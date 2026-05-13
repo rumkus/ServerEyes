@@ -107,6 +107,37 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Login via Clerk (desde la app movil)
+app.post('/api/auth/clerk-login', async (req, res) => {
+  try {
+    const { clerk_id, email } = req.body;
+    if (!clerk_id || !email) return res.status(400).json({ error: 'clerk_id y email requeridos' });
+
+    // Buscar usuario por clerk_id o email
+    let user = await pool.query('SELECT * FROM users WHERE clerk_id = $1 OR email = $2', [clerk_id, email]);
+
+    if (user.rows.length === 0) {
+      // Crear usuario nuevo desde Clerk
+      user = await pool.query(
+        'INSERT INTO users (clerk_id, email, nombre) VALUES ($1, $2, $3) RETURNING id, email, nombre',
+        [clerk_id, email, email.split('@')[0]]
+      );
+    } else {
+      // Actualizar clerk_id si no lo tenia
+      if (!user.rows[0].clerk_id) {
+        await pool.query('UPDATE users SET clerk_id = $1 WHERE id = $2', [clerk_id, user.rows[0].id]);
+      }
+    }
+
+    const u = user.rows[0];
+    const token = jwt.sign({ id: u.id, email: u.email }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ user: { id: u.id, email: u.email, nombre: u.nombre }, token });
+  } catch (error) {
+    console.error('Error en clerk-login:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // ============== MIDDLEWARE AUTH JWT ==============
 
 async function authenticateToken(req, res, next) {

@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Alert, StatusBar, ActivityIndicator } from 'react-native';
+import { WebView } from 'react-native-webview';
 
 const API_URL = 'https://servereyes-production.up.railway.app';
+const CLERK_DOMAIN = 'solid-yak-82.clerk.accounts.dev';
+const CLERK_PK = 'pk_test_c29saWQteWFrLTgyLmNsZXJrLmFjY291bnRzLmRldiQ';
 
 async function apiRequest(path: string, options: any = {}, token: string | null = null) {
   const headers: any = { 'Content-Type': 'application/json', ...options.headers };
@@ -11,32 +14,112 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
   return { ok: response.ok, data };
 }
 
+// HTML que carga Clerk JS y hace login
+const CLERK_LOGIN_HTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding-top: 20px; }
+    #clerk-container { width: 100%; max-width: 400px; }
+    .loading { color: #888; text-align: center; padding: 40px; font-family: sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="clerk-container">
+    <p class="loading">Cargando login...</p>
+  </div>
+  <script>
+    // Cargar Clerk JS
+    const script = document.createElement('script');
+    script.src = 'https://${CLERK_DOMAIN}/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+    script.crossOrigin = 'anonymous';
+    script.onload = async () => {
+      try {
+        const clerk = new window.Clerk('${CLERK_PK}');
+        await clerk.load();
+
+        if (clerk.user) {
+          // Ya logueado, obtener token
+          const token = await clerk.session.getToken();
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'clerk_token',
+            token: token,
+            email: clerk.user.primaryEmailAddress?.emailAddress || '',
+            userId: clerk.user.id
+          }));
+        } else {
+          // Montar UI de sign-in
+          const container = document.getElementById('clerk-container');
+          container.innerHTML = '';
+          clerk.mountSignIn(container, {
+            afterSignInUrl: '/',
+            afterSignUpUrl: '/',
+          });
+
+          // Observar cuando el usuario se loguea
+          clerk.addListener((event) => {
+            if (clerk.user && clerk.session) {
+              clerk.session.getToken().then(token => {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'clerk_token',
+                  token: token,
+                  email: clerk.user.primaryEmailAddress?.emailAddress || '',
+                  userId: clerk.user.id
+                }));
+              });
+            }
+          });
+        }
+      } catch (err) {
+        document.getElementById('clerk-container').innerHTML =
+          '<p style="color:#ff5252;text-align:center;padding:20px;font-family:sans-serif;">Error: ' + err.message + '</p>';
+      }
+    };
+    document.head.appendChild(script);
+  </script>
+</body>
+</html>
+`;
+
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [clerkToken, setClerkToken] = useState<string | null>(null);
   const [machines, setMachines] = useState<any[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
-
-  const handleAuth = async () => {
-    if (!email.trim() || !password.trim()) { setError('Completa todos los campos'); return; }
-    setLoading(true); setError('');
-    try {
-      const path = isSignUp ? '/api/auth/register' : '/api/auth/login';
-      const res = await apiRequest(path, { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
-      if (res.ok) { setToken(res.data.token); loadMachines(res.data.token); }
-      else setError(res.data.error || 'Error');
-    } catch { setError('Error de conexion'); }
-    setLoading(false);
-  };
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const tokenRef = useRef(token);
   tokenRef.current = token;
+
+  // Cuando recibimos token de Clerk, registrar/login en nuestro backend
+  const handleClerkAuth = async (clerkData: any) => {
+    setLoginLoading(true);
+    try {
+      // Intentar login con el token de Clerk
+      const res = await apiRequest('/api/auth/clerk-login', {
+        method: 'POST',
+        body: JSON.stringify({
+          clerk_id: clerkData.userId,
+          email: clerkData.email,
+          clerk_token: clerkData.token
+        })
+      });
+
+      if (res.ok) {
+        setToken(res.data.token);
+      } else {
+        Alert.alert('Error', res.data.error || 'Error de autenticacion');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Error de conexion');
+    }
+    setLoginLoading(false);
+  };
 
   const loadMachines = async (t?: string) => {
     try {
@@ -80,23 +163,33 @@ export default function App() {
     return `${Math.floor(d / 86400)}d`;
   };
 
-  // LOGIN
+  // LOGIN con Clerk WebView
   if (!token) {
     return (
-      <View style={s.container}>
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
-        <Text style={s.icon}>👁</Text>
-        <Text style={s.title}>ServerEyes</Text>
-        <Text style={s.sub}>Monitoreo de maquinas</Text>
-        <TextInput style={s.input} placeholder="Email" placeholderTextColor="#666" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
-        <TextInput style={s.input} placeholder="Contraseña" placeholderTextColor="#666" value={password} onChangeText={setPassword} secureTextEntry />
-        {error ? <Text style={s.err}>{error}</Text> : null}
-        <TouchableOpacity style={s.btn} onPress={handleAuth} disabled={loading}>
-          {loading ? <ActivityIndicator color="#1a1a2e" /> : <Text style={s.btnTxt}>{isSignUp ? 'Crear cuenta' : 'Iniciar sesion'}</Text>}
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => { setIsSignUp(!isSignUp); setError(''); }}>
-          <Text style={s.link}>{isSignUp ? 'Ya tengo cuenta' : 'Crear cuenta nueva'}</Text>
-        </TouchableOpacity>
+        {loginLoading ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+            <ActivityIndicator size="large" color="#00d4ff" />
+            <Text style={{color: '#888', marginTop: 16}}>Iniciando sesion...</Text>
+          </View>
+        ) : (
+          <WebView
+            source={{ html: CLERK_LOGIN_HTML }}
+            style={{flex: 1, backgroundColor: '#1a1a2e'}}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            thirdPartyCookiesEnabled={true}
+            onMessage={(event) => {
+              try {
+                const data = JSON.parse(event.nativeEvent.data);
+                if (data.type === 'clerk_token') {
+                  handleClerkAuth(data);
+                }
+              } catch {}
+            }}
+          />
+        )}
       </View>
     );
   }
@@ -119,7 +212,13 @@ export default function App() {
         ) : (
           <>
             <Text style={s.title}>Agregar maquina</Text>
-            <TextInput style={s.input} placeholder="Nombre de la maquina" placeholderTextColor="#666" value={newName} onChangeText={setNewName} />
+            <View style={s.inputContainer}>
+              <WebView
+                source={{ html: `<html><body style="margin:0;background:#16213e"><input type="text" id="inp" placeholder="Nombre de la maquina" style="width:100%;padding:14px;background:#16213e;border:2px solid #2a2a4a;border-radius:12px;color:#eee;font-size:16px;outline:none;box-sizing:border-box;" oninput="window.ReactNativeWebView.postMessage(this.value)"/></body></html>` }}
+                style={{height: 54, backgroundColor: '#16213e'}}
+                onMessage={(e) => setNewName(e.nativeEvent.data)}
+              />
+            </View>
             <TouchableOpacity style={s.btn} onPress={addMachine}>
               <Text style={s.btnTxt}>Registrar</Text>
             </TouchableOpacity>
@@ -196,15 +295,13 @@ export default function App() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', padding: 24 },
-  icon: { fontSize: 60, textAlign: 'center', marginBottom: 10 },
   title: { fontSize: 28, fontWeight: 'bold', color: '#00d4ff', textAlign: 'center' },
   sub: { fontSize: 14, color: '#888', textAlign: 'center', marginTop: 4, marginBottom: 20 },
-  input: { backgroundColor: '#16213e', borderWidth: 2, borderColor: '#2a2a4a', borderRadius: 12, padding: 14, fontSize: 16, color: '#eee', marginBottom: 12 },
   btn: { backgroundColor: '#00d4ff', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   btnTxt: { fontSize: 16, fontWeight: '700', color: '#1a1a2e' },
-  err: { color: '#ff5252', textAlign: 'center', fontSize: 13, marginBottom: 8 },
   link: { color: '#00d4ff', textAlign: 'center', marginTop: 16, fontSize: 14 },
   key: { backgroundColor: '#16213e', borderRadius: 8, padding: 14, fontSize: 15, color: '#00d4ff', textAlign: 'center', marginVertical: 16, fontFamily: 'monospace' },
+  inputContainer: { height: 54, marginBottom: 12, borderRadius: 12, overflow: 'hidden' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#16213e' },
   headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#00d4ff' },
   logoutBtn: { backgroundColor: '#2a2a4a', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
