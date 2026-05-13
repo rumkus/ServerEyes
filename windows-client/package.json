@@ -15,8 +15,10 @@
       "output": "dist"
     },
     "win": {
-      "target": ["portable", "nsis"],
-      "icon": "icon.ico"
+      "target": ["portable"],
+      "icon": "icon.ico",
+      "signingHashAlgorithms": [],
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": true,
