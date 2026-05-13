@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ServerEyes - Configuracion</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 24px;
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .logo h1 {
+      font-size: 22px;
+      color: #00d4ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .logo span { font-size: 28px; }
+    .logo p { font-size: 12px; color: #888; margin-top: 4px; }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      color: #aaa;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #16213e;
+      border: 2px solid #2a2a4a;
+      border-radius: 8px;
+      color: #eee;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus {
+      border-color: #00d4ff;
+    }
+    .form-group small {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #666;
+    }
+    .buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #00d4ff;
+      color: #1a1a2e;
+    }
+    .btn-primary:hover { background: #00b8e6; }
+    .btn-secondary {
+      background: #2a2a4a;
+      color: #aaa;
+    }
+    .btn-secondary:hover { background: #3a3a5a; }
+    .status {
+      text-align: center;
+      margin-top: 12px;
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .status.success { color: #00e676; }
+    .status.error { color: #ff5252; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <h1><span>👁</span> ServerEyes</h1>
+    <p>Configuracion del cliente de monitoreo</p>
+  </div>
+
+  <div class="form-group">
+    <label>URL del Servidor</label>
+    <input type="text" id="serverUrl" placeholder="https://tu-app.up.railway.app">
+    <small>La URL de tu backend en Railway</small>
+  </div>
+
+  <div class="form-group">
+    <label>Clave de Maquina</label>
+    <input type="text" id="machineKey" placeholder="abc123...">
+    <small>Se genera al registrar la maquina desde la app movil</small>
+  </div>
+
+  <div class="form-group">
+    <label>Nombre de esta Maquina</label>
+    <input type="text" id="machineName" placeholder="Mi PC">
+  </div>
+
+  <div class="form-group">
+    <label>Intervalo de Heartbeat (segundos)</label>
+    <input type="number" id="heartbeatInterval" min="10" max="300" value="30">
+    <small>Cada cuanto envia senales al servidor (minimo 10s)</small>
+  </div>
+
+  <div class="buttons">
+    <button class="btn btn-secondary" onclick="testConnection()">Probar Conexion</button>
+    <button class="btn btn-primary" onclick="saveConfig()">Guardar</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    // Cargar configuracion actual
+    async function loadConfig() {
+      const config = await ipcRenderer.invoke('get-config');
+      document.getElementById('serverUrl').value = config.serverUrl || '';
+      document.getElementById('machineKey').value = config.machineKey || '';
+      document.getElementById('machineName').value = config.machineName || '';
+      document.getElementById('heartbeatInterval').value = config.heartbeatInterval || 30;
+    }
+
+    async function saveConfig() {
+      const config = {
+        serverUrl: document.getElementById('serverUrl').value.replace(/\/$/, ''),
+        machineKey: document.getElementById('machineKey').value.trim(),
+        machineName: document.getElementById('machineName').value.trim(),
+        heartbeatInterval: parseInt(document.getElementById('heartbeatInterval').value) || 30
+      };
+
+      const result = await ipcRenderer.invoke('save-config', config);
+      showStatus('Configuracion guardada', 'success');
+    }
+
+    async function testConnection() {
+      showStatus('Probando conexion...', '');
+      const result = await ipcRenderer.invoke('test-connection');
+      showStatus(result.message, result.success ? 'success' : 'error');
+    }
+
+    function showStatus(msg, type) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status ' + type;
+    }
+
+    loadConfig();
+  </script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "name": "servereyes-client",
+  "version": "1.0.0",
+  "description": "ServerEyes - Cliente Windows de monitoreo",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.servereyes.client",
+    "productName": "ServerEyes",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": ["portable", "nsis"],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "installerIcon": "icon.ico",
+      "allowToChangeInstallationDirectory": false,
+      "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "ServerEyes-Portable.exe"
+    }
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
