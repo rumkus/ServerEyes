@@ -125,7 +125,7 @@ export default function App() {
           </View>
         ) : (
           <WebView
-            source={{ uri: `https://accounts.${CLERK_DOMAIN}/sign-in` }}
+            source={{ uri: `https://${CLERK_DOMAIN}/sign-in` }}
             style={{flex: 1, backgroundColor: '#1a1a2e'}}
             javaScriptEnabled={true}
             domStorageEnabled={true}
