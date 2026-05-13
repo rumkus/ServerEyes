@@ -14,74 +14,23 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
   return { ok: response.ok, data };
 }
 
-// HTML que carga Clerk JS y hace login
-const CLERK_LOGIN_HTML = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a2e; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding-top: 20px; }
-    #clerk-container { width: 100%; max-width: 400px; }
-    .loading { color: #888; text-align: center; padding: 40px; font-family: sans-serif; }
-  </style>
-</head>
-<body>
-  <div id="clerk-container">
-    <p class="loading">Cargando login...</p>
-  </div>
-  <script>
-    // Cargar Clerk JS
-    const script = document.createElement('script');
-    script.src = 'https://${CLERK_DOMAIN}/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-    script.crossOrigin = 'anonymous';
-    script.onload = async () => {
-      try {
-        const clerk = new window.Clerk('${CLERK_PK}');
-        await clerk.load();
-
-        if (clerk.user) {
-          // Ya logueado, obtener token
-          const token = await clerk.session.getToken();
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'clerk_token',
-            token: token,
-            email: clerk.user.primaryEmailAddress?.emailAddress || '',
-            userId: clerk.user.id
-          }));
-        } else {
-          // Montar UI de sign-in
-          const container = document.getElementById('clerk-container');
-          container.innerHTML = '';
-          clerk.mountSignIn(container, {
-            afterSignInUrl: '/',
-            afterSignUpUrl: '/',
-          });
-
-          // Observar cuando el usuario se loguea
-          clerk.addListener((event) => {
-            if (clerk.user && clerk.session) {
-              clerk.session.getToken().then(token => {
-                window.ReactNativeWebView.postMessage(JSON.stringify({
-                  type: 'clerk_token',
-                  token: token,
-                  email: clerk.user.primaryEmailAddress?.emailAddress || '',
-                  userId: clerk.user.id
-                }));
-              });
-            }
-          });
-        }
-      } catch (err) {
-        document.getElementById('clerk-container').innerHTML =
-          '<p style="color:#ff5252;text-align:center;padding:20px;font-family:sans-serif;">Error: ' + err.message + '</p>';
-      }
-    };
-    document.head.appendChild(script);
-  </script>
-</body>
-</html>
+// Script para inyectar despues del login en Clerk
+const CLERK_CHECK_SESSION = `
+(function() {
+  try {
+    if (window.Clerk && window.Clerk.user && window.Clerk.session) {
+      window.Clerk.session.getToken().then(function(token) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'clerk_token',
+          token: token,
+          email: window.Clerk.user.primaryEmailAddress ? window.Clerk.user.primaryEmailAddress.emailAddress : '',
+          userId: window.Clerk.user.id
+        }));
+      });
+    }
+  } catch(e) {}
+})();
+true;
 `;
 
 export default function App() {
@@ -92,6 +41,7 @@ export default function App() {
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const webviewRef = useRef<any>(null);
 
   const tokenRef = useRef(token);
   tokenRef.current = token;
@@ -175,11 +125,21 @@ export default function App() {
           </View>
         ) : (
           <WebView
-            source={{ html: CLERK_LOGIN_HTML }}
+            source={{ uri: `https://accounts.${CLERK_DOMAIN}/sign-in` }}
             style={{flex: 1, backgroundColor: '#1a1a2e'}}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             thirdPartyCookiesEnabled={true}
+            injectedJavaScript={CLERK_CHECK_SESSION}
+            onNavigationStateChange={(navState) => {
+              // Despues de sign-in, Clerk redirige - chequeamos session
+              if (navState.url && !navState.url.includes('/sign-in') && !navState.url.includes('/sign-up')) {
+                webviewRef.current?.injectJavaScript(CLERK_CHECK_SESSION);
+                // Retry despues de un momento
+                setTimeout(() => webviewRef.current?.injectJavaScript(CLERK_CHECK_SESSION), 2000);
+                setTimeout(() => webviewRef.current?.injectJavaScript(CLERK_CHECK_SESSION), 4000);
+              }
+            }}
             onMessage={(event) => {
               try {
                 const data = JSON.parse(event.nativeEvent.data);
@@ -188,6 +148,7 @@ export default function App() {
                 }
               } catch {}
             }}
+            ref={webviewRef}
           />
         )}
       </View>
