@@ -14,23 +14,70 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
   return { ok: response.ok, data };
 }
 
-// Script para inyectar despues del login en Clerk
-const CLERK_CHECK_SESSION = `
-(function() {
-  try {
-    if (window.Clerk && window.Clerk.user && window.Clerk.session) {
-      window.Clerk.session.getToken().then(function(token) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'clerk_token',
-          token: token,
-          email: window.Clerk.user.primaryEmailAddress ? window.Clerk.user.primaryEmailAddress.emailAddress : '',
-          userId: window.Clerk.user.id
-        }));
-      });
-    }
-  } catch(e) {}
-})();
-true;
+const CLERK_LOGIN_HTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+    #clerk-signin { width: 100%; max-width: 400px; margin-top: 10px; }
+    .loading { color: #888; text-align: center; padding: 40px; font-family: -apple-system, sans-serif; font-size: 16px; }
+    .error { color: #ff5252; text-align: center; padding: 20px; font-family: -apple-system, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="clerk-signin"><p class="loading">Cargando...</p></div>
+  <script
+    async
+    crossorigin="anonymous"
+    data-clerk-publishable-key="${CLERK_PK}"
+    src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@4/dist/clerk.browser.js"
+    type="text/javascript"
+  ></script>
+  <script>
+    window.addEventListener('load', function() {
+      var attempts = 0;
+      var interval = setInterval(function() {
+        attempts++;
+        if (attempts > 50) { clearInterval(interval); document.getElementById('clerk-signin').innerHTML = '<p class="error">No se pudo cargar Clerk</p>'; return; }
+        if (!window.Clerk || !window.Clerk.isReady) return;
+        clearInterval(interval);
+
+        var clerk = window.Clerk;
+
+        if (clerk.user) {
+          clerk.session.getToken().then(function(token) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'clerk_token', token: token,
+              email: clerk.user.primaryEmailAddress ? clerk.user.primaryEmailAddress.emailAddress : '',
+              userId: clerk.user.id
+            }));
+          });
+          return;
+        }
+
+        var container = document.getElementById('clerk-signin');
+        container.innerHTML = '';
+        clerk.mountSignIn(container);
+
+        clerk.addListener(function() {
+          if (clerk.user && clerk.session) {
+            clerk.session.getToken().then(function(token) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'clerk_token', token: token,
+                email: clerk.user.primaryEmailAddress ? clerk.user.primaryEmailAddress.emailAddress : '',
+                userId: clerk.user.id
+              }));
+            });
+          }
+        });
+      }, 200);
+    });
+  </script>
+</body>
+</html>
 `;
 
 export default function App() {
@@ -125,21 +172,13 @@ export default function App() {
           </View>
         ) : (
           <WebView
-            source={{ uri: `https://${CLERK_DOMAIN}/sign-in` }}
+            source={{ html: CLERK_LOGIN_HTML }}
             style={{flex: 1, backgroundColor: '#1a1a2e'}}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             thirdPartyCookiesEnabled={true}
-            injectedJavaScript={CLERK_CHECK_SESSION}
-            onNavigationStateChange={(navState) => {
-              // Despues de sign-in, Clerk redirige - chequeamos session
-              if (navState.url && !navState.url.includes('/sign-in') && !navState.url.includes('/sign-up')) {
-                webviewRef.current?.injectJavaScript(CLERK_CHECK_SESSION);
-                // Retry despues de un momento
-                setTimeout(() => webviewRef.current?.injectJavaScript(CLERK_CHECK_SESSION), 2000);
-                setTimeout(() => webviewRef.current?.injectJavaScript(CLERK_CHECK_SESSION), 4000);
-              }
-            }}
+            originWhitelist={['*']}
+            mixedContentMode="always"
             onMessage={(event) => {
               try {
                 const data = JSON.parse(event.nativeEvent.data);
@@ -148,7 +187,6 @@ export default function App() {
                 }
               } catch {}
             }}
-            ref={webviewRef}
           />
         )}
       </View>
