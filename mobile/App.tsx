@@ -2,16 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AuthContext } from './src/AuthContext';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 
 const Stack = createNativeStackNavigator();
-
-export const AuthContext = React.createContext({
-  token: null as string | null,
-  login: (token: string) => {},
-  logout: () => {},
-});
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);

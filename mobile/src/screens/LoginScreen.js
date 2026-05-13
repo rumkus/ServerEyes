@@ -1,6 +1,6 @@
 import React, { useState, useContext } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { AuthContext } from '../../App';
+import { AuthContext } from '../AuthContext';
 import { login, register } from '../services/api';
 
 export default function LoginScreen() {
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   icon: { fontSize: 60, marginBottom: 10 },
   title: { fontSize: 32, fontWeight: 'bold', color: '#00d4ff' },
   subtitle: { fontSize: 14, color: '#888', marginTop: 4 },
-  form: { gap: 14 },
+  form: { },
   input: {
     backgroundColor: '#16213e', borderWidth: 2, borderColor: '#2a2a4a',
     borderRadius: 12, padding: 14, fontSize: 16, color: '#eee',

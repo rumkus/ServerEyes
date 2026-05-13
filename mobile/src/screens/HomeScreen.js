@@ -4,7 +4,7 @@ import {
   RefreshControl, Alert, TextInput, Modal,
 } from 'react-native';
 // Clipboard nativo
-import { AuthContext } from '../../App';
+import { AuthContext } from '../AuthContext';
 import { getMachines, addMachine, deleteMachine } from '../services/api';
 
 export default function HomeScreen() {
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, fontWeight: '700', letterSpacing: 1 },
   textOnline: { color: '#00e676' },
   textOffline: { color: '#ff5252' },
-  cardBody: { gap: 6 },
+  cardBody: { },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { color: '#888', fontSize: 13 },
   value: { color: '#ddd', fontSize: 13, fontWeight: '600' },
@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
     color: '#00d4ff', fontFamily: 'monospace', textAlign: 'center', marginBottom: 8,
   },
   modalHint: { color: '#888', fontSize: 12, textAlign: 'center', marginBottom: 16 },
-  modalButtons: { flexDirection: 'row', gap: 12 },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-between' },
   modalButton: { flex: 1, backgroundColor: '#00d4ff', borderRadius: 12, padding: 14, alignItems: 'center' },
   modalButtonText: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
   cancelButton: { backgroundColor: '#2a2a4a' },
