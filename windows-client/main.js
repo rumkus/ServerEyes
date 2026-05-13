@@ -1,40 +1,84 @@
-const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, Notification } = require('electron');
+const electron = require('electron');
 const path = require('path');
+const fs = require('fs');
 const os = require('os');
-const Store = require('electron-store');
-const fetch = require('node-fetch');
+const https = require('https');
+const http = require('http');
 
-const store = new Store();
+const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain } = electron;
 
 let tray = null;
 let configWindow = null;
-let heartbeatInterval = null;
+let heartbeatTimer = null;
+let configPath = null;
 
-// Configuracion por defecto
-const DEFAULT_CONFIG = {
-  serverUrl: '',
-  machineKey: '',
-  machineName: os.hostname(),
-  heartbeatInterval: 30 // segundos
-};
+// Config con JSON simple
+function getConfigPath() {
+  if (!configPath) {
+    configPath = path.join(app.getPath('userData'), 'config.json');
+  }
+  return configPath;
+}
 
-function getConfig() {
+function loadConfig() {
+  try {
+    const p = getConfigPath();
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  } catch (e) {}
   return {
-    serverUrl: store.get('serverUrl', DEFAULT_CONFIG.serverUrl),
-    machineKey: store.get('machineKey', DEFAULT_CONFIG.machineKey),
-    machineName: store.get('machineName', DEFAULT_CONFIG.machineName),
-    heartbeatInterval: store.get('heartbeatInterval', DEFAULT_CONFIG.heartbeatInterval)
+    serverUrl: '',
+    machineKey: '',
+    machineName: os.hostname(),
+    heartbeatInterval: 30
   };
+}
+
+function saveConfig(config) {
+  fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// HTTP request simple
+function httpRequest(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const client = parsedUrl.protocol === 'https:' ? https : http;
+    const reqOptions = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      timeout: 10000
+    };
+
+    const req = client.request(reqOptions, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(data) });
+        } catch {
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data });
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+
+    if (options.body) req.write(options.body);
+    req.end();
+  });
 }
 
 // Obtener IP publica
 async function getPublicIP() {
   try {
-    const response = await fetch('https://api.ipify.org?format=json');
-    const data = await response.json();
-    return data.ip;
-  } catch (error) {
-    console.error('Error obteniendo IP publica:', error.message);
+    const res = await httpRequest('https://api.ipify.org?format=json');
+    return res.data.ip;
+  } catch {
     return null;
   }
 }
@@ -44,213 +88,123 @@ function getLocalIP() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
     }
   }
   return '127.0.0.1';
 }
 
-// Obtener info del sistema
+// Info del sistema
 function getOSInfo() {
   return `${os.type()} ${os.release()} | ${os.cpus()[0]?.model || 'Unknown'} | RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`;
 }
 
 // Enviar heartbeat
 async function sendHeartbeat() {
-  const config = getConfig();
-
+  const config = loadConfig();
   if (!config.serverUrl || !config.machineKey) {
-    updateTrayIcon('unconfigured');
+    if (tray) tray.setToolTip('ServerEyes - No configurado');
     return;
   }
 
   try {
     const publicIP = await getPublicIP();
-    const localIP = getLocalIP();
-    const osInfo = getOSInfo();
-
-    const response = await fetch(`${config.serverUrl}/api/heartbeat`, {
+    const res = await httpRequest(`${config.serverUrl}/api/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         machine_key: config.machineKey,
         machine_name: config.machineName,
         public_ip: publicIP,
-        local_ip: localIP,
-        os_info: osInfo
-      }),
-      timeout: 10000
+        local_ip: getLocalIP(),
+        os_info: getOSInfo()
+      })
     });
 
-    if (response.ok) {
-      updateTrayIcon('online');
-    } else {
-      const err = await response.json();
-      console.error('Error heartbeat:', err);
-      updateTrayIcon('error');
-    }
+    if (tray) tray.setToolTip(res.ok ? `ServerEyes - Conectado (${publicIP})` : 'ServerEyes - Error');
   } catch (error) {
-    console.error('Error enviando heartbeat:', error.message);
-    updateTrayIcon('offline');
+    if (tray) tray.setToolTip('ServerEyes - Sin conexion');
   }
 }
 
-// Actualizar icono del tray segun estado
-function updateTrayIcon(status) {
-  if (!tray) return;
-
-  const statusText = {
-    online: 'ServerEyes - Conectado',
-    offline: 'ServerEyes - Sin conexion al servidor',
-    error: 'ServerEyes - Error de configuracion',
-    unconfigured: 'ServerEyes - No configurado'
-  };
-
-  tray.setToolTip(statusText[status] || 'ServerEyes');
-}
-
-// Crear icono para el tray (generado programaticamente)
+// Cargar icono ICO nativo de Windows
 function createTrayIcon() {
-  // Crear un icono simple de 16x16
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA4ElEQVQ4T2NkoBAwUqifYdAY8J+B4T8jNa3+z8DAyIAUBv8ZGP4zMTL+Z2Jm+s/EzPyfmYXpPzML83/m/8z/WdhY/7OwsvxnZWP9z8rO+p+Ng+0/Gyfbf3ZO9v8cXBz/Obg5/nPycP7n4uX6z83H/Z+Hn+c/Lz/vfz4B/gL8/wUEBf4LCRH+FxYR/i8iI/JfVE70v5i8+H8JRYn/kkqS/6VUZP7Lqsn+l9eQ/6+gqfBfUUvxv5K2MliNsp7Kf1UD1f9qhmr/1Y3U/2sYa/zXNNH8r2Wq9V/bTBsAI3VQEQ6jJLIAAAAASUVORK5CYII='
-  );
-  return icon;
+  const iconPath = path.join(__dirname, 'icon.ico');
+  return nativeImage.createFromPath(iconPath);
 }
 
 // Ventana de configuracion
 function openConfigWindow() {
-  if (configWindow) {
-    configWindow.focus();
-    return;
-  }
+  if (configWindow) { configWindow.focus(); return; }
 
   configWindow = new BrowserWindow({
-    width: 480,
-    height: 520,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
+    width: 480, height: 520,
+    resizable: false, maximizable: false, minimizable: false,
     title: 'ServerEyes - Configuracion',
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
 
   configWindow.setMenuBarVisibility(false);
   configWindow.loadFile(path.join(__dirname, 'config.html'));
-
-  configWindow.on('closed', () => {
-    configWindow = null;
-  });
+  configWindow.on('closed', () => { configWindow = null; });
 }
 
-// IPC handlers
-ipcMain.handle('get-config', () => getConfig());
-
-ipcMain.handle('save-config', (event, config) => {
-  store.set('serverUrl', config.serverUrl);
-  store.set('machineKey', config.machineKey);
-  store.set('machineName', config.machineName);
-  store.set('heartbeatInterval', config.heartbeatInterval);
-
-  // Reiniciar heartbeat con nueva config
-  startHeartbeat();
-
-  return { success: true };
-});
-
-ipcMain.handle('test-connection', async () => {
-  const config = getConfig();
-  if (!config.serverUrl) return { success: false, message: 'URL del servidor no configurada' };
-
-  try {
-    const response = await fetch(`${config.serverUrl}/api/status`);
-    if (response.ok) {
-      return { success: true, message: 'Conexion exitosa' };
-    }
-    return { success: false, message: 'El servidor no responde correctamente' };
-  } catch (error) {
-    return { success: false, message: `Error: ${error.message}` };
-  }
-});
-
-// Iniciar/reiniciar heartbeat
+// Iniciar heartbeat
 function startHeartbeat() {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
-
-  const config = getConfig();
-  const interval = (config.heartbeatInterval || 30) * 1000;
-
-  // Enviar primer heartbeat inmediatamente
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  const config = loadConfig();
   sendHeartbeat();
-
-  // Luego cada X segundos
-  heartbeatInterval = setInterval(sendHeartbeat, interval);
+  heartbeatTimer = setInterval(sendHeartbeat, (config.heartbeatInterval || 30) * 1000);
 }
-
-// App ready
-app.whenReady().then(() => {
-  // Ocultar de la barra de tareas
-  app.dock?.hide?.();
-
-  // Crear tray
-  const icon = createTrayIcon();
-  tray = new Tray(icon);
-
-  const contextMenu = Menu.buildFromTemplate([
-    { label: 'ServerEyes', enabled: false },
-    { type: 'separator' },
-    {
-      label: 'Configuracion',
-      click: openConfigWindow
-    },
-    {
-      label: 'Enviar heartbeat ahora',
-      click: sendHeartbeat
-    },
-    { type: 'separator' },
-    {
-      label: 'Iniciar con Windows',
-      type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (menuItem) => {
-        app.setLoginItemSettings({ openAtLogin: menuItem.checked });
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Salir',
-      click: () => {
-        app.isQuiting = true;
-        app.quit();
-      }
-    }
-  ]);
-
-  tray.setContextMenu(contextMenu);
-  tray.setToolTip('ServerEyes - Iniciando...');
-
-  tray.on('double-click', openConfigWindow);
-
-  // Iniciar heartbeat
-  startHeartbeat();
-});
-
-// Evitar que la app se cierre al cerrar la ventana
-app.on('window-all-closed', (e) => {
-  e.preventDefault();
-});
 
 // Single instance
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    openConfigWindow();
-  });
+  app.on('second-instance', () => openConfigWindow());
 }
+
+// App ready
+app.whenReady().then(() => {
+  // IPC
+  ipcMain.handle('get-config', () => loadConfig());
+  ipcMain.handle('save-config', (e, config) => {
+    saveConfig(config);
+    startHeartbeat();
+    return { success: true };
+  });
+  ipcMain.handle('test-connection', async () => {
+    const config = loadConfig();
+    if (!config.serverUrl) return { success: false, message: 'URL no configurada' };
+    try {
+      const res = await httpRequest(`${config.serverUrl}/api/status`);
+      return res.ok ? { success: true, message: 'Conexion exitosa' } : { success: false, message: 'Servidor no responde' };
+    } catch (error) {
+      return { success: false, message: `Error: ${error.message}` };
+    }
+  });
+
+  // Tray
+  tray = new Tray(createTrayIcon());
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'ServerEyes', enabled: false },
+    { type: 'separator' },
+    { label: 'Configuracion', click: openConfigWindow },
+    { label: 'Enviar heartbeat ahora', click: sendHeartbeat },
+    { type: 'separator' },
+    {
+      label: 'Iniciar con Windows', type: 'checkbox',
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (m) => app.setLoginItemSettings({ openAtLogin: m.checked })
+    },
+    { type: 'separator' },
+    { label: 'Salir', click: () => { app.isQuiting = true; app.quit(); } }
+  ]));
+  tray.setToolTip('ServerEyes - Iniciando...');
+  tray.on('double-click', openConfigWindow);
+
+  startHeartbeat();
+});
+
+app.on('window-all-closed', (e) => e.preventDefault());
