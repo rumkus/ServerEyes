@@ -9,6 +9,20 @@ export async function apiRequest(path, options = {}, token = null) {
   return { ok: response.ok, status: response.status, data };
 }
 
+export function login(email, password) {
+  return apiRequest('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function register(email, password, nombre) {
+  return apiRequest('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, nombre }),
+  });
+}
+
 export function getMachines(token) {
   return apiRequest('/api/machines', {}, token);
 }
@@ -26,8 +40,4 @@ export function deleteMachine(token, machineId) {
 
 export function getNotifications(token) {
   return apiRequest('/api/notifications', {}, token);
-}
-
-export function getMachineHistory(token, machineId) {
-  return apiRequest(`/api/machines/${machineId}/history`, {}, token);
 }

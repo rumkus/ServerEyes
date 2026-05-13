@@ -1,29 +1,52 @@
-import React from 'react';
-import { ClerkProvider, SignedIn, SignedOut } from '@clerk/clerk-expo';
+import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 
-const CLERK_PUBLISHABLE_KEY = 'pk_test_c29saWQteWFrLTgyLmNsZXJrLmFjY291bnRzLmRldiQ';
-
 const Stack = createNativeStackNavigator();
 
+export const AuthContext = React.createContext({
+  token: null as string | null,
+  login: (token: string) => {},
+  logout: () => {},
+});
+
 export default function App() {
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    AsyncStorage.getItem('token').then(t => {
+      if (t) setToken(t);
+      setLoading(false);
+    });
+  }, []);
+
+  const login = async (t: string) => {
+    await AsyncStorage.setItem('token', t);
+    setToken(t);
+  };
+
+  const logout = async () => {
+    await AsyncStorage.removeItem('token');
+    setToken(null);
+  };
+
+  if (loading) return null;
+
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+    <AuthContext.Provider value={{ token, login, logout }}>
       <NavigationContainer>
-        <SignedOut>
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Login" component={LoginScreen} />
-          </Stack.Navigator>
-        </SignedOut>
-        <SignedIn>
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {token ? (
             <Stack.Screen name="Home" component={HomeScreen} />
-          </Stack.Navigator>
-        </SignedIn>
+          ) : (
+            <Stack.Screen name="Login" component={LoginScreen} />
+          )}
+        </Stack.Navigator>
       </NavigationContainer>
-    </ClerkProvider>
+    </AuthContext.Provider>
   );
 }

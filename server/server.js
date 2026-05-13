@@ -2,6 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'servereyes-secret-key-change-in-production';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,8 +26,9 @@ async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      clerk_id VARCHAR(255) UNIQUE NOT NULL,
-      email VARCHAR(255),
+      clerk_id VARCHAR(255) UNIQUE,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      password_hash VARCHAR(255),
       nombre VARCHAR(255),
       created_at TIMESTAMP DEFAULT NOW()
     )
@@ -57,33 +62,67 @@ async function initDB() {
   console.log('Base de datos inicializada');
 }
 
-// ============== MIDDLEWARE AUTH CLERK ==============
+// ============== AUTH: REGISTRO Y LOGIN ==============
 
-async function verifyClerkToken(req, res, next) {
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, nombre } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
+
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) return res.status(409).json({ error: 'El email ya esta registrado' });
+
+    const password_hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (email, password_hash, nombre) VALUES ($1, $2, $3) RETURNING id, email, nombre',
+      [email, password_hash, nombre || '']
+    );
+
+    const user = result.rows[0];
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    res.status(201).json({ user, token });
+  } catch (error) {
+    console.error('Error en registro:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
+
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Credenciales incorrectas' });
+
+    const user = result.rows[0];
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre }, token });
+  } catch (error) {
+    console.error('Error en login:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============== MIDDLEWARE AUTH JWT ==============
+
+async function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token no proporcionado' });
   }
 
   try {
-    // Decodificar JWT de Clerk (verificacion basica)
     const token = authHeader.split(' ')[1];
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-
-    // Buscar o crear usuario
-    let user = await pool.query('SELECT * FROM users WHERE clerk_id = $1', [payload.sub]);
-
-    if (user.rows.length === 0) {
-      user = await pool.query(
-        'INSERT INTO users (clerk_id, email) VALUES ($1, $2) RETURNING *',
-        [payload.sub, payload.email || '']
-      );
-    }
-
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = await pool.query('SELECT id, email, nombre FROM users WHERE id = $1', [payload.id]);
+    if (user.rows.length === 0) return res.status(401).json({ error: 'Usuario no encontrado' });
     req.user = user.rows[0];
     next();
   } catch (error) {
-    console.error('Error de autenticacion:', error);
     res.status(401).json({ error: 'Token invalido' });
   }
 }
@@ -134,7 +173,7 @@ app.post('/api/heartbeat', async (req, res) => {
 // ============== RUTAS PROTEGIDAS (APP MOVIL) ==============
 
 // Obtener todas las maquinas del usuario
-app.get('/api/machines', verifyClerkToken, async (req, res) => {
+app.get('/api/machines', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM machines WHERE user_id = $1 ORDER BY machine_name',
@@ -148,7 +187,7 @@ app.get('/api/machines', verifyClerkToken, async (req, res) => {
 });
 
 // Registrar nueva maquina
-app.post('/api/machines', verifyClerkToken, async (req, res) => {
+app.post('/api/machines', authenticateToken, async (req, res) => {
   try {
     const { machine_name } = req.body;
 
@@ -172,7 +211,7 @@ app.post('/api/machines', verifyClerkToken, async (req, res) => {
 });
 
 // Eliminar maquina
-app.delete('/api/machines/:id', verifyClerkToken, async (req, res) => {
+app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
     await pool.query(
       'DELETE FROM heartbeat_log WHERE machine_id = $1',
@@ -190,7 +229,7 @@ app.delete('/api/machines/:id', verifyClerkToken, async (req, res) => {
 });
 
 // Obtener historial de heartbeats de una maquina
-app.get('/api/machines/:id/history', verifyClerkToken, async (req, res) => {
+app.get('/api/machines/:id/history', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT h.* FROM heartbeat_log h
@@ -239,7 +278,7 @@ app.get('/api/status', (req, res) => {
 });
 
 // Endpoint para polling de notificaciones (la app movil consulta periodicamente)
-app.get('/api/notifications', verifyClerkToken, async (req, res) => {
+app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, machine_name, public_ip, last_heartbeat, is_online

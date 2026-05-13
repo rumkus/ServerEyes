@@ -1,43 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { useSignIn, useSignUp } from '@clerk/clerk-expo';
+import { AuthContext } from '../../App';
+import { login, register } from '../services/api';
 
 export default function LoginScreen() {
-  const { signIn, setActive: setSignInActive, isLoaded: signInLoaded } = useSignIn();
-  const { signUp, setActive: setSignUpActive, isLoaded: signUpLoaded } = useSignUp();
-
+  const { login: setToken } = useContext(AuthContext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSignIn = async () => {
-    if (!signInLoaded) return;
-    setLoading(true);
-    setError('');
-    try {
-      const result = await signIn.create({ identifier: email, password });
-      if (result.status === 'complete') {
-        await setSignInActive({ session: result.createdSessionId });
-      }
-    } catch (err) {
-      setError(err.errors?.[0]?.message || 'Error al iniciar sesion');
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) {
+      setError('Completa todos los campos');
+      return;
     }
-    setLoading(false);
-  };
-
-  const handleSignUp = async () => {
-    if (!signUpLoaded) return;
     setLoading(true);
     setError('');
+
     try {
-      const result = await signUp.create({ emailAddress: email, password });
-      if (result.status === 'complete') {
-        await setSignUpActive({ session: result.createdSessionId });
+      const res = isSignUp
+        ? await register(email.trim(), password, '')
+        : await login(email.trim(), password);
+
+      if (res.ok) {
+        setToken(res.data.token);
+      } else {
+        setError(res.data.error || 'Error de autenticacion');
       }
     } catch (err) {
-      setError(err.errors?.[0]?.message || 'Error al registrarse');
+      setError('Error de conexion con el servidor');
     }
     setLoading(false);
   };
@@ -71,10 +64,7 @@ export default function LoginScreen() {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <TouchableOpacity
-          style={styles.button}
-          onPress={isSignUp ? handleSignUp : handleSignIn}
-          disabled={loading}>
+        <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#1a1a2e" />
           ) : (

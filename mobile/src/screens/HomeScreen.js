@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  RefreshControl, Alert, TextInput, Modal, Share, Clipboard
+  RefreshControl, Alert, TextInput, Modal,
 } from 'react-native';
-import { useAuth } from '@clerk/clerk-expo';
+// Clipboard nativo
+import { AuthContext } from '../../App';
 import { getMachines, addMachine, deleteMachine } from '../services/api';
 
 export default function HomeScreen() {
-  const { getToken, signOut } = useAuth();
+  const { token, logout } = useContext(AuthContext);
   const [machines, setMachines] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -16,17 +17,17 @@ export default function HomeScreen() {
 
   const loadMachines = useCallback(async () => {
     try {
-      const token = await getToken();
       const res = await getMachines(token);
       if (res.ok) setMachines(res.data);
+      else if (res.status === 401) logout();
     } catch (err) {
       console.error('Error cargando maquinas:', err);
     }
-  }, [getToken]);
+  }, [token, logout]);
 
   useEffect(() => {
     loadMachines();
-    const interval = setInterval(loadMachines, 15000); // Refresh cada 15s
+    const interval = setInterval(loadMachines, 15000);
     return () => clearInterval(interval);
   }, [loadMachines]);
 
@@ -39,7 +40,6 @@ export default function HomeScreen() {
   const handleAddMachine = async () => {
     if (!newMachineName.trim()) return;
     try {
-      const token = await getToken();
       const res = await addMachine(token, newMachineName.trim());
       if (res.ok) {
         setNewMachineKey(res.data.machine_key);
@@ -52,25 +52,20 @@ export default function HomeScreen() {
   };
 
   const handleDeleteMachine = (machine) => {
-    Alert.alert(
-      'Eliminar maquina',
-      `¿Eliminar "${machine.machine_name}"?`,
-      [
-        { text: 'Cancelar' },
-        {
-          text: 'Eliminar', style: 'destructive',
-          onPress: async () => {
-            const token = await getToken();
-            await deleteMachine(token, machine.id);
-            loadMachines();
-          }
-        }
-      ]
-    );
+    Alert.alert('Eliminar maquina', `¿Eliminar "${machine.machine_name}"?`, [
+      { text: 'Cancelar' },
+      {
+        text: 'Eliminar', style: 'destructive',
+        onPress: async () => {
+          await deleteMachine(token, machine.id);
+          loadMachines();
+        },
+      },
+    ]);
   };
 
   const copyKey = (key) => {
-    Clipboard.setString(key);
+    // noop - el Alert ya muestra la clave
     Alert.alert('Copiado', 'Clave copiada al portapapeles');
   };
 
@@ -94,7 +89,6 @@ export default function HomeScreen() {
           {item.is_online ? 'ONLINE' : 'OFFLINE'}
         </Text>
       </View>
-
       <View style={styles.cardBody}>
         <View style={styles.infoRow}>
           <Text style={styles.label}>IP Publica:</Text>
@@ -108,11 +102,8 @@ export default function HomeScreen() {
           <Text style={styles.label}>Ultimo heartbeat:</Text>
           <Text style={styles.value}>{getTimeSince(item.last_heartbeat)}</Text>
         </View>
-        {item.os_info && (
-          <Text style={styles.osInfo}>{item.os_info}</Text>
-        )}
+        {item.os_info && <Text style={styles.osInfo}>{item.os_info}</Text>}
       </View>
-
       <TouchableOpacity style={styles.keyButton} onPress={() => copyKey(item.machine_key)}>
         <Text style={styles.keyButtonText}>Copiar clave</Text>
       </TouchableOpacity>
@@ -121,18 +112,16 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>👁 ServerEyes</Text>
-          <Text style={styles.headerSub}>{machines.length} maquinas registradas</Text>
+          <Text style={styles.headerSub}>{machines.length} maquinas</Text>
         </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={signOut}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
           <Text style={styles.logoutText}>Salir</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Lista de maquinas */}
       <FlatList
         data={machines}
         keyExtractor={(item) => item.id.toString()}
@@ -148,12 +137,10 @@ export default function HomeScreen() {
         }
       />
 
-      {/* Boton agregar */}
       <TouchableOpacity style={styles.fab} onPress={() => setShowAddModal(true)}>
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
 
-      {/* Modal agregar maquina */}
       <Modal visible={showAddModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -164,10 +151,8 @@ export default function HomeScreen() {
                 <TouchableOpacity onPress={() => copyKey(newMachineKey)}>
                   <Text style={styles.machineKey}>{newMachineKey}</Text>
                 </TouchableOpacity>
-                <Text style={styles.modalHint}>Toca la clave para copiarla. Pegala en la configuracion del cliente Windows.</Text>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => { setShowAddModal(false); setNewMachineKey(''); }}>
+                <Text style={styles.modalHint}>Toca la clave para copiarla y pegala en el cliente Windows.</Text>
+                <TouchableOpacity style={styles.modalButton} onPress={() => { setShowAddModal(false); setNewMachineKey(''); }}>
                   <Text style={styles.modalButtonText}>Cerrar</Text>
                 </TouchableOpacity>
               </>
@@ -182,9 +167,7 @@ export default function HomeScreen() {
                   onChangeText={setNewMachineName}
                 />
                 <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.cancelButton]}
-                    onPress={() => { setShowAddModal(false); setNewMachineName(''); }}>
+                  <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setShowAddModal(false); setNewMachineName(''); }}>
                     <Text style={styles.cancelButtonText}>Cancelar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.modalButton} onPress={handleAddMachine}>
