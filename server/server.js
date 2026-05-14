@@ -248,6 +248,9 @@ app.post('/api/heartbeat', async (req, res) => {
     const result = await pool.query(
       `UPDATE machines SET
         machine_name = COALESCE($1, machine_name),
+        previous_public_ip = CASE WHEN public_ip IS NOT NULL AND public_ip != $2 THEN public_ip ELSE previous_public_ip END,
+        ip_changed_at = CASE WHEN public_ip IS NOT NULL AND public_ip != $2 THEN NOW() ELSE ip_changed_at END,
+        ip_change_seen = CASE WHEN public_ip IS NOT NULL AND public_ip != $2 THEN false ELSE ip_change_seen END,
         public_ip = $2,
         local_ip = $3,
         os_info = $4,
@@ -381,6 +384,31 @@ setInterval(async () => {
 
 app.get('/api/status', (req, res) => {
   res.json({ status: 'ServerEyes running', timestamp: new Date().toISOString() });
+});
+
+// Endpoint para cambios de IP no vistos
+app.get('/api/ip-changes', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, machine_name, public_ip, previous_public_ip, ip_changed_at
+       FROM machines
+       WHERE user_id = $1 AND ip_change_seen = false`,
+      [req.user.id]
+    );
+
+    // Marcar como vistos
+    if (result.rows.length > 0) {
+      await pool.query(
+        'UPDATE machines SET ip_change_seen = true WHERE user_id = $1 AND ip_change_seen = false',
+        [req.user.id]
+      );
+    }
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener cambios de IP:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
 });
 
 // Endpoint para polling de notificaciones (la app movil consulta periodicamente)
