@@ -4,19 +4,27 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { execSync } = require('child_process');
 
-// Config
-const CONFIG_FILE = path.join(path.dirname(process.execPath), 'servereyes-config.json');
+const EXE_PATH = process.execPath;
+const CONFIG_FILE = path.join(path.dirname(EXE_PATH), 'servereyes-config.json');
+const LOG_FILE = path.join(path.dirname(EXE_PATH), 'servereyes.log');
+const VBS_FILE = path.join(path.dirname(EXE_PATH), 'ServerEyes-Silent.vbs');
+const TASK_NAME = 'ServerEyes Agent';
 
 function loadConfig() {
-  try {
-    if (fs.existsSync(CONFIG_FILE)) return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-  } catch {}
+  try { if (fs.existsSync(CONFIG_FILE)) return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch {}
   return { serverUrl: '', machineKey: '', machineName: os.hostname(), heartbeatInterval: 30 };
 }
 
 function saveConfig(config) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+function log(msg) {
+  const line = `[${new Date().toLocaleString()}] ${msg}`;
+  console.log(line);
+  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch {}
 }
 
 // HTTP
@@ -42,7 +50,7 @@ function httpRequest(url, options = {}) {
   });
 }
 
-// IPs activas (sin virtuales, sin link-local)
+// IPs activas
 function getLocalIP() {
   const interfaces = os.networkInterfaces();
   const ips = [];
@@ -75,54 +83,88 @@ async function sendHeartbeat(config) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        machine_key: config.machineKey,
-        machine_name: config.machineName,
-        public_ip: publicIP,
-        local_ip: getLocalIP(),
-        os_info: getOSInfo()
+        machine_key: config.machineKey, machine_name: config.machineName,
+        public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo()
       })
     });
-    const ts = new Date().toLocaleTimeString();
-    if (res.ok) console.log(`[${ts}] Heartbeat OK - IP: ${publicIP}`);
-    else console.log(`[${ts}] Heartbeat ERROR: ${JSON.stringify(res.data)}`);
+    if (res.ok) log(`Heartbeat OK - IP: ${publicIP}`);
+    else log(`Heartbeat ERROR: ${JSON.stringify(res.data)}`);
+  } catch (err) { log(`Heartbeat FAILED: ${err.message}`); }
+}
+
+// Heartbeat loop
+function startHeartbeatLoop(config) {
+  log(`Agente iniciado - ${config.machineName}`);
+  log(`Servidor: ${config.serverUrl}`);
+  log(`Intervalo: ${config.heartbeatInterval}s`);
+  sendHeartbeat(config);
+  setInterval(() => sendHeartbeat(config), (config.heartbeatInterval || 30) * 1000);
+}
+
+// Pairing con espera sincrona
+function startPairing(config) {
+  return new Promise(async (resolve) => {
+    try {
+      const res = await httpRequest(`${config.serverUrl}/api/pairing/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machine_name: config.machineName, os_info: getOSInfo() })
+      });
+      if (!res.ok) { console.log('Error:', res.data.error); resolve(false); return; }
+
+      console.log(`\n  CODIGO: ${res.data.code}\n`);
+      console.log('  Ingresa este codigo en la app del celular.');
+      console.log('  Esperando confirmacion...\n');
+
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        if (attempts > 150) { clearInterval(poll); console.log('  Codigo expirado.'); resolve(false); return; }
+        try {
+          const check = await httpRequest(`${config.serverUrl}/api/pairing/status/${res.data.code}`);
+          if (check.ok && check.data.confirmed) {
+            clearInterval(poll);
+            config.machineKey = check.data.machine_key;
+            saveConfig(config);
+            console.log('  VINCULADO! La clave se guardo automaticamente.\n');
+            resolve(true);
+          }
+        } catch {}
+      }, 2000);
+    } catch (err) { console.log('Error:', err.message); resolve(false); }
+  });
+}
+
+// Instalar como tarea programada (corre sin ventana al iniciar Windows)
+function install() {
+  // Crear VBS que lanza el exe oculto
+  const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False\r\n`;
+  fs.writeFileSync(VBS_FILE, vbsContent);
+
+  try {
+    execSync(`schtasks /Create /TN "${TASK_NAME}" /TR "wscript.exe \\"${VBS_FILE}\\"" /SC ONLOGON /RL HIGHEST /F`, { stdio: 'pipe' });
+    console.log('\nInstalado como tarea programada.');
+    console.log('El agente se ejecutara automaticamente al iniciar Windows (sin ventana).');
+    console.log(`\nPara desinstalar: ${path.basename(EXE_PATH)} --uninstall`);
   } catch (err) {
-    console.log(`[${new Date().toLocaleTimeString()}] Heartbeat FAILED: ${err.message}`);
+    // Intentar sin /RL HIGHEST si falla
+    try {
+      execSync(`schtasks /Create /TN "${TASK_NAME}" /TR "wscript.exe \\"${VBS_FILE}\\"" /SC ONLOGON /F`, { stdio: 'pipe' });
+      console.log('\nInstalado como tarea programada.');
+      console.log('El agente se ejecutara automaticamente al iniciar Windows (sin ventana).');
+    } catch {
+      console.log('Error al instalar tarea. Ejecuta como Administrador.');
+    }
   }
 }
 
-// Pairing
-async function startPairing(config, rl) {
-  console.log('\n--- Vincular equipo ---');
+function uninstall() {
   try {
-    const res = await httpRequest(`${config.serverUrl}/api/pairing/request`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ machine_name: config.machineName, os_info: getOSInfo() })
-    });
-
-    if (!res.ok) { console.log('Error:', res.data.error); return; }
-
-    console.log(`\n  CODIGO: ${res.data.code}\n`);
-    console.log('  Ingresa este codigo en la app del celular.');
-    console.log('  Esperando confirmacion (5 min max)...\n');
-
-    // Poll cada 2s
-    const poll = setInterval(async () => {
-      try {
-        const check = await httpRequest(`${config.serverUrl}/api/pairing/status/${res.data.code}`);
-        if (check.ok && check.data.confirmed) {
-          clearInterval(poll);
-          config.machineKey = check.data.machine_key;
-          saveConfig(config);
-          console.log('  ¡VINCULADO! La clave se guardo automaticamente.\n');
-        }
-      } catch {}
-    }, 2000);
-
-    // Timeout 5 min
-    setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
-  } catch (err) {
-    console.log('Error:', err.message);
+    execSync(`schtasks /Delete /TN "${TASK_NAME}" /F`, { stdio: 'pipe' });
+    if (fs.existsSync(VBS_FILE)) fs.unlinkSync(VBS_FILE);
+    console.log('Tarea programada eliminada.');
+  } catch {
+    console.log('No se encontro la tarea o ya fue eliminada.');
   }
 }
 
@@ -145,7 +187,7 @@ async function setup() {
   const name = await ask(`Nombre de esta maquina [${config.machineName}]: `);
   if (name.trim()) config.machineName = name.trim();
 
-  console.log('\n¿Como queres vincular?');
+  console.log('\nComo queres vincular?');
   console.log('  1) Codigo de vinculacion (desde la app del celular)');
   console.log('  2) Ingresar clave manualmente');
   const choice = await ask('\nOpcion [1]: ');
@@ -153,13 +195,24 @@ async function setup() {
   if (choice.trim() === '2') {
     const key = await ask('Clave de maquina: ');
     if (key.trim()) config.machineKey = key.trim();
+    saveConfig(config);
   } else {
     saveConfig(config);
-    await startPairing(config, rl);
+    const paired = await startPairing(config);
+    if (!paired) { rl.close(); return; }
   }
 
-  saveConfig(config);
+  // Preguntar si instalar
+  const doInstall = await ask('Instalar para que arranque con Windows? (s/n) [s]: ');
+  if (doInstall.trim().toLowerCase() !== 'n') {
+    install();
+  }
+
   rl.close();
+
+  // Arrancar heartbeat automaticamente
+  console.log('\nIniciando heartbeat...\n');
+  startHeartbeatLoop(loadConfig());
 }
 
 // Main
@@ -171,28 +224,18 @@ async function main() {
     return;
   }
 
+  if (args.includes('--install')) { install(); return; }
+  if (args.includes('--uninstall')) { uninstall(); return; }
+
   const config = loadConfig();
 
   if (!config.serverUrl || !config.machineKey) {
     console.log('ServerEyes Agent - No configurado');
-    console.log('Ejecuta con --setup para configurar');
-    console.log(`  ${process.execPath} --setup`);
-    console.log(`\nO edita: ${CONFIG_FILE}`);
+    console.log(`Ejecuta: ${path.basename(EXE_PATH)} --setup`);
     return;
   }
 
-  console.log(`ServerEyes Agent v1.0`);
-  console.log(`Maquina: ${config.machineName}`);
-  console.log(`Servidor: ${config.serverUrl}`);
-  console.log(`Intervalo: ${config.heartbeatInterval}s`);
-  console.log(`Config: ${CONFIG_FILE}`);
-  console.log('---');
-
-  // Primer heartbeat
-  await sendHeartbeat(config);
-
-  // Loop
-  setInterval(() => sendHeartbeat(config), (config.heartbeatInterval || 30) * 1000);
+  startHeartbeatLoop(config);
 }
 
 main().catch(console.error);
