@@ -1,0 +1,16 @@
+{
+  "name": "servereyes-agent",
+  "version": "1.0.0",
+  "description": "ServerEyes Agent - Ligero para servidores Windows",
+  "main": "agent.js",
+  "bin": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "setup": "node agent.js --setup",
+    "build": "npx pkg agent.js --target node18-win-x64 --output dist/ServerEyes-Agent.exe"
+  },
+  "pkg": {
+    "targets": ["node18-win-x64"],
+    "outputPath": "dist"
+  }
+}
