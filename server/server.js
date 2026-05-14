@@ -138,6 +138,81 @@ app.post('/api/auth/clerk-login', async (req, res) => {
   }
 });
 
+// ============== PAIRING (vinculacion por codigo) ==============
+
+// Almacen temporal de codigos de pairing (en memoria, expiran en 5 min)
+const pairingCodes = new Map();
+
+// Windows solicita un codigo de pairing
+app.post('/api/pairing/request', async (req, res) => {
+  try {
+    const { machine_name, os_info } = req.body;
+    if (!machine_name) return res.status(400).json({ error: 'machine_name requerido' });
+
+    // Generar codigo de 6 digitos
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+
+    pairingCodes.set(code, {
+      machine_name,
+      os_info: os_info || '',
+      created_at: Date.now(),
+      confirmed: false,
+      machine_key: null
+    });
+
+    // Limpiar despues de 5 minutos
+    setTimeout(() => pairingCodes.delete(code), 5 * 60 * 1000);
+
+    res.json({ code, expires_in: 300 });
+  } catch (error) {
+    console.error('Error en pairing request:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Android confirma el codigo y crea la maquina
+app.post('/api/pairing/confirm', authenticateToken, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'code requerido' });
+
+    const pairing = pairingCodes.get(code);
+    if (!pairing) return res.status(404).json({ error: 'Codigo invalido o expirado' });
+    if (pairing.confirmed) return res.status(409).json({ error: 'Codigo ya fue usado' });
+
+    // Crear la maquina
+    const machine_key = require('crypto').randomBytes(32).toString('hex').slice(0, 32);
+    const result = await pool.query(
+      'INSERT INTO machines (user_id, machine_name, machine_key) VALUES ($1, $2, $3) RETURNING *',
+      [req.user.id, pairing.machine_name, machine_key]
+    );
+
+    // Marcar como confirmado
+    pairing.confirmed = true;
+    pairing.machine_key = machine_key;
+
+    res.json({ machine: result.rows[0] });
+  } catch (error) {
+    console.error('Error en pairing confirm:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Windows consulta si el codigo fue confirmado
+app.get('/api/pairing/status/:code', (req, res) => {
+  const pairing = pairingCodes.get(req.params.code);
+  if (!pairing) return res.status(404).json({ error: 'Codigo invalido o expirado' });
+
+  if (pairing.confirmed) {
+    // Devolver la clave y limpiar
+    const machine_key = pairing.machine_key;
+    pairingCodes.delete(req.params.code);
+    res.json({ confirmed: true, machine_key });
+  } else {
+    res.json({ confirmed: false });
+  }
+});
+
 // ============== MIDDLEWARE AUTH JWT ==============
 
 async function authenticateToken(req, res, next) {

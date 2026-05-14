@@ -167,6 +167,29 @@ function openConfigWindow() {
   configWindow.on('closed', () => { configWindow = null; });
 }
 
+// Ventana de pairing (vincular equipo)
+let pairingWindow = null;
+
+function openPairingWindow() {
+  const config = loadConfig();
+  if (!config.serverUrl) {
+    openConfigWindow();
+    return;
+  }
+  if (pairingWindow) { pairingWindow.focus(); return; }
+
+  pairingWindow = new BrowserWindow({
+    width: 400, height: 350,
+    resizable: false, maximizable: false, minimizable: false,
+    title: 'ServerEyes - Vincular equipo',
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+
+  pairingWindow.setMenuBarVisibility(false);
+  pairingWindow.loadFile(path.join(__dirname, 'pairing.html'));
+  pairingWindow.on('closed', () => { pairingWindow = null; });
+}
+
 // Iniciar heartbeat
 function startHeartbeat() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -203,11 +226,47 @@ app.whenReady().then(() => {
     }
   });
 
+  // Pairing IPC
+  ipcMain.handle('request-pairing', async () => {
+    const config = loadConfig();
+    if (!config.serverUrl) return { success: false, message: 'Configura la URL del servidor primero' };
+    try {
+      const machineName = config.machineName || os.hostname();
+      const osInfo = `${os.type()} ${os.release()} | ${os.cpus()[0]?.model || 'Unknown'} | RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`;
+      const res = await httpRequest(`${config.serverUrl}/api/pairing/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machine_name: machineName, os_info: osInfo })
+      });
+      if (res.ok) return { success: true, code: res.data.code };
+      return { success: false, message: res.data.error || 'Error' };
+    } catch (error) {
+      return { success: false, message: `Error: ${error.message}` };
+    }
+  });
+
+  ipcMain.handle('check-pairing', async (e, code) => {
+    const config = loadConfig();
+    try {
+      const res = await httpRequest(`${config.serverUrl}/api/pairing/status/${code}`);
+      if (res.ok && res.data.confirmed) {
+        // Guardar la clave automaticamente
+        saveConfig({ ...config, machineKey: res.data.machine_key });
+        startHeartbeat();
+        return { confirmed: true };
+      }
+      return { confirmed: false };
+    } catch {
+      return { confirmed: false };
+    }
+  });
+
   // Tray
   tray = new Tray(createTrayIcon());
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'ServerEyes', enabled: false },
     { type: 'separator' },
+    { label: 'Vincular equipo', click: openPairingWindow },
     { label: 'Configuracion', click: openConfigWindow },
     { label: 'Enviar heartbeat ahora', click: sendHeartbeat },
     { type: 'separator' },

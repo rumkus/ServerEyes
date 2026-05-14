@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Vincular equipo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; padding: 30px; text-align: center; }
+    .title { font-size: 18px; color: #00d4ff; margin-bottom: 8px; }
+    .subtitle { font-size: 13px; color: #888; margin-bottom: 30px; }
+    .code { font-size: 48px; font-weight: 800; letter-spacing: 12px; color: #00d4ff; background: #16213e; border-radius: 16px; padding: 20px 30px; margin-bottom: 16px; font-family: 'Consolas', monospace; }
+    .status { font-size: 14px; color: #888; margin-bottom: 20px; min-height: 24px; }
+    .status.success { color: #00e676; }
+    .status.error { color: #ff5252; }
+    .hint { font-size: 12px; color: #555; line-height: 1.6; }
+    .loading { color: #888; font-size: 16px; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <div id="content">
+    <p class="loading">Generando codigo...</p>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let pollInterval = null;
+
+    async function start() {
+      const result = await ipcRenderer.invoke('request-pairing');
+      const content = document.getElementById('content');
+
+      if (!result.success) {
+        content.innerHTML = `
+          <p class="title">Error</p>
+          <p class="status error">${result.message}</p>
+        `;
+        return;
+      }
+
+      const code = result.code;
+      content.innerHTML = `
+        <p class="title">Vincular equipo</p>
+        <p class="subtitle">Ingresa este codigo en la app del celular</p>
+        <div class="code">${code}</div>
+        <p class="status" id="status">Esperando confirmacion...</p>
+        <p class="hint">Abri la app ServerEyes en tu celular<br>Toca "Vincular con codigo" e ingresa este numero<br>El codigo expira en 5 minutos</p>
+      `;
+
+      // Consultar cada 2 segundos si fue confirmado
+      pollInterval = setInterval(async () => {
+        const check = await ipcRenderer.invoke('check-pairing', code);
+        if (check.confirmed) {
+          clearInterval(pollInterval);
+          document.getElementById('status').className = 'status success';
+          document.getElementById('status').textContent = '¡Equipo vinculado exitosamente!';
+          document.querySelector('.code').style.color = '#00e676';
+          document.querySelector('.hint').textContent = 'Ya podes cerrar esta ventana. El heartbeat comenzo automaticamente.';
+        }
+      }, 2000);
+    }
+
+    start();
+
+    // Limpiar al cerrar
+    window.addEventListener('beforeunload', () => {
+      if (pollInterval) clearInterval(pollInterval);
+    });
+  </script>
+</body>
+</html>
