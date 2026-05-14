@@ -83,15 +83,21 @@ async function getPublicIP() {
   }
 }
 
-// Obtener IP local
+// Obtener IPs locales de adaptadores activos (conectados)
 function getLocalIP() {
   const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+  const activeIPs = [];
+
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    for (const iface of addrs) {
+      if (iface.family !== 'IPv4' || iface.internal) continue;
+      // Filtrar IPs de link-local (169.254.x.x) que indican "sin conexion"
+      if (iface.address.startsWith('169.254.')) continue;
+      activeIPs.push(`${iface.address} (${name})`);
     }
   }
-  return '127.0.0.1';
+
+  return activeIPs.length > 0 ? activeIPs.join(' | ') : '127.0.0.1';
 }
 
 // Info del sistema
