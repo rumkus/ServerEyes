@@ -254,9 +254,11 @@ export default function App() {
               <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>
               <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.public_ip || '---'}</Text>
             </View>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
-              <Text style={{color: '#888', fontSize: 13}}>IP Local:</Text>
-              <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.local_ip || '---'}</Text>
+            <View style={{marginBottom: 4}}>
+              <Text style={{color: '#888', fontSize: 13, marginBottom: 2}}>IP Local:</Text>
+              {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
+                <Text key={i} style={{color: '#ddd', fontSize: 13, fontWeight: '600', paddingLeft: 8}}>{ip.trim()}</Text>
+              ))}
             </View>
             <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
               <Text style={{color: '#888', fontSize: 13}}>Heartbeat:</Text>
