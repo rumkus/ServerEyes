@@ -83,15 +83,27 @@ async function getPublicIP() {
   }
 }
 
-// Obtener IPs locales de adaptadores activos (conectados)
+// Obtener IPs locales solo de adaptadores fisicos (Ethernet y Wi-Fi)
 function getLocalIP() {
   const interfaces = os.networkInterfaces();
   const activeIPs = [];
 
+  // Nombres de adaptadores virtuales a ignorar
+  const virtualPatterns = [
+    /vmware/i, /virtualbox/i, /vbox/i, /hyper-v/i,
+    /docker/i, /vethernet/i, /vpn/i, /tap/i, /tun/i,
+    /wireguard/i, /wg\d/i, /nordlynx/i, /proton/i,
+    /fortinet/i, /cisco/i, /juniper/i, /palo alto/i,
+    /npcap/i, /loopback/i, /pseudo/i, /teredo/i,
+    /isatap/i, /6to4/i, /bluetooth/i,
+  ];
+
   for (const [name, addrs] of Object.entries(interfaces)) {
+    // Saltar adaptadores virtuales
+    if (virtualPatterns.some(p => p.test(name))) continue;
+
     for (const iface of addrs) {
       if (iface.family !== 'IPv4' || iface.internal) continue;
-      // Filtrar IPs de link-local (169.254.x.x) que indican "sin conexion"
       if (iface.address.startsWith('169.254.')) continue;
       activeIPs.push(`${iface.address} (${name})`);
     }
