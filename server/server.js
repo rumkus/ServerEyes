@@ -285,7 +285,7 @@ app.post('/api/heartbeat', async (req, res) => {
 app.get('/api/machines', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM machines WHERE user_id = $1 ORDER BY machine_name',
+      'SELECT * FROM machines WHERE user_id = $1 ORDER BY grupo NULLS LAST, orden, machine_name',
       [req.user.id]
     );
     res.json(result.rows);
@@ -315,6 +315,51 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error al registrar maquina:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Actualizar maquina (nombre, grupo, orden)
+app.put('/api/machines/:id', authenticateToken, async (req, res) => {
+  try {
+    const { machine_name, grupo, orden } = req.body;
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (machine_name !== undefined) { fields.push(`machine_name = $${idx++}`); values.push(machine_name); }
+    if (grupo !== undefined) { fields.push(`grupo = $${idx++}`); values.push(grupo || null); }
+    if (orden !== undefined) { fields.push(`orden = $${idx++}`); values.push(orden); }
+
+    if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
+
+    values.push(req.params.id, req.user.id);
+    const result = await pool.query(
+      `UPDATE machines SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al actualizar maquina:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Actualizar orden de varias maquinas
+app.put('/api/machines-order', authenticateToken, async (req, res) => {
+  try {
+    const { orders } = req.body; // [{id: 1, orden: 0, grupo: 'Cliente A'}, ...]
+    for (const item of orders) {
+      await pool.query(
+        'UPDATE machines SET orden = $1, grupo = $2 WHERE id = $3 AND user_id = $4',
+        [item.orden, item.grupo || null, item.id, req.user.id]
+      );
+    }
+    res.json({ message: 'Orden actualizado' });
+  } catch (error) {
+    console.error('Error al actualizar orden:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });

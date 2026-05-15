@@ -26,6 +26,13 @@ export default function App() {
   const [pairingCode, setPairingCode] = useState('');
   const [pairingStatus, setPairingStatus] = useState('');
   const [ipAlert, setIpAlert] = useState<{name: string, oldIp: string, newIp: string} | null>(null);
+  const [editingMachine, setEditingMachine] = useState<any>(null);
+  const [editName, setEditName] = useState('');
+  const [editGrupo, setEditGrupo] = useState('');
+  const [viewMode, setViewMode] = useState<'all' | 'groups'>('all');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
+  const [newGroupName, setNewGroupName] = useState('');
 
   const handleAuth = async () => {
     if (!email.trim() || !password.trim()) { setError('Completa todos los campos'); return; }
@@ -80,6 +87,63 @@ export default function App() {
       if (res.ok) { setNewKey(res.data.machine_key); setNewName(''); loadMachines(); }
     } catch { Alert.alert('Error', 'No se pudo registrar'); }
   };
+
+  const updateMachine = async (id: number, data: any) => {
+    try {
+      await apiRequest(`/api/machines/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token);
+      loadMachines();
+    } catch {}
+  };
+
+  const saveEdit = () => {
+    if (!editingMachine) return;
+    updateMachine(editingMachine.id, { machine_name: editName, grupo: editGrupo || null });
+    setEditingMachine(null);
+  };
+
+  const moveMachineUp = (machine: any) => {
+    const idx = machines.findIndex(m => m.id === machine.id);
+    if (idx <= 0) return;
+    const orders = machines.map((m, i) => ({ id: m.id, orden: i, grupo: m.grupo }));
+    [orders[idx].orden, orders[idx - 1].orden] = [orders[idx - 1].orden, orders[idx].orden];
+    apiRequest('/api/machines-order', { method: 'PUT', body: JSON.stringify({ orders }) }, token);
+    const newMachines = [...machines];
+    [newMachines[idx], newMachines[idx - 1]] = [newMachines[idx - 1], newMachines[idx]];
+    setMachines(newMachines);
+  };
+
+  const moveMachineDown = (machine: any) => {
+    const idx = machines.findIndex(m => m.id === machine.id);
+    if (idx >= machines.length - 1) return;
+    const orders = machines.map((m, i) => ({ id: m.id, orden: i, grupo: m.grupo }));
+    [orders[idx].orden, orders[idx + 1].orden] = [orders[idx + 1].orden, orders[idx].orden];
+    apiRequest('/api/machines-order', { method: 'PUT', body: JSON.stringify({ orders }) }, token);
+    const newMachines = [...machines];
+    [newMachines[idx], newMachines[idx + 1]] = [newMachines[idx + 1], newMachines[idx]];
+    setMachines(newMachines);
+  };
+
+  const toggleGroup = (group: string) => {
+    const newSet = new Set(expandedGroups);
+    if (newSet.has(group)) newSet.delete(group); else newSet.add(group);
+    setExpandedGroups(newSet);
+  };
+
+  const getGroups = () => {
+    const groups: {[key: string]: any[]} = {};
+    const sinGrupo: any[] = [];
+    machines.forEach(m => {
+      if (m.grupo) {
+        if (!groups[m.grupo]) groups[m.grupo] = [];
+        groups[m.grupo].push(m);
+      } else {
+        sinGrupo.push(m);
+      }
+    });
+    return { groups, sinGrupo };
+  };
+
+  const existingGroups = [...new Set(machines.map(m => m.grupo).filter(Boolean))];
 
   const confirmPairing = async () => {
     if (pairingCode.length !== 6) { setPairingStatus('Ingresa un codigo de 6 digitos'); return; }
@@ -199,6 +263,118 @@ export default function App() {
     );
   }
 
+  // Render de una maquina
+  const renderMachineCard = (item: any) => (
+    <TouchableOpacity
+      key={item.id}
+      style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
+      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); }}
+      onLongPress={() => deleteMachine(item)}>
+      <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
+        <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
+        <Text style={{flex: 1, fontSize: 18, fontWeight: '700', color: '#eee'}}>{item.machine_name}</Text>
+        <Text style={{fontSize: 12, fontWeight: '700', color: item.is_online ? '#00e676' : '#ff5252'}}>
+          {item.is_online ? 'ONLINE' : 'OFFLINE'}
+        </Text>
+      </View>
+      {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 6}}>📁 {item.grupo}</Text>}
+      <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
+        <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>
+        <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.public_ip || '---'}</Text>
+      </View>
+      <View style={{marginBottom: 4}}>
+        <Text style={{color: '#888', fontSize: 13, marginBottom: 2}}>IP Local:</Text>
+        {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
+          <Text key={i} style={{color: '#ddd', fontSize: 13, fontWeight: '600', paddingLeft: 8}}>{ip.trim()}</Text>
+        ))}
+      </View>
+      <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
+        <Text style={{color: '#888', fontSize: 13}}>Heartbeat:</Text>
+        <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{timeSince(item.last_heartbeat)}</Text>
+      </View>
+      {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
+      <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8}}>
+        <TouchableOpacity onPress={() => moveMachineUp(item)} style={{padding: 6}}>
+          <Text style={{color: '#555', fontSize: 16}}>▲</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => moveMachineDown(item)} style={{padding: 6, marginLeft: 8}}>
+          <Text style={{color: '#555', fontSize: 16}}>▼</Text>
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Vista por grupos
+  const renderGroupView = () => {
+    const { groups, sinGrupo } = getGroups();
+    const groupNames = Object.keys(groups).sort();
+
+    return (
+      <View style={{padding: 16, paddingBottom: 80}}>
+        {groupNames.map(groupName => (
+          <View key={groupName} style={{marginBottom: 12}}>
+            <TouchableOpacity
+              onPress={() => toggleGroup(groupName)}
+              style={{backgroundColor: '#16213e', borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center'}}>
+              <Text style={{fontSize: 16, marginRight: 8}}>{expandedGroups.has(groupName) ? '📂' : '📁'}</Text>
+              <Text style={{flex: 1, fontSize: 16, fontWeight: '700', color: '#00d4ff'}}>{groupName}</Text>
+              <Text style={{color: '#888', fontSize: 13}}>{groups[groupName].length} maq.</Text>
+              <Text style={{color: '#555', fontSize: 14, marginLeft: 8}}>{expandedGroups.has(groupName) ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {expandedGroups.has(groupName) && (
+              <View style={{marginTop: 8, paddingLeft: 8}}>
+                {groups[groupName].map(m => renderMachineCard(m))}
+              </View>
+            )}
+          </View>
+        ))}
+        {sinGrupo.length > 0 && (
+          <View>
+            {groupNames.length > 0 && (
+              <Text style={{color: '#555', fontSize: 13, marginBottom: 8, marginTop: 8}}>Sin grupo</Text>
+            )}
+            {sinGrupo.map(m => renderMachineCard(m))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // EDIT MODAL
+  if (editingMachine) {
+    return (
+      <View style={s.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>✏️</Text>
+        <Text style={s.title}>Editar maquina</Text>
+        <Text style={[s.sub, {marginBottom: 16}]}>Toca fuera para cerrar</Text>
+        <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Nombre:</Text>
+        <TextInput style={s.input} value={editName} onChangeText={setEditName} placeholder="Nombre" placeholderTextColor="#666" />
+        <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Grupo / Cliente:</Text>
+        <TextInput style={s.input} value={editGrupo} onChangeText={setEditGrupo} placeholder="Sin grupo" placeholderTextColor="#666" />
+        {existingGroups.length > 0 && (
+          <View style={{flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12}}>
+            {existingGroups.map(g => (
+              <TouchableOpacity key={g} onPress={() => setEditGrupo(g!)}
+                style={{backgroundColor: editGrupo === g ? '#00d4ff' : '#2a2a4a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8, marginBottom: 6}}>
+                <Text style={{color: editGrupo === g ? '#1a1a2e' : '#888', fontSize: 12, fontWeight: '600'}}>{g}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+        <TouchableOpacity style={s.btn} onPress={saveEdit}>
+          <Text style={s.btnTxt}>Guardar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setEditingMachine(null)}>
+          <Text style={s.link}>Cancelar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => { deleteMachine(editingMachine); setEditingMachine(null); }} style={{marginTop: 20}}>
+          <Text style={{color: '#ff5252', textAlign: 'center', fontSize: 14}}>Eliminar maquina</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   // HOME
   return (
     <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
@@ -208,9 +384,16 @@ export default function App() {
           <Text style={s.headerTitle}>👁 ServerEyes</Text>
           <Text style={{color: '#888', fontSize: 13}}>{machines.length} maquinas</Text>
         </View>
-        <TouchableOpacity style={s.logoutBtn} onPress={() => setToken(null)}>
-          <Text style={{color: '#ff5252', fontWeight: '600'}}>Salir</Text>
-        </TouchableOpacity>
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+          <TouchableOpacity
+            onPress={() => setViewMode(viewMode === 'all' ? 'groups' : 'all')}
+            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+            <Text style={{color: '#00d4ff', fontSize: 13}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.logoutBtn} onPress={() => setToken(null)}>
+            <Text style={{color: '#ff5252', fontWeight: '600'}}>Salir</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {ipAlert && (
@@ -226,48 +409,31 @@ export default function App() {
         </TouchableOpacity>
       )}
 
-      <FlatList
-        data={machines}
-        keyExtractor={i => i.id.toString()}
-        contentContainerStyle={{padding: 16, paddingBottom: 80}}
-        onRefresh={() => loadMachines()}
-        refreshing={false}
-        ListEmptyComponent={
-          <View style={{alignItems: 'center', marginTop: 100}}>
-            <Text style={{fontSize: 60}}>🖥</Text>
-            <Text style={{color: '#888', fontSize: 18, marginTop: 16}}>No hay maquinas</Text>
-            <Text style={{color: '#555', fontSize: 14, marginTop: 4}}>Toca + para agregar</Text>
-          </View>
-        }
-        renderItem={({item}) => (
-          <TouchableOpacity
-            style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
-            onLongPress={() => deleteMachine(item)}>
-            <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
-              <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
-              <Text style={{flex: 1, fontSize: 18, fontWeight: '700', color: '#eee'}}>{item.machine_name}</Text>
-              <Text style={{fontSize: 12, fontWeight: '700', color: item.is_online ? '#00e676' : '#ff5252'}}>
-                {item.is_online ? 'ONLINE' : 'OFFLINE'}
-              </Text>
+      {viewMode === 'groups' ? (
+        <FlatList
+          data={[1]}
+          keyExtractor={() => 'groups'}
+          renderItem={() => renderGroupView()}
+          onRefresh={() => loadMachines()}
+          refreshing={false}
+        />
+      ) : (
+        <FlatList
+          data={machines}
+          keyExtractor={i => i.id.toString()}
+          contentContainerStyle={{padding: 16, paddingBottom: 80}}
+          onRefresh={() => loadMachines()}
+          refreshing={false}
+          ListEmptyComponent={
+            <View style={{alignItems: 'center', marginTop: 100}}>
+              <Text style={{fontSize: 60}}>🖥</Text>
+              <Text style={{color: '#888', fontSize: 18, marginTop: 16}}>No hay maquinas</Text>
+              <Text style={{color: '#555', fontSize: 14, marginTop: 4}}>Toca + para agregar</Text>
             </View>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
-              <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>
-              <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.public_ip || '---'}</Text>
-            </View>
-            <View style={{marginBottom: 4}}>
-              <Text style={{color: '#888', fontSize: 13, marginBottom: 2}}>IP Local:</Text>
-              {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
-                <Text key={i} style={{color: '#ddd', fontSize: 13, fontWeight: '600', paddingLeft: 8}}>{ip.trim()}</Text>
-              ))}
-            </View>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-              <Text style={{color: '#888', fontSize: 13}}>Heartbeat:</Text>
-              <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{timeSince(item.last_heartbeat)}</Text>
-            </View>
-            {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
-          </TouchableOpacity>
-        )}
-      />
+          }
+          renderItem={({item}) => renderMachineCard(item)}
+        />
+      )}
 
       <TouchableOpacity style={[s.fab, {bottom: 90, backgroundColor: '#2a2a4a'}]} onPress={() => setShowAdd(true)}>
         <Text style={[s.fabTxt, {fontSize: 22, color: '#00d4ff'}]}>+</Text>
