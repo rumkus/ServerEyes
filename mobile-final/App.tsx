@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = 'https://servereyes-production.up.railway.app';
 
@@ -13,6 +14,7 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
+  const [appReady, setAppReady] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,13 +36,28 @@ export default function App() {
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
   const [newGroupName, setNewGroupName] = useState('');
 
+  // Cargar token guardado al iniciar
+  useEffect(() => {
+    AsyncStorage.getItem('servereyes_token').then(saved => {
+      if (saved) setToken(saved);
+      setAppReady(true);
+    }).catch(() => setAppReady(true));
+  }, []);
+
+  // Guardar token cuando cambia
+  const setAndSaveToken = async (t: string | null) => {
+    if (t) await AsyncStorage.setItem('servereyes_token', t);
+    else await AsyncStorage.removeItem('servereyes_token');
+    setToken(t);
+  };
+
   const handleAuth = async () => {
     if (!email.trim() || !password.trim()) { setError('Completa todos los campos'); return; }
     setLoading(true); setError('');
     try {
       const path = isSignUp ? '/api/auth/register' : '/api/auth/login';
       const res = await apiRequest(path, { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
-      if (res.ok) { setToken(res.data.token); loadMachines(res.data.token); }
+      if (res.ok) { setAndSaveToken(res.data.token); loadMachines(res.data.token); }
       else setError(res.data.error || 'Error');
     } catch { setError('Error de conexion'); }
     setLoading(false);
@@ -182,6 +199,17 @@ export default function App() {
     if (d < 86400) return `${Math.floor(d / 3600)}h`;
     return `${Math.floor(d / 86400)}d`;
   };
+
+  // Pantalla de carga
+  if (!appReady) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', alignItems: 'center'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <Text style={{fontSize: 40, marginBottom: 10}}>👁</Text>
+        <ActivityIndicator size="large" color="#00d4ff" />
+      </View>
+    );
+  }
 
   // LOGIN
   if (!token) {
@@ -390,7 +418,7 @@ export default function App() {
             style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
             <Text style={{color: '#00d4ff', fontSize: 13}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.logoutBtn} onPress={() => setToken(null)}>
+          <TouchableOpacity style={s.logoutBtn} onPress={() => setAndSaveToken(null)}>
             <Text style={{color: '#ff5252', fontWeight: '600'}}>Salir</Text>
           </TouchableOpacity>
         </View>
