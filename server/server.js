@@ -247,19 +247,18 @@ app.post('/api/heartbeat', async (req, res) => {
     // Actualizar maquina
     const result = await pool.query(
       `UPDATE machines SET
-        machine_name = COALESCE($1, machine_name),
-        previous_public_ip = CASE WHEN public_ip IS NOT NULL AND public_ip != $2 THEN public_ip ELSE previous_public_ip END,
-        ip_changed_at = CASE WHEN public_ip IS NOT NULL AND public_ip != $2 THEN NOW() ELSE ip_changed_at END,
-        ip_change_seen = CASE WHEN public_ip IS NOT NULL AND public_ip != $2 THEN false ELSE ip_change_seen END,
-        public_ip = $2,
-        local_ip = $3,
-        os_info = $4,
+        previous_public_ip = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 THEN public_ip ELSE previous_public_ip END,
+        ip_changed_at = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 THEN NOW() ELSE ip_changed_at END,
+        ip_change_seen = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 THEN false ELSE ip_change_seen END,
+        public_ip = $1,
+        local_ip = $2,
+        os_info = $3,
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
-      WHERE machine_key = $5
+      WHERE machine_key = $4
       RETURNING *`,
-      [machine_name, public_ip, local_ip, os_info, machine_key]
+      [public_ip, local_ip, os_info, machine_key]
     );
 
     if (result.rows.length === 0) {
