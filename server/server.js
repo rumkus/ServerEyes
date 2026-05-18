@@ -292,15 +292,27 @@ async function authenticateToken(req, res, next) {
   }
 }
 
+// Speed test pendientes (machine_id -> true)
+const pendingSpeedTests = new Set();
+
 // ============== RUTAS PUBLICAS (WINDOWS CLIENT) ==============
 
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
+    }
+
+    // Si solo viene download_mbps (resultado de speed test)
+    if (download_mbps !== undefined && !public_ip) {
+      await pool.query(
+        'UPDATE machines SET download_mbps = $1, speed_test_at = NOW() WHERE machine_key = $2',
+        [download_mbps, machine_key]
+      );
+      return res.json({ status: 'speed_test_saved' });
     }
 
     // Actualizar maquina
@@ -312,12 +324,13 @@ app.post('/api/heartbeat', async (req, res) => {
         public_ip = $1,
         local_ip = $2,
         os_info = $3,
+        ping_ms = $4,
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
-      WHERE machine_key = $4
+      WHERE machine_key = $5
       RETURNING *`,
-      [public_ip, local_ip, os_info, machine_key]
+      [public_ip, local_ip, os_info, ping_ms, machine_key]
     );
 
     if (result.rows.length === 0) {
@@ -367,7 +380,11 @@ app.post('/api/heartbeat', async (req, res) => {
       } catch (e) { console.error('[DNS] Auto-update error:', e.message); }
     }
 
-    res.json({ status: 'ok', machine: result.rows[0] });
+    // Chequear si hay speed test pendiente
+    const runSpeedtest = pendingSpeedTests.has(updatedMachine.id);
+    if (runSpeedtest) pendingSpeedTests.delete(updatedMachine.id);
+
+    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest });
   } catch (error) {
     console.error('Error en heartbeat:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -457,6 +474,19 @@ app.put('/api/machines-order', authenticateToken, async (req, res) => {
     res.json({ message: 'Orden actualizado' });
   } catch (error) {
     console.error('Error al actualizar orden:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Solicitar speed test a una maquina
+app.post('/api/machines/:id/speedtest', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    pendingSpeedTests.add(machine.rows[0].id);
+    res.json({ message: 'Speed test solicitado. Se ejecutara en el proximo heartbeat.' });
+  } catch (error) {
+    console.error('Error solicitando speed test:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });

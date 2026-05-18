@@ -644,11 +644,31 @@ export default function App() {
         <Text style={{color: '#888', fontSize: 13}}>Heartbeat:</Text>
         <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{timeSince(item.last_heartbeat)}</Text>
       </View>
+      <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 4}}>
+        <Text style={{color: '#888', fontSize: 13}}>Ping:</Text>
+        <Text style={{color: item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555', fontSize: 13, fontWeight: '600'}}>
+          {item.ping_ms ? `${item.ping_ms}ms` : '---'}
+        </Text>
+      </View>
+      {item.download_mbps && (
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 4}}>
+          <Text style={{color: '#888', fontSize: 13}}>Velocidad:</Text>
+          <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '600'}}>{item.download_mbps} Mbps</Text>
+        </View>
+      )}
       {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
-        <TouchableOpacity onPress={() => openUptime(item)} style={{flexDirection: 'row', alignItems: 'center', padding: 6}}>
-          <Text style={{color: '#00d4ff', fontSize: 12}}>📊 Uptime</Text>
-        </TouchableOpacity>
+        <View style={{flexDirection: 'row'}}>
+          <TouchableOpacity onPress={() => openUptime(item)} style={{padding: 6, marginRight: 12}}>
+            <Text style={{color: '#00d4ff', fontSize: 12}}>📊 Uptime</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={async () => {
+            const res = await apiRequest(`/api/machines/${item.id}/speedtest`, { method: 'POST' }, token);
+            if (res.ok) Alert.alert('Speed Test', 'Solicitado. El resultado aparece en ~30 segundos.');
+          }} style={{padding: 6}}>
+            <Text style={{color: '#ff9800', fontSize: 12}}>⚡ Speed Test</Text>
+          </TouchableOpacity>
+        </View>
         <View style={{flexDirection: 'row'}}>
           <TouchableOpacity onPress={() => moveMachineUp(item)} style={{padding: 6}}>
             <Text style={{color: '#555', fontSize: 16}}>▲</Text>

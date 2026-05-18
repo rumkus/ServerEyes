@@ -117,6 +117,35 @@ function getOSInfo() {
   return `${os.type()} ${os.release()} | ${os.cpus()[0]?.model || 'Unknown'} | RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`;
 }
 
+// Ping
+function measurePing() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec('ping -n 1 -w 3000 8.8.8.8', (err, stdout) => {
+      if (err) { resolve(null); return; }
+      const match = stdout.match(/(?:time|tiempo)[=<](\d+)/i);
+      resolve(match ? parseInt(match[1]) : null);
+    });
+  });
+}
+
+// Speed test
+function measureSpeed() {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    let bytes = 0;
+    https.get('https://speed.cloudflare.com/__down?bytes=5000000', (res) => {
+      res.on('data', (chunk) => { bytes += chunk.length; });
+      res.on('end', () => {
+        const duration = (Date.now() - startTime) / 1000;
+        const mbps = ((bytes * 8) / (1024 * 1024)) / duration;
+        resolve({ download: Math.round(mbps * 100) / 100 });
+      });
+    }).on('error', () => resolve(null));
+    setTimeout(() => resolve(null), 15000);
+  });
+}
+
 // Enviar heartbeat
 async function sendHeartbeat() {
   const config = loadConfig();
@@ -127,6 +156,7 @@ async function sendHeartbeat() {
 
   try {
     const publicIP = await getPublicIP();
+    const pingMs = await measurePing();
     const res = await httpRequest(`${config.serverUrl}/api/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -135,11 +165,24 @@ async function sendHeartbeat() {
         machine_name: config.machineName,
         public_ip: publicIP,
         local_ip: getLocalIP(),
-        os_info: getOSInfo()
+        os_info: getOSInfo(),
+        ping_ms: pingMs
       })
     });
 
-    if (tray) tray.setToolTip(res.ok ? `ServerEyes - Conectado (${publicIP})` : 'ServerEyes - Error');
+    if (tray) tray.setToolTip(res.ok ? `ServerEyes - Conectado (${publicIP}) - ${pingMs || '?'}ms` : 'ServerEyes - Error');
+
+    // Speed test si el servidor lo pide
+    if (res.ok && res.data && res.data.run_speedtest) {
+      const speed = await measureSpeed();
+      if (speed) {
+        await httpRequest(`${config.serverUrl}/api/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ machine_key: config.machineKey, download_mbps: speed.download })
+        });
+      }
+    }
   } catch (error) {
     if (tray) tray.setToolTip('ServerEyes - Sin conexion');
   }

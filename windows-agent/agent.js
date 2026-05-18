@@ -74,21 +74,73 @@ function getOSInfo() {
   return `${os.type()} ${os.release()} | ${os.cpus()[0]?.model || 'Unknown'} | RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`;
 }
 
+// Ping a google.com
+function measurePing() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec('ping -n 1 -w 3000 8.8.8.8', (err, stdout) => {
+      if (err) { resolve(null); return; }
+      // Buscar "time=XXms" o "tiempo=XXms"
+      const match = stdout.match(/(?:time|tiempo)[=<](\d+)/i);
+      resolve(match ? parseInt(match[1]) : null);
+    });
+  });
+}
+
+// Speed test (descarga un archivo y mide velocidad)
+async function measureSpeed() {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    let bytes = 0;
+    // Descargar 5MB de Cloudflare para medir download
+    const url = 'https://speed.cloudflare.com/__down?bytes=5000000';
+    https.get(url, (res) => {
+      res.on('data', (chunk) => { bytes += chunk.length; });
+      res.on('end', () => {
+        const duration = (Date.now() - startTime) / 1000;
+        const mbps = ((bytes * 8) / (1024 * 1024)) / duration;
+        resolve({ download: Math.round(mbps * 100) / 100 });
+      });
+    }).on('error', () => resolve(null));
+
+    // Timeout 15s
+    setTimeout(() => resolve(null), 15000);
+  });
+}
+
 // Heartbeat
 async function sendHeartbeat(config) {
   if (!config.serverUrl || !config.machineKey) return;
   try {
     const publicIP = await getPublicIP();
+    const pingMs = await measurePing();
     const res = await httpRequest(`${config.serverUrl}/api/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
-        public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo()
+        public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
+        ping_ms: pingMs
       })
     });
-    if (res.ok) log(`Heartbeat OK - IP: ${publicIP}`);
-    else log(`Heartbeat ERROR: ${JSON.stringify(res.data)}`);
+    if (res.ok) {
+      log(`Heartbeat OK - IP: ${publicIP} - Ping: ${pingMs || '?'}ms`);
+      // Chequear si el server pide speed test
+      if (res.data && res.data.run_speedtest) {
+        log('Speed test solicitado, ejecutando...');
+        const speed = await measureSpeed();
+        if (speed) {
+          log(`Speed test: Download ${speed.download} Mbps`);
+          await httpRequest(`${config.serverUrl}/api/heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              machine_key: config.machineKey, download_mbps: speed.download
+            })
+          });
+        }
+      }
+    } else log(`Heartbeat ERROR: ${JSON.stringify(res.data)}`);
   } catch (err) { log(`Heartbeat FAILED: ${err.message}`); }
 }
 
