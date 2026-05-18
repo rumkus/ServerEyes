@@ -4,7 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import RNShare from 'react-native-share';
 import messaging from '@react-native-firebase/messaging';
-import { Platform, PermissionsAndroid } from 'react-native';
+import { Platform, PermissionsAndroid, NativeModules } from 'react-native';
+const { WidgetBridge } = NativeModules;
 
 const API_URL = 'https://servereyes-production.up.railway.app';
 const MAX_LOGS = 500;
@@ -193,8 +194,13 @@ export default function App() {
 
   // Guardar token cuando cambia
   const setAndSaveToken = async (t: string | null) => {
-    if (t) await AsyncStorage.setItem('servereyes_token', t);
-    else await AsyncStorage.removeItem('servereyes_token');
+    if (t) {
+      await AsyncStorage.setItem('servereyes_token', t);
+      try { WidgetBridge?.setToken(t); } catch {}
+    } else {
+      await AsyncStorage.removeItem('servereyes_token');
+      try { WidgetBridge?.clearToken(); } catch {}
+    }
     setToken(t);
   };
 
