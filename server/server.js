@@ -348,9 +348,9 @@ app.post('/api/heartbeat', async (req, res) => {
     // Actualizar maquina
     const result = await pool.query(
       `UPDATE machines SET
-        previous_public_ip = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 THEN public_ip ELSE previous_public_ip END,
-        ip_changed_at = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 THEN NOW() ELSE ip_changed_at END,
-        ip_change_seen = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 THEN false ELSE ip_change_seen END,
+        previous_public_ip = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN public_ip ELSE previous_public_ip END,
+        ip_changed_at = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN NOW() ELSE ip_changed_at END,
+        ip_change_seen = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN false ELSE ip_change_seen END,
         public_ip = $1,
         local_ip = $2,
         os_info = $3,
