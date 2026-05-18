@@ -393,8 +393,7 @@ app.post('/api/heartbeat', async (req, res) => {
     }
 
     // Auto-update DNS si cambio la IP y tiene URL configurada
-    const updatedMachine = result.rows[0];
-    if (updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
+    if (updatedMachine && updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
         updatedMachine.previous_public_ip !== public_ip) {
       try {
         const dnsUrl = `${updatedMachine.dns_update_url}&address=${public_ip}`;
