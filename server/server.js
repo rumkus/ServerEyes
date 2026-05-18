@@ -631,7 +631,7 @@ app.get('/api/status', (req, res) => {
 // Historial de uptime de una maquina (ultimos N dias)
 app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
   try {
-    const days = parseInt(req.query.days as string) || 7;
+    const days = parseInt(req.query.days) || 7;
     const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
 
@@ -644,7 +644,7 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
     );
 
     // Calcular uptime por dia
-    const dailyUptime: any = {};
+    const dailyUptime = {};
     const now = new Date();
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(now);
@@ -703,7 +703,7 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
     }
 
     // Calcular porcentajes
-    const result = Object.values(dailyUptime).map((d: any) => {
+    const result = Object.values(dailyUptime).map((d) => {
       const total = d.online_minutes + d.offline_minutes;
       d.percentage = total > 0 ? Math.round((d.online_minutes / total) * 100) : 0;
       return d;
