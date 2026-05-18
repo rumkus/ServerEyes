@@ -675,7 +675,7 @@ export default function App() {
       key={item.id}
       style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
       onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); }}
-      onLongPress={() => deleteMachine(item)}>
+      onLongPress={() => { setShowGroupPicker(item); setNewGroupName(''); }}>
       <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
         <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
         <Text style={{flex: 1, fontSize: 18, fontWeight: '700', color: '#eee'}}>{item.machine_name}</Text>
@@ -772,6 +772,66 @@ export default function App() {
       </View>
     );
   };
+
+  // GROUP PICKER (long-press)
+  if (showGroupPicker) {
+    const pickerMachine = showGroupPicker;
+    const allGroups = [...new Set(machines.map(m => m.grupo).filter(Boolean))];
+    const moveToGroup = (grupo: string | null) => {
+      updateMachine(pickerMachine.id, { grupo });
+      setShowGroupPicker(null);
+    };
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', padding: 24}}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>📁</Text>
+        <Text style={s.title}>Mover a grupo</Text>
+        <Text style={{color: '#888', textAlign: 'center', fontSize: 13, marginBottom: 20}}>{pickerMachine.machine_name}</Text>
+
+        <ScrollView style={{maxHeight: 350}}>
+          {allGroups.map(g => (
+            <TouchableOpacity key={g} onPress={() => moveToGroup(g!)}
+              style={{backgroundColor: pickerMachine.grupo === g ? '#0a3d62' : '#16213e', borderRadius: 12, padding: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', borderWidth: pickerMachine.grupo === g ? 1 : 0, borderColor: '#00d4ff'}}>
+              <Text style={{fontSize: 18, marginRight: 12}}>{pickerMachine.grupo === g ? '📂' : '📁'}</Text>
+              <Text style={{flex: 1, color: '#ddd', fontSize: 16, fontWeight: '600'}}>{g}</Text>
+              {pickerMachine.grupo === g && <Text style={{color: '#00d4ff', fontSize: 12}}>actual</Text>}
+            </TouchableOpacity>
+          ))}
+
+          <View style={{flexDirection: 'row', marginTop: 4, marginBottom: 8}}>
+            <TextInput
+              style={[s.input, {flex: 1, marginBottom: 0, marginRight: 8}]}
+              placeholder="Nuevo grupo..."
+              placeholderTextColor="#666"
+              value={newGroupName}
+              onChangeText={setNewGroupName}
+            />
+            <TouchableOpacity
+              onPress={() => { if (newGroupName.trim()) { moveToGroup(newGroupName.trim()); setNewGroupName(''); } }}
+              style={{backgroundColor: newGroupName.trim() ? '#00d4ff' : '#2a2a4a', borderRadius: 12, paddingHorizontal: 18, justifyContent: 'center'}}>
+              <Text style={{color: newGroupName.trim() ? '#1a1a2e' : '#555', fontWeight: '700', fontSize: 16}}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {pickerMachine.grupo && (
+            <TouchableOpacity onPress={() => moveToGroup(null)}
+              style={{backgroundColor: '#16213e', borderRadius: 12, padding: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center'}}>
+              <Text style={{fontSize: 18, marginRight: 12}}>✖</Text>
+              <Text style={{color: '#888', fontSize: 16}}>Quitar de grupo</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+
+        <TouchableOpacity onPress={() => setShowGroupPicker(null)} style={{marginTop: 16}}>
+          <Text style={s.link}>Cancelar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => { setShowGroupPicker(null); deleteMachine(pickerMachine); }} style={{marginTop: 16}}>
+          <Text style={{color: '#ff5252', textAlign: 'center', fontSize: 14}}>Eliminar maquina</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // EDIT MODAL
   if (editingMachine) {
