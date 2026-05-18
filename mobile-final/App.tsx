@@ -86,6 +86,11 @@ export default function App() {
   const [editDnsHost, setEditDnsHost] = useState('');
   const [editCheckIp, setEditCheckIp] = useState(true);
   const [editNotes, setEditNotes] = useState('');
+  const [editAlertCpu, setEditAlertCpu] = useState('');
+  const [editAlertRam, setEditAlertRam] = useState('');
+  const [editAlertDisk, setEditAlertDisk] = useState('');
+  const [editAlertPing, setEditAlertPing] = useState('');
+  const [editAlertOffline, setEditAlertOffline] = useState(true);
   const [dnsUpdating, setDnsUpdating] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logText, setLogText] = useState('');
@@ -304,7 +309,12 @@ export default function App() {
     updateMachine(editingMachine.id, {
       machine_name: editName, grupo: editGrupo || null,
       dns_update_url: editDnsUrl || null, dns_host: editDnsHost || null,
-      check_ip_change: editCheckIp, notes: editNotes
+      check_ip_change: editCheckIp, notes: editNotes,
+      alert_cpu: editAlertCpu ? parseInt(editAlertCpu) : null,
+      alert_ram: editAlertRam ? parseInt(editAlertRam) : null,
+      alert_disk: editAlertDisk ? parseInt(editAlertDisk) : null,
+      alert_ping: editAlertPing ? parseInt(editAlertPing) : null,
+      alert_offline: editAlertOffline
     });
     setEditingMachine(null);
   };
@@ -754,7 +764,7 @@ export default function App() {
     <TouchableOpacity
       key={item.id}
       style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
-      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); }}
+      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); }}
       onLongPress={() => { setShowGroupPicker(item); setNewGroupName(''); }}>
       <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
         <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
@@ -1008,6 +1018,34 @@ export default function App() {
             <Text style={{color: '#ddd', fontSize: 14, fontWeight: '600'}}>Monitorear cambio de IP publica</Text>
             <Text style={{color: '#666', fontSize: 11, marginTop: 2}}>Desactiva si la IP es fija para evitar alertas innecesarias</Text>
           </View>
+        </TouchableOpacity>
+        <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 10}}>Alertas (push notification)</Text>
+        <View style={{flexDirection: 'row', marginBottom: 8}}>
+          <View style={{flex: 1, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>CPU mayor a %</Text>
+            <TextInput style={[s.input, {marginBottom: 0, textAlign: 'center'}]} value={editAlertCpu} onChangeText={t => setEditAlertCpu(t.replace(/[^0-9]/g, ''))} placeholder="--" placeholderTextColor="#555" keyboardType="number-pad" maxLength={3} />
+          </View>
+          <View style={{flex: 1, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>RAM mayor a %</Text>
+            <TextInput style={[s.input, {marginBottom: 0, textAlign: 'center'}]} value={editAlertRam} onChangeText={t => setEditAlertRam(t.replace(/[^0-9]/g, ''))} placeholder="--" placeholderTextColor="#555" keyboardType="number-pad" maxLength={3} />
+          </View>
+          <View style={{flex: 1, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Disco mayor a %</Text>
+            <TextInput style={[s.input, {marginBottom: 0, textAlign: 'center'}]} value={editAlertDisk} onChangeText={t => setEditAlertDisk(t.replace(/[^0-9]/g, ''))} placeholder="--" placeholderTextColor="#555" keyboardType="number-pad" maxLength={3} />
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Ping mayor a ms</Text>
+            <TextInput style={[s.input, {marginBottom: 0, textAlign: 'center'}]} value={editAlertPing} onChangeText={t => setEditAlertPing(t.replace(/[^0-9]/g, ''))} placeholder="--" placeholderTextColor="#555" keyboardType="number-pad" maxLength={4} />
+          </View>
+        </View>
+        <Text style={{color: '#666', fontSize: 10, marginBottom: 8}}>Deja vacio para desactivar. Cooldown: 5 min entre alertas.</Text>
+        <TouchableOpacity
+          onPress={() => setEditAlertOffline(!editAlertOffline)}
+          style={{flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingVertical: 4}}>
+          <View style={{width: 22, height: 22, borderWidth: 2, borderColor: editAlertOffline ? '#ff9800' : '#555', borderRadius: 4, marginRight: 10, backgroundColor: editAlertOffline ? '#ff9800' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+            {editAlertOffline && <Text style={{color: '#1a1a2e', fontSize: 15, fontWeight: '700'}}>✓</Text>}
+          </View>
+          <Text style={{color: '#ddd', fontSize: 14}}>Notificar cuando se desconecte</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.btn} onPress={saveEdit}>
           <Text style={s.btnTxt}>Guardar</Text>

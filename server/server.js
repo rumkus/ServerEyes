@@ -105,6 +105,13 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS ram_total REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_usage REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_total REAL`).catch(() => {});
+  // Umbrales de alerta (null = desactivado)
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_disk INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ping INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_offline BOOLEAN DEFAULT true`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS last_alert_at TIMESTAMP`).catch(() => {});
 
   console.log('Base de datos inicializada');
 }
@@ -410,6 +417,32 @@ app.post('/api/heartbeat', async (req, res) => {
       }
     }
 
+    // Chequear umbrales de alerta (max 1 alerta cada 5 minutos por maquina)
+    if (updatedMachine && updatedMachine.user_id) {
+      const alertCooldown = updatedMachine.last_alert_at ? (Date.now() - new Date(updatedMachine.last_alert_at).getTime()) > 300000 : true;
+      if (alertCooldown) {
+        const alerts = [];
+        if (updatedMachine.alert_cpu && cpu_usage !== undefined && cpu_usage >= updatedMachine.alert_cpu) {
+          alerts.push(`CPU al ${cpu_usage}% (umbral: ${updatedMachine.alert_cpu}%)`);
+        }
+        if (updatedMachine.alert_ram && ram_usage !== undefined && ram_total) {
+          const ramPct = Math.round((ram_usage / ram_total) * 100);
+          if (ramPct >= updatedMachine.alert_ram) alerts.push(`RAM al ${ramPct}% (umbral: ${updatedMachine.alert_ram}%)`);
+        }
+        if (updatedMachine.alert_disk && disk_usage !== undefined && disk_total) {
+          const diskPct = Math.round((disk_usage / disk_total) * 100);
+          if (diskPct >= updatedMachine.alert_disk) alerts.push(`Disco al ${diskPct}% (umbral: ${updatedMachine.alert_disk}%)`);
+        }
+        if (updatedMachine.alert_ping && ping_ms && ping_ms >= updatedMachine.alert_ping) {
+          alerts.push(`Ping ${ping_ms}ms (umbral: ${updatedMachine.alert_ping}ms)`);
+        }
+        if (alerts.length > 0) {
+          sendPush(updatedMachine.user_id, `⚠️ Alerta: ${updatedMachine.machine_name}`, alerts.join(' | '), { type: 'threshold_alert', machineId: String(updatedMachine.id) });
+          await pool.query('UPDATE machines SET last_alert_at = NOW() WHERE id = $1', [updatedMachine.id]);
+        }
+      }
+    }
+
     // Registrar cambio de IP en historial (siempre, independiente de check_ip_change)
     if (updatedMachine && updatedMachine.previous_public_ip &&
         updatedMachine.previous_public_ip !== public_ip) {
@@ -496,7 +529,7 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 // Actualizar maquina (nombre, grupo, orden)
 app.put('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
-    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes } = req.body;
+    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes, alert_cpu, alert_ram, alert_disk, alert_ping, alert_offline } = req.body;
     const fields = [];
     const values = [];
     let idx = 1;
@@ -508,6 +541,11 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (dns_host !== undefined) { fields.push(`dns_host = $${idx++}`); values.push(dns_host || null); }
     if (check_ip_change !== undefined) { fields.push(`check_ip_change = $${idx++}`); values.push(check_ip_change); }
     if (notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(notes); }
+    if (alert_cpu !== undefined) { fields.push(`alert_cpu = $${idx++}`); values.push(alert_cpu); }
+    if (alert_ram !== undefined) { fields.push(`alert_ram = $${idx++}`); values.push(alert_ram); }
+    if (alert_disk !== undefined) { fields.push(`alert_disk = $${idx++}`); values.push(alert_disk); }
+    if (alert_ping !== undefined) { fields.push(`alert_ping = $${idx++}`); values.push(alert_ping); }
+    if (alert_offline !== undefined) { fields.push(`alert_offline = $${idx++}`); values.push(alert_offline); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
@@ -666,8 +704,10 @@ setInterval(async () => {
           'UPDATE machines SET offline_notified = true WHERE id = $1',
           [machine.id]
         );
-        // Push notification
-        sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) });
+        // Push notification (solo si alert_offline no esta desactivado)
+        if (machine.alert_offline !== false) {
+          sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) });
+        }
       }
     }
   } catch (error) {
