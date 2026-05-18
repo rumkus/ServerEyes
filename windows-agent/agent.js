@@ -74,6 +74,38 @@ function getOSInfo() {
   return `${os.type()} ${os.release()} | ${os.cpus()[0]?.model || 'Unknown'} | RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`;
 }
 
+// Metricas del sistema (CPU, RAM, Disco)
+function getSystemMetrics() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec('wmic cpu get loadpercentage /value', (err, cpuOut) => {
+      let cpuUsage = null;
+      if (!err) {
+        const match = cpuOut.match(/LoadPercentage=(\d+)/);
+        if (match) cpuUsage = parseInt(match[1]);
+      }
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      const ramTotal = Math.round(totalMem / 1024 / 1024 / 1024 * 10) / 10;
+      const ramUsage = Math.round((totalMem - freeMem) / 1024 / 1024 / 1024 * 10) / 10;
+      exec('wmic logicaldisk where "DeviceID=\'C:\'" get Size,FreeSpace /value', (err2, diskOut) => {
+        let diskTotal = null, diskUsage = null;
+        if (!err2) {
+          const freeMatch = diskOut.match(/FreeSpace=(\d+)/);
+          const sizeMatch = diskOut.match(/Size=(\d+)/);
+          if (freeMatch && sizeMatch) {
+            const total = parseInt(sizeMatch[1]);
+            const free = parseInt(freeMatch[1]);
+            diskTotal = Math.round(total / 1024 / 1024 / 1024 * 10) / 10;
+            diskUsage = Math.round((total - free) / 1024 / 1024 / 1024 * 10) / 10;
+          }
+        }
+        resolve({ cpu_usage: cpuUsage, ram_usage: ramUsage, ram_total: ramTotal, disk_usage: diskUsage, disk_total: diskTotal });
+      });
+    });
+  });
+}
+
 // Ping a google.com
 function measurePing() {
   return new Promise((resolve) => {
@@ -114,13 +146,14 @@ async function sendHeartbeat(config) {
   try {
     const publicIP = await getPublicIP();
     const pingMs = await measurePing();
+    const metrics = await getSystemMetrics();
     const res = await httpRequest(`${config.serverUrl}/api/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs
+        ping_ms: pingMs, ...metrics
       })
     });
     if (res.ok) {

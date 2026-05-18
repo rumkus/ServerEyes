@@ -100,6 +100,11 @@ async function initDB() {
   // Agregar columnas nuevas si no existen
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_ip_change BOOLEAN DEFAULT true`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS cpu_usage REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS ram_usage REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS ram_total REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_usage REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_total REAL`).catch(() => {});
 
   console.log('Base de datos inicializada');
 }
@@ -344,7 +349,7 @@ const pendingSpeedTests = new Set();
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
@@ -369,12 +374,17 @@ app.post('/api/heartbeat', async (req, res) => {
         local_ip = $2,
         os_info = $3,
         ping_ms = $4,
+        cpu_usage = COALESCE($6, cpu_usage),
+        ram_usage = COALESCE($7, ram_usage),
+        ram_total = COALESCE($8, ram_total),
+        disk_usage = COALESCE($9, disk_usage),
+        disk_total = COALESCE($10, disk_total),
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
       WHERE machine_key = $5
       RETURNING *`,
-      [public_ip, local_ip, os_info, ping_ms, machine_key]
+      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total]
     );
 
     if (result.rows.length === 0) {

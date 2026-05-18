@@ -793,6 +793,39 @@ export default function App() {
           <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '600'}}>{item.download_mbps} Mbps</Text>
         </View>
       )}
+      {(item.cpu_usage !== null && item.cpu_usage !== undefined) && (
+        <View style={{marginTop: 8}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
+            <Text style={{color: '#888', fontSize: 12}}>CPU</Text>
+            <Text style={{color: item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676', fontSize: 12, fontWeight: '600'}}>{item.cpu_usage}%</Text>
+          </View>
+          <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
+            <View style={{width: `${Math.min(item.cpu_usage, 100)}%`, height: '100%', backgroundColor: item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+          </View>
+        </View>
+      )}
+      {(item.ram_usage !== null && item.ram_usage !== undefined) && (
+        <View style={{marginTop: 6}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
+            <Text style={{color: '#888', fontSize: 12}}>RAM</Text>
+            <Text style={{color: '#aaa', fontSize: 12, fontWeight: '600'}}>{item.ram_usage}/{item.ram_total} GB</Text>
+          </View>
+          <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
+            <View style={{width: `${Math.min((item.ram_usage / item.ram_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.ram_usage / item.ram_total) > 0.9 ? '#ff5252' : (item.ram_usage / item.ram_total) > 0.7 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+          </View>
+        </View>
+      )}
+      {(item.disk_usage !== null && item.disk_usage !== undefined) && (
+        <View style={{marginTop: 6}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
+            <Text style={{color: '#888', fontSize: 12}}>Disco C:</Text>
+            <Text style={{color: '#aaa', fontSize: 12, fontWeight: '600'}}>{item.disk_usage}/{item.disk_total} GB</Text>
+          </View>
+          <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
+            <View style={{width: `${Math.min((item.disk_usage / item.disk_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.disk_usage / item.disk_total) > 0.95 ? '#ff5252' : (item.disk_usage / item.disk_total) > 0.85 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+          </View>
+        </View>
+      )}
       {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
         <View style={{flexDirection: 'row'}}>
