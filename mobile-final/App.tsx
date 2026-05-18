@@ -183,17 +183,27 @@ export default function App() {
     try {
       const path = isSignUp ? '/api/auth/register' : '/api/auth/login';
       const res = await apiRequest(path, { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
-      if (res.ok) {
+      if (res.ok && res.data.token) {
         log.info('Auth exitoso');
         await setAndSaveToken(res.data.token);
-        // loadMachines se dispara via useEffect al cambiar token
+      } else if (res.status === 401) {
+        log.warn('Auth fallido: credenciales incorrectas');
+        setError('Email o contraseña incorrectos');
+      } else if (res.status === 409) {
+        setError('El email ya esta registrado');
+      } else if (res.status === 502 || res.status === 503) {
+        log.error(`Servidor no disponible: ${res.status}`);
+        setError('Servidor no disponible. Intenta en unos minutos.');
+      } else if (res.status === 0) {
+        log.error('Sin conexion a internet');
+        setError('Sin conexion a internet');
       } else {
-        log.warn(`Auth fallido: ${res.data.error}`);
-        setError(res.data.error || 'Error');
+        log.warn(`Auth fallido: ${res.status} ${JSON.stringify(res.data)}`);
+        setError(res.data?.error || `Error del servidor (${res.status})`);
       }
     } catch (err: any) {
       log.error(`Auth error: ${err.message}`);
-      setError('Error de conexion');
+      setError(`Error de conexion: ${err.message}`);
     }
     setLoading(false);
   };

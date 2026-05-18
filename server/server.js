@@ -12,16 +12,24 @@ const JWT_SECRET = process.env.JWT_SECRET || 'servereyes-secret-key-change-in-pr
 let firebaseAdmin = null;
 try {
   const admin = require('firebase-admin');
-  const serviceAccountPath = path.join(__dirname, 'firebase-service-account.json');
   const fs = require('fs');
-  if (fs.existsSync(serviceAccountPath)) {
-    admin.initializeApp({
-      credential: admin.credential.cert(require(serviceAccountPath))
-    });
+  const serviceAccountPath = path.join(__dirname, 'firebase-service-account.json');
+  let serviceAccount = null;
+
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // Desde variable de entorno (Railway)
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else if (fs.existsSync(serviceAccountPath)) {
+    // Desde archivo local
+    serviceAccount = require(serviceAccountPath);
+  }
+
+  if (serviceAccount) {
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
     firebaseAdmin = admin;
     console.log('Firebase Admin inicializado');
   } else {
-    console.log('firebase-service-account.json no encontrado, push deshabilitado');
+    console.log('Firebase no configurado, push deshabilitado');
   }
 } catch (err) {
   console.error('Error inicializando Firebase:', err.message);
