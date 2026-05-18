@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration, Share, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration, Share, ScrollView, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import RNShare from 'react-native-share';
@@ -89,6 +89,18 @@ export default function App() {
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
   const [newGroupName, setNewGroupName] = useState('');
 
+  // Detectar cuando la app vuelve del background
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      log.info(`AppState: ${state}`);
+      if (state === 'active' && tokenRef.current) {
+        log.info('App volvio a primer plano, recargando...');
+        setTimeout(() => loadMachines(), 500);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   // Cargar token guardado al iniciar
   useEffect(() => {
     log.info('App iniciando...');
@@ -158,15 +170,25 @@ export default function App() {
     if (!tokenRef.current) return;
     try {
       const res = await apiRequest('/api/ip-changes', {}, tokenRef.current);
-      if (res.ok && res.data.length > 0) {
+      if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
+        for (const change of res.data) {
+          log.info(`[IP CAMBIO] ${change.machine_name}: ${change.previous_public_ip} -> ${change.public_ip}`);
+        }
+        // Mostrar solo la primera alerta visual
         const change = res.data[0];
-        log.info(`IP cambio: ${change.machine_name} ${change.previous_public_ip} -> ${change.public_ip}`);
-        setIpAlert({ name: change.machine_name, oldIp: change.previous_public_ip, newIp: change.public_ip });
-        try { Vibration.vibrate(500); } catch (e: any) { log.error(`Vibration error: ${e.message}`); }
-        // Ocultar despues de 15 segundos
-        setTimeout(() => setIpAlert(null), 15000);
+        if (change && change.machine_name && change.public_ip) {
+          setIpAlert({
+            name: change.machine_name,
+            oldIp: change.previous_public_ip || '?',
+            newIp: change.public_ip
+          });
+          try { Vibration.vibrate(500); } catch {}
+          setTimeout(() => { try { setIpAlert(null); } catch {} }, 15000);
+        }
       }
-    } catch {}
+    } catch (e: any) {
+      log.error(`checkIPChanges error: ${e.message}`);
+    }
   };
 
   // Auto-refresh cada 10 segundos
