@@ -1,15 +1,61 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration, Share, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = 'https://servereyes-production.up.railway.app';
+const MAX_LOGS = 500;
+
+// Sistema de logs
+let _logs: string[] = [];
+
+async function loadLogs() {
+  try {
+    const saved = await AsyncStorage.getItem('servereyes_logs');
+    if (saved) _logs = JSON.parse(saved);
+  } catch {}
+}
+
+async function saveLogs() {
+  try {
+    await AsyncStorage.setItem('servereyes_logs', JSON.stringify(_logs.slice(-MAX_LOGS)));
+  } catch {}
+}
+
+function addLog(level: string, msg: string) {
+  const ts = new Date().toLocaleString();
+  const line = `[${ts}] [${level}] ${msg}`;
+  _logs.push(line);
+  if (_logs.length > MAX_LOGS) _logs = _logs.slice(-MAX_LOGS);
+  saveLogs();
+  if (__DEV__) console.log(line);
+}
+
+const log = {
+  info: (msg: string) => addLog('INFO', msg),
+  error: (msg: string) => addLog('ERROR', msg),
+  warn: (msg: string) => addLog('WARN', msg),
+};
+
+// Capturar errores globales
+const origConsoleError = console.error;
+console.error = (...args: any[]) => {
+  addLog('CONSOLE_ERROR', args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+  origConsoleError(...args);
+};
 
 async function apiRequest(path: string, options: any = {}, token: string | null = null) {
   const headers: any = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
-  const data = await response.json();
-  return { ok: response.ok, data };
+  try {
+    log.info(`API ${options.method || 'GET'} ${path}`);
+    const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+    const data = await response.json();
+    if (!response.ok) log.warn(`API ${path} -> ${response.status}: ${JSON.stringify(data)}`);
+    return { ok: response.ok, status: response.status, data };
+  } catch (err: any) {
+    log.error(`API ${path} FAILED: ${err.message}`);
+    return { ok: false, status: 0, data: { error: err.message } };
+  }
 }
 
 export default function App() {
@@ -34,6 +80,8 @@ export default function App() {
   const [editDnsUrl, setEditDnsUrl] = useState('');
   const [editDnsHost, setEditDnsHost] = useState('');
   const [dnsUpdating, setDnsUpdating] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logText, setLogText] = useState('');
   const [viewMode, setViewMode] = useState<'all' | 'groups'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
@@ -41,10 +89,22 @@ export default function App() {
 
   // Cargar token guardado al iniciar
   useEffect(() => {
-    AsyncStorage.getItem('servereyes_token').then(saved => {
-      if (saved) setToken(saved);
-      setAppReady(true);
-    }).catch(() => setAppReady(true));
+    log.info('App iniciando...');
+    loadLogs().then(() => {
+      log.info('Logs cargados');
+      AsyncStorage.getItem('servereyes_token').then(saved => {
+        if (saved) {
+          log.info('Token encontrado en storage');
+          setToken(saved);
+        } else {
+          log.info('No hay token guardado');
+        }
+        setAppReady(true);
+      }).catch((err) => {
+        log.error(`Error leyendo token: ${err.message}`);
+        setAppReady(true);
+      });
+    });
   }, []);
 
   // Guardar token cuando cambia
@@ -57,12 +117,22 @@ export default function App() {
   const handleAuth = async () => {
     if (!email.trim() || !password.trim()) { setError('Completa todos los campos'); return; }
     setLoading(true); setError('');
+    log.info(`Auth intento: ${isSignUp ? 'register' : 'login'} ${email.trim()}`);
     try {
       const path = isSignUp ? '/api/auth/register' : '/api/auth/login';
       const res = await apiRequest(path, { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
-      if (res.ok) { setAndSaveToken(res.data.token); loadMachines(res.data.token); }
-      else setError(res.data.error || 'Error');
-    } catch { setError('Error de conexion'); }
+      if (res.ok) {
+        log.info('Auth exitoso');
+        setAndSaveToken(res.data.token);
+        loadMachines(res.data.token);
+      } else {
+        log.warn(`Auth fallido: ${res.data.error}`);
+        setError(res.data.error || 'Error');
+      }
+    } catch (err: any) {
+      log.error(`Auth error: ${err.message}`);
+      setError('Error de conexion');
+    }
     setLoading(false);
   };
 
@@ -72,7 +142,12 @@ export default function App() {
   const loadMachines = async (t?: string) => {
     try {
       const res = await apiRequest('/api/machines', {}, t || tokenRef.current);
-      if (res.ok) setMachines(res.data);
+      if (res.ok) {
+        setMachines(res.data);
+      } else if (res.status === 401) {
+        log.warn('Token expirado, redirigiendo a login');
+        setAndSaveToken(null);
+      }
     } catch {}
   };
 
@@ -215,6 +290,43 @@ export default function App() {
     if (d < 86400) return `${Math.floor(d / 3600)}h`;
     return `${Math.floor(d / 86400)}d`;
   };
+
+  // LOGS
+  if (showLogs) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
+          <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>📋 Logs</Text>
+          <View style={{flexDirection: 'row'}}>
+            <TouchableOpacity
+              onPress={async () => {
+                const text = _logs.slice(-200).join('\n');
+                await Share.share({ message: `ServerEyes Logs\n${new Date().toLocaleString()}\n\n${text}` });
+              }}
+              style={{backgroundColor: '#00d4ff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+              <Text style={{color: '#1a1a2e', fontWeight: '600', fontSize: 13}}>Compartir</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { _logs = []; saveLogs(); setLogText(''); }}
+              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+              <Text style={{color: '#888', fontWeight: '600', fontSize: 13}}>Limpiar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setShowLogs(false)}
+              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
+              <Text style={{color: '#888', fontWeight: '600', fontSize: 13}}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <ScrollView style={{flex: 1, padding: 12}}>
+          <Text style={{color: '#aaa', fontSize: 11, fontFamily: 'monospace', lineHeight: 18}}>
+            {_logs.slice(-200).reverse().join('\n') || 'Sin logs'}
+          </Text>
+        </ScrollView>
+      </View>
+    );
+  }
 
   // Pantalla de carga
   if (!appReady) {
@@ -450,7 +562,12 @@ export default function App() {
             style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
             <Text style={{color: '#00d4ff', fontSize: 13}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.logoutBtn} onPress={() => setAndSaveToken(null)}>
+          <TouchableOpacity
+            onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}
+            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+            <Text style={{color: '#888', fontSize: 13}}>📋</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.logoutBtn} onPress={() => { log.info('Logout'); setAndSaveToken(null); }}>
             <Text style={{color: '#ff5252', fontWeight: '600'}}>Salir</Text>
           </TouchableOpacity>
         </View>
