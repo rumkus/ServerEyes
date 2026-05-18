@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ServerEyes - Dashboard</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; }
+
+/* Login */
+.login-wrap { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+.login-box { background: #16213e; border-radius: 16px; padding: 40px; width: 380px; max-width: 90vw; }
+.login-box h1 { color: #00d4ff; text-align: center; margin-bottom: 8px; font-size: 28px; }
+.login-box .sub { color: #888; text-align: center; margin-bottom: 24px; font-size: 14px; }
+.login-box input { width: 100%; background: #1a1a2e; border: 2px solid #2a2a4a; border-radius: 10px; padding: 12px 14px; color: #eee; font-size: 15px; margin-bottom: 12px; outline: none; }
+.login-box input:focus { border-color: #00d4ff; }
+.login-box .btn { width: 100%; background: #00d4ff; color: #1a1a2e; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; }
+.login-box .btn:hover { background: #00b8d9; }
+.login-box .err { color: #ff5252; text-align: center; font-size: 13px; margin-top: 8px; }
+
+/* Header */
+.header { background: #16213e; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+.header h1 { color: #00d4ff; font-size: 22px; }
+.header .info { color: #888; font-size: 13px; }
+.header .actions { display: flex; gap: 10px; align-items: center; }
+.header .btn-sm { background: #2a2a4a; color: #888; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.header .btn-sm:hover { background: #3a3a5a; color: #eee; }
+.header .btn-logout { color: #ff5252; }
+
+/* Stats bar */
+.stats { display: flex; gap: 16px; padding: 16px 24px; flex-wrap: wrap; }
+.stat-card { background: #16213e; border-radius: 12px; padding: 16px 20px; flex: 1; min-width: 140px; }
+.stat-card .num { font-size: 32px; font-weight: 800; }
+.stat-card .label { color: #888; font-size: 13px; margin-top: 2px; }
+.stat-online .num { color: #00e676; }
+.stat-offline .num { color: #ff5252; }
+.stat-total .num { color: #00d4ff; }
+
+/* Filter */
+.filter-bar { padding: 0 24px 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.filter-bar input { background: #16213e; border: 2px solid #2a2a4a; border-radius: 8px; padding: 8px 14px; color: #eee; font-size: 14px; outline: none; width: 260px; }
+.filter-bar input:focus { border-color: #00d4ff; }
+.filter-btn { background: #2a2a4a; color: #888; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.filter-btn.active { background: #00d4ff; color: #1a1a2e; }
+.filter-btn:hover { background: #3a3a5a; color: #eee; }
+.filter-btn.active:hover { background: #00b8d9; }
+
+/* Grid */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; padding: 0 24px 24px; }
+.card { border-radius: 14px; padding: 18px; border: 1px solid; transition: transform 0.1s; }
+.card:hover { transform: translateY(-2px); }
+.card.online { background: #0d2818; border-color: #1a5c2e; }
+.card.offline { background: #2d1117; border-color: #5c1a1a; }
+
+.card-header { display: flex; align-items: center; margin-bottom: 10px; }
+.card-dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 10px; }
+.card-dot.on { background: #00e676; }
+.card-dot.off { background: #ff5252; }
+.card-name { flex: 1; font-size: 17px; font-weight: 700; }
+.card-status { font-size: 12px; font-weight: 700; }
+.card-status.on { color: #00e676; }
+.card-status.off { color: #ff5252; }
+
+.card-tags { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+.tag-group { background: #0a3d62; color: #00d4ff; }
+.tag-dns { background: #3d2e00; color: #ff9800; }
+.tag-notes { background: #2a2a4a; color: #aaa; }
+.tag-noip { background: #2a2a4a; color: #666; }
+
+.card-row { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
+.card-row .lbl { color: #888; }
+.card-row .val { font-weight: 600; }
+
+.card-ips { margin-bottom: 4px; font-size: 13px; }
+.card-ips .lbl { color: #888; margin-bottom: 2px; }
+.card-ips .ip { color: #ddd; font-weight: 600; padding-left: 8px; }
+
+/* Progress bars */
+.bar-wrap { margin-top: 6px; }
+.bar-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+.bar-header .lbl { color: #888; }
+.bar-header .val { font-weight: 600; }
+.bar { height: 6px; background: #2a2a4a; border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.bar-green { background: #00e676; }
+.bar-orange { background: #ff9800; }
+.bar-red { background: #ff5252; }
+
+.card-os { color: #555; font-size: 11px; margin-top: 8px; }
+
+/* Group headers */
+.group-header { padding: 12px 24px; display: flex; align-items: center; cursor: pointer; }
+.group-header:hover { background: #16213e33; }
+.group-header .icon { font-size: 18px; margin-right: 10px; }
+.group-header .name { font-size: 17px; font-weight: 700; color: #00d4ff; flex: 1; }
+.group-header .count { color: #888; font-size: 13px; margin-right: 10px; }
+.group-header .arrow { color: #555; font-size: 14px; }
+
+.no-group-label { color: #555; font-size: 13px; padding: 12px 24px 4px; }
+
+/* Responsive */
+@media (max-width: 500px) {
+  .grid { grid-template-columns: 1fr; padding: 0 12px 12px; }
+  .header { padding: 12px 16px; }
+  .stats { padding: 12px 16px; }
+  .filter-bar { padding: 0 16px 12px; }
+  .filter-bar input { width: 100%; }
+}
+
+/* Auto-refresh indicator */
+.refresh-dot { width: 8px; height: 8px; border-radius: 50%; background: #00e676; display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script>
+const API = window.location.origin;
+let token = localStorage.getItem('se_token');
+let machines = [];
+let filter = '';
+let statusFilter = 'all';
+let viewMode = 'list'; // list | groups
+let expandedGroups = new Set();
+let refreshInterval = null;
+
+// API helper
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...opts.headers };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  try {
+    const res = await fetch(API + path, { ...opts, headers });
+    const data = await res.json();
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: e.message } };
+  }
+}
+
+// Time since
+function timeSince(ts) {
+  if (!ts) return 'Nunca';
+  const d = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (d < 60) return d + 's';
+  if (d < 3600) return Math.floor(d / 60) + 'min';
+  if (d < 86400) return Math.floor(d / 3600) + 'h';
+  return Math.floor(d / 86400) + 'd';
+}
+
+// Bar color
+function barColor(pct, thresholds) {
+  const [warn, crit] = thresholds || [70, 90];
+  if (pct >= crit) return 'bar-red';
+  if (pct >= warn) return 'bar-orange';
+  return 'bar-green';
+}
+
+function textColor(pct, thresholds) {
+  const [warn, crit] = thresholds || [70, 90];
+  if (pct >= crit) return '#ff5252';
+  if (pct >= warn) return '#ff9800';
+  return '#00e676';
+}
+
+// Render login
+function renderLogin(err) {
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap">
+      <div class="login-box">
+        <h1>ServerEyes</h1>
+        <p class="sub">Dashboard de monitoreo</p>
+        <input type="email" id="login-email" placeholder="Email" />
+        <input type="password" id="login-pass" placeholder="Contrasena" />
+        ${err ? '<p class="err">' + err + '</p>' : ''}
+        <button class="btn" onclick="doLogin()">Iniciar sesion</button>
+      </div>
+    </div>`;
+  document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  if (!email || !pass) { renderLogin('Completa todos los campos'); return; }
+  const res = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password: pass }) });
+  if (res.ok && res.data.token) {
+    token = res.data.token;
+    localStorage.setItem('se_token', token);
+    startDashboard();
+  } else {
+    renderLogin(res.data?.error || 'Error de conexion');
+  }
+}
+
+function logout() {
+  token = null;
+  localStorage.removeItem('se_token');
+  if (refreshInterval) clearInterval(refreshInterval);
+  renderLogin();
+}
+
+// Filtered machines
+function getFiltered() {
+  let list = machines;
+  if (statusFilter === 'online') list = list.filter(m => m.is_online);
+  if (statusFilter === 'offline') list = list.filter(m => !m.is_online);
+  if (filter) {
+    const f = filter.toLowerCase();
+    list = list.filter(m =>
+      (m.machine_name || '').toLowerCase().includes(f) ||
+      (m.public_ip || '').includes(f) ||
+      (m.local_ip || '').toLowerCase().includes(f) ||
+      (m.grupo || '').toLowerCase().includes(f) ||
+      (m.notes || '').toLowerCase().includes(f)
+    );
+  }
+  return list;
+}
+
+// Render card
+function renderCard(m) {
+  const isOn = m.is_online;
+  let tags = '';
+  if (m.grupo) tags += `<span class="tag tag-group">&#128193; ${m.grupo}</span>`;
+  if (m.dns_host) tags += `<span class="tag tag-dns">&#127760; ${m.dns_host}</span>`;
+  if (m.notes) tags += `<span class="tag tag-notes">&#128221; ${m.notes.substring(0, 40)}${m.notes.length > 40 ? '...' : ''}</span>`;
+  if (m.check_ip_change === false) tags += `<span class="tag tag-noip">&#128277; IP no monitoreada</span>`;
+
+  const localIps = (m.local_ip || '---').split(' | ').map(ip => `<div class="ip">${ip.trim()}</div>`).join('');
+
+  let bars = '';
+  if (m.cpu_usage !== null && m.cpu_usage !== undefined) {
+    const pct = m.cpu_usage;
+    bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">CPU</span><span class="val" style="color:${textColor(pct)}">${pct}%</span></div><div class="bar"><div class="bar-fill ${barColor(pct)}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
+  }
+  if (m.ram_usage !== null && m.ram_usage !== undefined && m.ram_total) {
+    const pct = Math.round((m.ram_usage / m.ram_total) * 100);
+    bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">RAM</span><span class="val" style="color:${textColor(pct)}">${m.ram_usage}/${m.ram_total} GB</span></div><div class="bar"><div class="bar-fill ${barColor(pct)}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
+  }
+  if (m.disk_usage !== null && m.disk_usage !== undefined && m.disk_total) {
+    const pct = Math.round((m.disk_usage / m.disk_total) * 100);
+    bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">Disco C:</span><span class="val" style="color:${textColor(pct, [85, 95])}">${m.disk_usage}/${m.disk_total} GB</span></div><div class="bar"><div class="bar-fill ${barColor(pct, [85, 95])}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
+  }
+
+  const pingColor = m.ping_ms ? (m.ping_ms < 50 ? '#00e676' : m.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
+
+  return `
+    <div class="card ${isOn ? 'online' : 'offline'}">
+      <div class="card-header">
+        <div class="card-dot ${isOn ? 'on' : 'off'}"></div>
+        <span class="card-name">${m.machine_name}</span>
+        <span class="card-status ${isOn ? 'on' : 'off'}">${isOn ? 'ONLINE' : 'OFFLINE'}</span>
+      </div>
+      ${tags ? '<div class="card-tags">' + tags + '</div>' : ''}
+      <div class="card-row"><span class="lbl">IP Publica:</span><span class="val">${m.public_ip || '---'}</span></div>
+      <div class="card-ips"><div class="lbl">IP Local:</div>${localIps}</div>
+      <div class="card-row"><span class="lbl">Heartbeat:</span><span class="val">${timeSince(m.last_heartbeat)}</span></div>
+      <div class="card-row"><span class="lbl">Ping:</span><span class="val" style="color:${pingColor}">${m.ping_ms ? m.ping_ms + 'ms' : '---'}</span></div>
+      ${m.download_mbps ? '<div class="card-row"><span class="lbl">Velocidad:</span><span class="val" style="color:#00d4ff">' + m.download_mbps + ' Mbps</span></div>' : ''}
+      ${bars}
+      ${m.os_info ? '<div class="card-os">' + m.os_info + '</div>' : ''}
+    </div>`;
+}
+
+// Render group view
+function renderGroupView(list) {
+  const groups = {};
+  const noGroup = [];
+  list.forEach(m => {
+    if (m.grupo) { if (!groups[m.grupo]) groups[m.grupo] = []; groups[m.grupo].push(m); }
+    else noGroup.push(m);
+  });
+  const groupNames = Object.keys(groups).sort();
+
+  let html = '';
+  for (const g of groupNames) {
+    const expanded = expandedGroups.has(g);
+    html += `<div class="group-header" onclick="toggleGroup('${g.replace(/'/g, "\\'")}')">
+      <span class="icon">${expanded ? '&#128194;' : '&#128193;'}</span>
+      <span class="name">${g}</span>
+      <span class="count">${groups[g].length} maq.</span>
+      <span class="arrow">${expanded ? '&#9660;' : '&#9654;'}</span>
+    </div>`;
+    if (expanded) {
+      html += '<div class="grid">' + groups[g].map(renderCard).join('') + '</div>';
+    }
+  }
+  if (noGroup.length > 0) {
+    if (groupNames.length > 0) html += '<div class="no-group-label">Sin grupo</div>';
+    html += '<div class="grid">' + noGroup.map(renderCard).join('') + '</div>';
+  }
+  return html;
+}
+
+function toggleGroup(g) {
+  if (expandedGroups.has(g)) expandedGroups.delete(g);
+  else expandedGroups.add(g);
+  renderDashboard();
+}
+
+// Main render
+function renderDashboard() {
+  const list = getFiltered();
+  const online = machines.filter(m => m.is_online).length;
+  const offline = machines.length - online;
+
+  const content = viewMode === 'groups'
+    ? renderGroupView(list)
+    : '<div class="grid">' + list.map(renderCard).join('') + '</div>';
+
+  document.getElementById('app').innerHTML = `
+    <div class="header">
+      <div>
+        <h1>&#128065; ServerEyes</h1>
+        <span class="info"><span class="refresh-dot"></span>Auto-refresh 10s</span>
+      </div>
+      <div class="actions">
+        <button class="btn-sm" onclick="toggleView()">${viewMode === 'groups' ? '&#128203; Lista' : '&#128193; Grupos'}</button>
+        <button class="btn-sm btn-logout" onclick="logout()">Salir</button>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat-card stat-total"><div class="num">${machines.length}</div><div class="label">Total</div></div>
+      <div class="stat-card stat-online"><div class="num">${online}</div><div class="label">Online</div></div>
+      <div class="stat-card stat-offline"><div class="num">${offline}</div><div class="label">Offline</div></div>
+    </div>
+    <div class="filter-bar">
+      <input type="text" placeholder="Buscar por nombre, IP, grupo, notas..." value="${filter}" oninput="setFilter(this.value)" />
+      <button class="filter-btn ${statusFilter === 'all' ? 'active' : ''}" onclick="setStatus('all')">Todas</button>
+      <button class="filter-btn ${statusFilter === 'online' ? 'active' : ''}" onclick="setStatus('online')">Online</button>
+      <button class="filter-btn ${statusFilter === 'offline' ? 'active' : ''}" onclick="setStatus('offline')">Offline</button>
+    </div>
+    ${list.length === 0 ? '<div style="text-align:center;padding:80px 0"><div style="font-size:60px">&#128421;</div><div style="color:#888;font-size:18px;margin-top:16px">No hay maquinas</div></div>' : content}
+  `;
+}
+
+function setFilter(v) { filter = v; renderDashboard(); }
+function setStatus(s) { statusFilter = s; renderDashboard(); }
+function toggleView() { viewMode = viewMode === 'groups' ? 'list' : 'groups'; renderDashboard(); }
+
+// Load machines
+async function loadMachines() {
+  const res = await api('/api/machines');
+  if (res.ok) {
+    machines = res.data;
+    renderDashboard();
+  } else if (res.status === 401) {
+    logout();
+  }
+}
+
+// Start
+async function startDashboard() {
+  await loadMachines();
+  if (refreshInterval) clearInterval(refreshInterval);
+  refreshInterval = setInterval(loadMachines, 10000);
+}
+
+// Init
+if (token) {
+  startDashboard();
+} else {
+  renderLogin();
+}
+</script>
+</body>
+</html>
