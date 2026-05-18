@@ -123,8 +123,8 @@ export default function App() {
       const res = await apiRequest(path, { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
       if (res.ok) {
         log.info('Auth exitoso');
-        setAndSaveToken(res.data.token);
-        loadMachines(res.data.token);
+        await setAndSaveToken(res.data.token);
+        // loadMachines se dispara via useEffect al cambiar token
       } else {
         log.warn(`Auth fallido: ${res.data.error}`);
         setError(res.data.error || 'Error');
@@ -169,10 +169,17 @@ export default function App() {
   // Auto-refresh cada 10 segundos
   useEffect(() => {
     if (!token) return;
-    loadMachines();
-    checkIPChanges();
-    const interval = setInterval(() => { loadMachines(); checkIPChanges(); }, 10000);
-    return () => clearInterval(interval);
+    log.info('Token activo, iniciando refresh loop');
+    // Delay inicial para que la UI se estabilice
+    const timeout = setTimeout(() => {
+      loadMachines();
+      checkIPChanges();
+    }, 1000);
+    const interval = setInterval(() => {
+      loadMachines();
+      checkIPChanges();
+    }, 10000);
+    return () => { clearTimeout(timeout); clearInterval(interval); };
   }, [token]);
 
   const addMachine = async () => {
