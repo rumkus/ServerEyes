@@ -158,8 +158,9 @@ export default function App() {
       const res = await apiRequest('/api/ip-changes', {}, tokenRef.current);
       if (res.ok && res.data.length > 0) {
         const change = res.data[0];
+        log.info(`IP cambio: ${change.machine_name} ${change.previous_public_ip} -> ${change.public_ip}`);
         setIpAlert({ name: change.machine_name, oldIp: change.previous_public_ip, newIp: change.public_ip });
-        Vibration.vibrate([0, 300, 200, 300]); // Patron de vibracion
+        try { Vibration.vibrate(500); } catch (e: any) { log.error(`Vibration error: ${e.message}`); }
         // Ocultar despues de 15 segundos
         setTimeout(() => setIpAlert(null), 15000);
       }
@@ -167,18 +168,30 @@ export default function App() {
   };
 
   // Auto-refresh cada 10 segundos
+  const firstLoadDone = useRef(false);
   useEffect(() => {
-    if (!token) return;
+    if (!token) { firstLoadDone.current = false; return; }
     log.info('Token activo, iniciando refresh loop');
-    // Delay inicial para que la UI se estabilice
-    const timeout = setTimeout(() => {
-      loadMachines();
-      checkIPChanges();
-    }, 1000);
+
+    // Primera carga: solo maquinas, limpiar alertas de IP pendientes
+    const timeout = setTimeout(async () => {
+      try {
+        await loadMachines();
+        // Consumir IP changes pendientes sin mostrar alerta (evita crash post-login)
+        await apiRequest('/api/ip-changes', {}, token);
+        log.info('Primera carga completada');
+      } catch (e: any) { log.error(`Primera carga error: ${e.message}`); }
+      firstLoadDone.current = true;
+    }, 1500);
+
+    // Refresh periodico: maquinas + IP changes (solo despues de la primera carga)
     const interval = setInterval(() => {
       loadMachines();
-      checkIPChanges();
+      if (firstLoadDone.current) {
+        try { checkIPChanges(); } catch (e: any) { log.error(`checkIP error: ${e.message}`); }
+      }
     }, 10000);
+
     return () => { clearTimeout(timeout); clearInterval(interval); };
   }, [token]);
 
