@@ -70,6 +70,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [machines, setMachines] = useState<any[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
@@ -86,6 +87,10 @@ export default function App() {
   const [dnsUpdating, setDnsUpdating] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logText, setLogText] = useState('');
+  const [showChangePass, setShowChangePass] = useState(false);
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [changePassError, setChangePassError] = useState('');
   const [uptimeMachine, setUptimeMachine] = useState<any>(null);
   const [uptimeData, setUptimeData] = useState<any[]>([]);
   const [uptimeDays, setUptimeDays] = useState(7);
@@ -395,6 +400,38 @@ export default function App() {
     return `${Math.floor(d / 86400)}d`;
   };
 
+  // CAMBIAR CONTRASEÑA
+  if (showChangePass) {
+    return (
+      <View style={s.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>🔒</Text>
+        <Text style={s.title}>Cambiar contraseña</Text>
+        <Text style={[s.sub, {marginBottom: 16}]}></Text>
+        <TextInput style={s.input} placeholder="Contraseña actual" placeholderTextColor="#666" value={currentPass} onChangeText={setCurrentPass} secureTextEntry />
+        <TextInput style={s.input} placeholder="Nueva contraseña (min 6 caracteres)" placeholderTextColor="#666" value={newPass} onChangeText={setNewPass} secureTextEntry />
+        {changePassError ? <Text style={s.err}>{changePassError}</Text> : null}
+        <TouchableOpacity style={s.btn} onPress={async () => {
+          setChangePassError('');
+          const res = await apiRequest('/api/auth/change-password', {
+            method: 'POST', body: JSON.stringify({ current_password: currentPass, new_password: newPass })
+          }, token);
+          if (res.ok) {
+            Alert.alert('Listo', 'Contraseña actualizada');
+            setShowChangePass(false); setCurrentPass(''); setNewPass('');
+          } else {
+            setChangePassError(res.data.error || 'Error');
+          }
+        }}>
+          <Text style={s.btnTxt}>Guardar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => { setShowChangePass(false); setCurrentPass(''); setNewPass(''); setChangePassError(''); }}>
+          <Text style={s.link}>Cancelar</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   // UPTIME
   if (uptimeMachine) {
     const avgUptime = uptimeData.length > 0
@@ -543,7 +580,13 @@ export default function App() {
         <Text style={s.title}>ServerEyes</Text>
         <Text style={s.sub}>Monitoreo de maquinas</Text>
         <TextInput style={s.input} placeholder="Email" placeholderTextColor="#666" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
-        <TextInput style={s.input} placeholder="Contraseña" placeholderTextColor="#666" value={password} onChangeText={setPassword} secureTextEntry />
+        <TextInput style={s.input} placeholder="Contraseña" placeholderTextColor="#666" value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
+        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12}}>
+          <View style={{width: 20, height: 20, borderWidth: 2, borderColor: showPassword ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 8, backgroundColor: showPassword ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+            {showPassword && <Text style={{color: '#1a1a2e', fontSize: 14, fontWeight: '700'}}>✓</Text>}
+          </View>
+          <Text style={{color: '#888', fontSize: 13}}>Ver contraseña</Text>
+        </TouchableOpacity>
         {error ? <Text style={s.err}>{error}</Text> : null}
         <TouchableOpacity style={s.btn} onPress={handleAuth} disabled={loading}>
           {loading ? <ActivityIndicator color="#1a1a2e" /> : <Text style={s.btnTxt}>{isSignUp ? 'Crear cuenta' : 'Iniciar sesion'}</Text>}
@@ -786,6 +829,11 @@ export default function App() {
             onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}
             style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
             <Text style={{color: '#888', fontSize: 13}}>📋</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setShowChangePass(true)}
+            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+            <Text style={{color: '#888', fontSize: 13}}>🔒</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.logoutBtn} onPress={() => { log.info('Logout'); setAndSaveToken(null); }}>
             <Text style={{color: '#ff5252', fontWeight: '600'}}>Salir</Text>
