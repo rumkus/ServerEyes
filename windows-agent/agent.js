@@ -289,35 +289,67 @@ function startPairing(config) {
 
 // Instalar como tarea programada (corre sin ventana al iniciar Windows)
 function install() {
+  const exeName = path.basename(EXE_PATH);
+
   // Crear VBS que lanza el exe oculto
   const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False\r\n`;
   fs.writeFileSync(VBS_FILE, vbsContent);
 
+  // Crear VBS watchdog que chequea si el proceso existe y lo levanta si no
+  const watchdogVbs = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
+  const watchdogContent = [
+    'Set objWMI = GetObject("winmgmts:\\\\.\\.\\root\\cimv2")',
+    `Set colProcs = objWMI.ExecQuery("Select * from Win32_Process Where Name = '${exeName}'")`,
+    'If colProcs.Count = 0 Then',
+    '  Set WshShell = CreateObject("WScript.Shell")',
+    `  WshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False`,
+    'End If',
+  ].join('\r\n') + '\r\n';
+  fs.writeFileSync(watchdogVbs, watchdogContent);
+
   try {
+    // Tarea principal: arrancar al iniciar sesion
     execSync(`schtasks /Create /TN "${TASK_NAME}" /TR "wscript.exe \\"${VBS_FILE}\\"" /SC ONLOGON /RL HIGHEST /F`, { stdio: 'pipe' });
     console.log('\nInstalado como tarea programada.');
     console.log('El agente se ejecutara automaticamente al iniciar Windows (sin ventana).');
-    console.log(`\nPara desinstalar: ${path.basename(EXE_PATH)} --uninstall`);
   } catch (err) {
-    // Intentar sin /RL HIGHEST si falla
     try {
       execSync(`schtasks /Create /TN "${TASK_NAME}" /TR "wscript.exe \\"${VBS_FILE}\\"" /SC ONLOGON /F`, { stdio: 'pipe' });
       console.log('\nInstalado como tarea programada.');
-      console.log('El agente se ejecutara automaticamente al iniciar Windows (sin ventana).');
     } catch {
-      console.log('Error al instalar tarea. Ejecuta como Administrador.');
+      console.log('Error al instalar tarea principal. Ejecuta como Administrador.');
     }
   }
+
+  try {
+    // Tarea watchdog: cada 20 segundos chequea si esta corriendo, si no lo levanta
+    // schtasks no soporta intervalos menores a 1 minuto, asi que usamos /RI 1 (repetir cada 1 min)
+    // y dentro del VBS ya chequea si el proceso existe
+    execSync(`schtasks /Create /TN "${TASK_NAME} Watchdog" /TR "wscript.exe \\"${watchdogVbs}\\"" /SC MINUTE /MO 1 /RL HIGHEST /F`, { stdio: 'pipe' });
+    console.log('Watchdog instalado (chequea cada 1 minuto si el agente esta corriendo).');
+  } catch {
+    try {
+      execSync(`schtasks /Create /TN "${TASK_NAME} Watchdog" /TR "wscript.exe \\"${watchdogVbs}\\"" /SC MINUTE /MO 1 /F`, { stdio: 'pipe' });
+      console.log('Watchdog instalado (chequea cada 1 minuto si el agente esta corriendo).');
+    } catch {
+      console.log('No se pudo instalar el watchdog. El agente igual arrancara al iniciar Windows.');
+    }
+  }
+
+  console.log(`\nPara desinstalar: ${exeName} --uninstall`);
 }
 
 function uninstall() {
+  const watchdogVbs = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
   try {
     execSync(`schtasks /Delete /TN "${TASK_NAME}" /F`, { stdio: 'pipe' });
-    if (fs.existsSync(VBS_FILE)) fs.unlinkSync(VBS_FILE);
-    console.log('Tarea programada eliminada.');
-  } catch {
-    console.log('No se encontro la tarea o ya fue eliminada.');
-  }
+  } catch {}
+  try {
+    execSync(`schtasks /Delete /TN "${TASK_NAME} Watchdog" /F`, { stdio: 'pipe' });
+  } catch {}
+  try { if (fs.existsSync(VBS_FILE)) fs.unlinkSync(VBS_FILE); } catch {}
+  try { if (fs.existsSync(watchdogVbs)) fs.unlinkSync(watchdogVbs); } catch {}
+  console.log('Tareas programadas y archivos auxiliares eliminados.');
 }
 
 // Setup interactivo
