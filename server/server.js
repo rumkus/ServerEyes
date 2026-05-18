@@ -141,6 +141,46 @@ async function initDB() {
     )
   `);
 
+  // Organizacion / empresa
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS organizations (
+      id SERIAL PRIMARY KEY,
+      owner_id INTEGER REFERENCES users(id),
+      name VARCHAR(255) NOT NULL,
+      address TEXT DEFAULT '',
+      phone VARCHAR(50) DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'owner'`).catch(() => {});
+
+  // Invitaciones
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS invitations (
+      id SERIAL PRIMARY KEY,
+      organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+      invited_by INTEGER REFERENCES users(id),
+      email VARCHAR(255) NOT NULL,
+      code VARCHAR(10) UNIQUE NOT NULL,
+      status VARCHAR(20) DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  // Compartir maquinas con tecnicos
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS machine_shares (
+      id SERIAL PRIMARY KEY,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      shared_by INTEGER REFERENCES users(id),
+      can_edit BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(machine_id, user_id)
+    )
+  `);
+
   console.log('Base de datos inicializada');
 }
 
@@ -182,7 +222,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre }, token });
+    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner' }, token });
   } catch (error) {
     console.error('Error en login:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -238,6 +278,182 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
     res.json({ message: 'Contraseña actualizada' });
   } catch (error) {
     console.error('Error al cambiar contraseña:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============== ORGANIZACION Y EQUIPO ==============
+
+// Crear o actualizar organizacion
+app.post('/api/organization', authenticateToken, async (req, res) => {
+  try {
+    const { name, address, phone } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nombre de empresa requerido' });
+
+    // Chequear si ya tiene org
+    const existing = await pool.query('SELECT id FROM organizations WHERE owner_id = $1', [req.user.id]);
+    if (existing.rows.length > 0) {
+      await pool.query('UPDATE organizations SET name = $1, address = $2, phone = $3 WHERE owner_id = $4', [name, address || '', phone || '', req.user.id]);
+      res.json({ message: 'Organizacion actualizada', id: existing.rows[0].id });
+    } else {
+      const result = await pool.query(
+        'INSERT INTO organizations (owner_id, name, address, phone) VALUES ($1, $2, $3, $4) RETURNING id',
+        [req.user.id, name, address || '', phone || '']
+      );
+      await pool.query('UPDATE users SET organization_id = $1, role = $2 WHERE id = $3', [result.rows[0].id, 'owner', req.user.id]);
+      res.json({ message: 'Organizacion creada', id: result.rows[0].id });
+    }
+  } catch (error) {
+    console.error('Error en organizacion:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Obtener mi organizacion y equipo
+app.get('/api/organization', authenticateToken, async (req, res) => {
+  try {
+    // Buscar org donde soy owner
+    let org = await pool.query('SELECT * FROM organizations WHERE owner_id = $1', [req.user.id]);
+    // Si no soy owner, buscar por organization_id
+    if (org.rows.length === 0) {
+      const user = await pool.query('SELECT organization_id FROM users WHERE id = $1', [req.user.id]);
+      if (user.rows[0]?.organization_id) {
+        org = await pool.query('SELECT * FROM organizations WHERE id = $1', [user.rows[0].organization_id]);
+      }
+    }
+    if (org.rows.length === 0) return res.json({ organization: null, team: [], invitations: [] });
+
+    const orgId = org.rows[0].id;
+    const team = await pool.query(
+      'SELECT id, email, nombre, role, created_at FROM users WHERE organization_id = $1 ORDER BY role, id',
+      [orgId]
+    );
+    const invitations = await pool.query(
+      'SELECT i.*, u.email as invited_by_email FROM invitations i LEFT JOIN users u ON i.invited_by = u.id WHERE i.organization_id = $1 ORDER BY i.created_at DESC',
+      [orgId]
+    );
+    res.json({ organization: org.rows[0], team: team.rows, invitations: invitations.rows });
+  } catch (error) {
+    console.error('Error obteniendo organizacion:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Invitar tecnico
+app.post('/api/organization/invite', authenticateToken, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requerido' });
+
+    const org = await pool.query('SELECT id FROM organizations WHERE owner_id = $1', [req.user.id]);
+    if (org.rows.length === 0) return res.status(400).json({ error: 'Primero crea tu organizacion' });
+
+    // Chequear si ya fue invitado
+    const existing = await pool.query('SELECT id FROM invitations WHERE organization_id = $1 AND email = $2 AND status = $3', [org.rows[0].id, email, 'pending']);
+    if (existing.rows.length > 0) return res.status(409).json({ error: 'Ya hay una invitacion pendiente para ese email' });
+
+    const code = require('crypto').randomBytes(4).toString('hex').toUpperCase();
+    await pool.query(
+      'INSERT INTO invitations (organization_id, invited_by, email, code) VALUES ($1, $2, $3, $4)',
+      [org.rows[0].id, req.user.id, email, code]
+    );
+    res.json({ message: 'Invitacion creada', code });
+  } catch (error) {
+    console.error('Error invitando:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Aceptar invitacion (el tecnico usa el codigo)
+app.post('/api/organization/join', authenticateToken, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'Codigo requerido' });
+
+    const inv = await pool.query('SELECT * FROM invitations WHERE code = $1 AND status = $2', [code.toUpperCase(), 'pending']);
+    if (inv.rows.length === 0) return res.status(404).json({ error: 'Codigo invalido o ya fue usado' });
+
+    const invitation = inv.rows[0];
+    // Verificar que el email coincide
+    const user = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
+    if (user.rows[0].email !== invitation.email) {
+      return res.status(403).json({ error: 'Este codigo es para ' + invitation.email });
+    }
+
+    await pool.query('UPDATE users SET organization_id = $1, role = $2 WHERE id = $3', [invitation.organization_id, 'technician', req.user.id]);
+    await pool.query('UPDATE invitations SET status = $1 WHERE id = $2', ['accepted', invitation.id]);
+
+    const org = await pool.query('SELECT name FROM organizations WHERE id = $1', [invitation.organization_id]);
+    res.json({ message: 'Te uniste a ' + org.rows[0].name, organization_id: invitation.organization_id });
+  } catch (error) {
+    console.error('Error aceptando invitacion:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Cancelar invitacion
+app.delete('/api/organization/invite/:id', authenticateToken, async (req, res) => {
+  try {
+    const org = await pool.query('SELECT id FROM organizations WHERE owner_id = $1', [req.user.id]);
+    if (org.rows.length === 0) return res.status(403).json({ error: 'No autorizado' });
+    await pool.query('DELETE FROM invitations WHERE id = $1 AND organization_id = $2', [req.params.id, org.rows[0].id]);
+    res.json({ message: 'Invitacion cancelada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Remover tecnico del equipo
+app.delete('/api/organization/member/:id', authenticateToken, async (req, res) => {
+  try {
+    const org = await pool.query('SELECT id FROM organizations WHERE owner_id = $1', [req.user.id]);
+    if (org.rows.length === 0) return res.status(403).json({ error: 'No autorizado' });
+    await pool.query('UPDATE users SET organization_id = NULL, role = $1 WHERE id = $2 AND organization_id = $3', ['owner', req.params.id, org.rows[0].id]);
+    await pool.query('DELETE FROM machine_shares WHERE user_id = $1', [req.params.id]);
+    res.json({ message: 'Miembro removido' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Compartir maquinas con un tecnico
+app.post('/api/machines/share', authenticateToken, async (req, res) => {
+  try {
+    const { user_id, machine_ids } = req.body;
+    if (!user_id || !machine_ids) return res.status(400).json({ error: 'user_id y machine_ids requeridos' });
+
+    // Verificar que soy dueño de las maquinas
+    const myMachines = await pool.query('SELECT id FROM machines WHERE user_id = $1', [req.user.id]);
+    const myIds = new Set(myMachines.rows.map(m => m.id));
+
+    // Borrar shares anteriores de este tecnico con mis maquinas
+    await pool.query('DELETE FROM machine_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
+
+    // Crear nuevos shares
+    for (const machineId of machine_ids) {
+      if (myIds.has(machineId)) {
+        await pool.query(
+          'INSERT INTO machine_shares (machine_id, user_id, shared_by) VALUES ($1, $2, $3) ON CONFLICT (machine_id, user_id) DO NOTHING',
+          [machineId, user_id, req.user.id]
+        );
+      }
+    }
+    res.json({ message: 'Maquinas compartidas', count: machine_ids.length });
+  } catch (error) {
+    console.error('Error compartiendo:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Obtener maquinas compartidas con un tecnico
+app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT machine_id FROM machine_shares WHERE user_id = $1 AND shared_by = $2',
+      [req.params.userId, req.user.id]
+    );
+    res.json(result.rows.map(r => r.machine_id));
+  } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -531,14 +747,25 @@ app.post('/api/heartbeat', async (req, res) => {
 
 // ============== RUTAS PROTEGIDAS (APP MOVIL) ==============
 
-// Obtener todas las maquinas del usuario
+// Obtener todas las maquinas del usuario (propias + compartidas)
 app.get('/api/machines', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM machines WHERE user_id = $1 ORDER BY grupo NULLS LAST, orden, machine_name',
+    // Maquinas propias
+    const own = await pool.query(
+      'SELECT *, false as is_shared FROM machines WHERE user_id = $1 ORDER BY grupo NULLS LAST, orden, machine_name',
       [req.user.id]
     );
-    res.json(result.rows);
+    // Maquinas compartidas conmigo
+    const shared = await pool.query(
+      `SELECT m.*, true as is_shared, u.email as owner_email, u.nombre as owner_name
+       FROM machines m
+       JOIN machine_shares ms ON ms.machine_id = m.id
+       LEFT JOIN users u ON m.user_id = u.id
+       WHERE ms.user_id = $1
+       ORDER BY m.grupo NULLS LAST, m.machine_name`,
+      [req.user.id]
+    );
+    res.json([...own.rows, ...shared.rows]);
   } catch (error) {
     console.error('Error al obtener maquinas:', error);
     res.status(500).json({ error: 'Error interno' });

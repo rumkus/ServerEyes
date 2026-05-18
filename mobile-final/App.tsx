@@ -112,6 +112,15 @@ export default function App() {
   const [showAgentUpdate, setShowAgentUpdate] = useState(false);
   const [agentVersion, setAgentVersion] = useState('');
   const [agentUrl, setAgentUrl] = useState('');
+  const [showTeam, setShowTeam] = useState(false);
+  const [orgData, setOrgData] = useState<any>(null);
+  const [orgName, setOrgName] = useState('');
+  const [orgAddress, setOrgAddress] = useState('');
+  const [orgPhone, setOrgPhone] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [shareUserId, setShareUserId] = useState<number | null>(null);
+  const [shareSelected, setShareSelected] = useState<Set<number>>(new Set());
 
   // Registrar token FCM para push notifications
   const registerFCM = async () => {
@@ -776,6 +785,7 @@ export default function App() {
           {item.is_online ? 'ONLINE' : 'OFFLINE'}
         </Text>
       </View>
+      {item.is_shared && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 4}}>&#128101; Compartida por {item.owner_name || item.owner_email}</Text>}
       {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📁 {item.grupo}</Text>}
       {item.dns_host && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 6}}>🌐 {item.dns_host}</Text>}
       {item.notes ? <Text style={{color: '#aaa', fontSize: 11, marginBottom: 4}} numberOfLines={1}>📝 {item.notes}</Text> : null}
@@ -902,6 +912,181 @@ export default function App() {
       </View>
     );
   };
+
+  // SHARE PICKER - elegir maquinas para compartir con un tecnico
+  if (shareUserId) {
+    const myMachines = machines.filter(m => !m.is_shared);
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
+          <Text style={s.title}>Compartir maquinas</Text>
+          <Text style={[s.sub, {marginBottom: 16}]}>Selecciona las maquinas que este tecnico podra ver</Text>
+          {myMachines.map(m => (
+            <TouchableOpacity key={m.id} onPress={() => {
+              const next = new Set(shareSelected);
+              if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
+              setShareSelected(next);
+            }} style={{flexDirection: 'row', alignItems: 'center', backgroundColor: '#16213e', borderRadius: 10, padding: 14, marginBottom: 8}}>
+              <View style={{width: 22, height: 22, borderWidth: 2, borderColor: shareSelected.has(m.id) ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 12, backgroundColor: shareSelected.has(m.id) ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+                {shareSelected.has(m.id) && <Text style={{color: '#1a1a2e', fontSize: 15, fontWeight: '700'}}>✓</Text>}
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={{color: '#eee', fontSize: 15, fontWeight: '600'}}>{m.machine_name}</Text>
+                {m.grupo && <Text style={{color: '#00d4ff', fontSize: 11}}>{m.grupo}</Text>}
+              </View>
+              <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: m.is_online ? '#00e676' : '#ff5252'}} />
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            await apiRequest('/api/machines/share', { method: 'POST', body: JSON.stringify({ user_id: shareUserId, machine_ids: [...shareSelected] }) }, token);
+            Alert.alert('Listo', `${shareSelected.size} maquina(s) compartidas`);
+            setShareUserId(null);
+            // Recargar org
+            const res = await apiRequest('/api/organization', {}, token);
+            if (res.ok) setOrgData(res.data);
+          }}>
+            <Text style={s.btnTxt}>Guardar ({shareSelected.size})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShareUserId(null)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // TEAM / ORGANIZATION
+  if (showTeam) {
+    const org = orgData?.organization;
+    const team = orgData?.team || [];
+    const invitations = orgData?.invitations?.filter((i: any) => i.status === 'pending') || [];
+    const isOwner = !org || team.find((t: any) => t.id === parseInt(String(token?.split('.')[1] ? JSON.parse(atob(token!.split('.')[1])).id : '0')))?.role === 'owner' || !org;
+
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
+          <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>&#128101;</Text>
+          <Text style={s.title}>Empresa y Equipo</Text>
+
+          {!org ? (
+            <>
+              <Text style={[s.sub, {marginBottom: 16}]}>Configura tu empresa para invitar tecnicos</Text>
+              <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Nombre de la empresa:</Text>
+              <TextInput style={s.input} value={orgName} onChangeText={setOrgName} placeholder="Mi Empresa SRL" placeholderTextColor="#666" />
+              <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Direccion (opcional):</Text>
+              <TextInput style={s.input} value={orgAddress} onChangeText={setOrgAddress} placeholder="Calle 123, Ciudad" placeholderTextColor="#666" />
+              <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Telefono (opcional):</Text>
+              <TextInput style={s.input} value={orgPhone} onChangeText={setOrgPhone} placeholder="+54 11..." placeholderTextColor="#666" keyboardType="phone-pad" />
+              <TouchableOpacity style={s.btn} onPress={async () => {
+                if (!orgName.trim()) return;
+                const res = await apiRequest('/api/organization', { method: 'POST', body: JSON.stringify({ name: orgName.trim(), address: orgAddress, phone: orgPhone }) }, token);
+                if (res.ok) {
+                  Alert.alert('Listo', 'Empresa creada');
+                  const r2 = await apiRequest('/api/organization', {}, token);
+                  if (r2.ok) setOrgData(r2.data);
+                } else Alert.alert('Error', res.data?.error || 'Error');
+              }}><Text style={s.btnTxt}>Crear empresa</Text></TouchableOpacity>
+
+              <View style={{marginTop: 30, borderTopWidth: 1, borderTopColor: '#2a2a4a', paddingTop: 20}}>
+                <Text style={{color: '#888', fontSize: 14, textAlign: 'center', marginBottom: 12}}>¿Te invitaron a un equipo?</Text>
+                <TextInput style={[s.input, {textAlign: 'center', fontSize: 18, letterSpacing: 4}]} value={joinCode} onChangeText={setJoinCode} placeholder="CODIGO" placeholderTextColor="#555" autoCapitalize="characters" />
+                <TouchableOpacity style={[s.btn, {backgroundColor: '#ff9800'}]} onPress={async () => {
+                  if (!joinCode.trim()) return;
+                  const res = await apiRequest('/api/organization/join', { method: 'POST', body: JSON.stringify({ code: joinCode.trim() }) }, token);
+                  if (res.ok) { Alert.alert('Listo', res.data.message); const r2 = await apiRequest('/api/organization', {}, token); if (r2.ok) setOrgData(r2.data); setJoinCode(''); }
+                  else Alert.alert('Error', res.data?.error || 'Error');
+                }}><Text style={s.btnTxt}>Unirme</Text></TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={[s.sub, {marginBottom: 16}]}>{org.name}</Text>
+
+              {/* Equipo */}
+              <Text style={{color: '#00d4ff', fontSize: 16, fontWeight: '700', marginBottom: 10}}>Equipo ({team.length})</Text>
+              {team.map((member: any) => (
+                <View key={member.id} style={{backgroundColor: '#16213e', borderRadius: 10, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center'}}>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: '#eee', fontSize: 15, fontWeight: '600'}}>{member.nombre || member.email}</Text>
+                    <Text style={{color: '#888', fontSize: 12}}>{member.email}</Text>
+                  </View>
+                  <Text style={{color: member.role === 'owner' ? '#ff9800' : '#00d4ff', fontSize: 12, fontWeight: '600', marginRight: 8}}>
+                    {member.role === 'owner' ? 'OWNER' : 'TECNICO'}
+                  </Text>
+                  {member.role === 'technician' && (
+                    <View style={{flexDirection: 'row'}}>
+                      <TouchableOpacity onPress={async () => {
+                        const res = await apiRequest(`/api/machines/shared/${member.id}`, {}, token);
+                        const ids = res.ok ? new Set(res.data as number[]) : new Set<number>();
+                        setShareSelected(ids);
+                        setShareUserId(member.id);
+                      }} style={{backgroundColor: '#0a3d62', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, marginRight: 6}}>
+                        <Text style={{color: '#00d4ff', fontSize: 11, fontWeight: '600'}}>Compartir</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => {
+                        Alert.alert('Remover', `¿Remover a ${member.nombre || member.email}?`, [
+                          { text: 'No' },
+                          { text: 'Si', style: 'destructive', onPress: async () => {
+                            await apiRequest(`/api/organization/member/${member.id}`, { method: 'DELETE' }, token);
+                            const r2 = await apiRequest('/api/organization', {}, token);
+                            if (r2.ok) setOrgData(r2.data);
+                          }}
+                        ]);
+                      }} style={{backgroundColor: '#2d1117', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6}}>
+                        <Text style={{color: '#ff5252', fontSize: 11, fontWeight: '600'}}>X</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))}
+
+              {/* Invitar */}
+              <Text style={{color: '#ff9800', fontSize: 16, fontWeight: '700', marginTop: 16, marginBottom: 10}}>Invitar tecnico</Text>
+              <View style={{flexDirection: 'row', marginBottom: 8}}>
+                <TextInput style={[s.input, {flex: 1, marginBottom: 0, marginRight: 8}]} value={inviteEmail} onChangeText={setInviteEmail} placeholder="email@tecnico.com" placeholderTextColor="#666" keyboardType="email-address" autoCapitalize="none" />
+                <TouchableOpacity style={{backgroundColor: '#ff9800', borderRadius: 12, paddingHorizontal: 18, justifyContent: 'center'}} onPress={async () => {
+                  if (!inviteEmail.trim()) return;
+                  const res = await apiRequest('/api/organization/invite', { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim() }) }, token);
+                  if (res.ok) {
+                    Alert.alert('Invitacion', `Codigo: ${res.data.code}\n\nComparti este codigo con ${inviteEmail.trim()}`);
+                    setInviteEmail('');
+                    const r2 = await apiRequest('/api/organization', {}, token);
+                    if (r2.ok) setOrgData(r2.data);
+                  } else Alert.alert('Error', res.data?.error || 'Error');
+                }}>
+                  <Text style={{color: '#1a1a2e', fontWeight: '700'}}>Invitar</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Invitaciones pendientes */}
+              {invitations.length > 0 && (
+                <>
+                  <Text style={{color: '#888', fontSize: 13, marginTop: 8, marginBottom: 6}}>Pendientes:</Text>
+                  {invitations.map((inv: any) => (
+                    <View key={inv.id} style={{backgroundColor: '#16213e', borderRadius: 8, padding: 10, marginBottom: 6, flexDirection: 'row', alignItems: 'center'}}>
+                      <View style={{flex: 1}}>
+                        <Text style={{color: '#ddd', fontSize: 13}}>{inv.email}</Text>
+                        <Text style={{color: '#ff9800', fontSize: 11}}>Codigo: {inv.code}</Text>
+                      </View>
+                      <TouchableOpacity onPress={async () => {
+                        await apiRequest(`/api/organization/invite/${inv.id}`, { method: 'DELETE' }, token);
+                        const r2 = await apiRequest('/api/organization', {}, token);
+                        if (r2.ok) setOrgData(r2.data);
+                      }}>
+                        <Text style={{color: '#ff5252', fontSize: 12}}>Cancelar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+
+          <TouchableOpacity onPress={() => setShowTeam(false)} style={{marginTop: 20}}><Text style={s.link}>Volver</Text></TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
 
   // AGENT UPDATE
   if (showAgentUpdate) {
@@ -1140,6 +1325,18 @@ export default function App() {
             onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}
             style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
             <Text style={{color: '#888', fontSize: 13}}>📋</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={async () => {
+              const res = await apiRequest('/api/organization', {}, token);
+              if (res.ok) {
+                setOrgData(res.data);
+                if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); }
+              }
+              setShowTeam(true);
+            }}
+            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+            <Text style={{color: '#888', fontSize: 13}}>&#128101;</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={async () => {
