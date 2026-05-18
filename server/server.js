@@ -271,6 +271,24 @@ app.post('/api/heartbeat', async (req, res) => {
       [result.rows[0].id, public_ip]
     );
 
+    // Auto-update DNS si cambio la IP y tiene URL configurada
+    const updatedMachine = result.rows[0];
+    if (updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
+        updatedMachine.previous_public_ip !== public_ip) {
+      try {
+        const dnsUrl = `${updatedMachine.dns_update_url}&address=${public_ip}`;
+        const dnsClient = dnsUrl.startsWith('https') ? require('https') : require('http');
+        dnsClient.get(dnsUrl, (r) => {
+          let d = '';
+          r.on('data', c => d += c);
+          r.on('end', () => {
+            console.log(`[DNS] Auto-update ${updatedMachine.dns_host || 'host'}: ${d.trim()}`);
+            pool.query('UPDATE machines SET dns_last_update = NOW() WHERE id = $1', [updatedMachine.id]);
+          });
+        });
+      } catch (e) { console.error('[DNS] Auto-update error:', e.message); }
+    }
+
     res.json({ status: 'ok', machine: result.rows[0] });
   } catch (error) {
     console.error('Error en heartbeat:', error);
@@ -321,7 +339,7 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 // Actualizar maquina (nombre, grupo, orden)
 app.put('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
-    const { machine_name, grupo, orden } = req.body;
+    const { machine_name, grupo, orden, dns_update_url, dns_host } = req.body;
     const fields = [];
     const values = [];
     let idx = 1;
@@ -329,6 +347,8 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (machine_name !== undefined) { fields.push(`machine_name = $${idx++}`); values.push(machine_name); }
     if (grupo !== undefined) { fields.push(`grupo = $${idx++}`); values.push(grupo || null); }
     if (orden !== undefined) { fields.push(`orden = $${idx++}`); values.push(orden); }
+    if (dns_update_url !== undefined) { fields.push(`dns_update_url = $${idx++}`); values.push(dns_update_url || null); }
+    if (dns_host !== undefined) { fields.push(`dns_host = $${idx++}`); values.push(dns_host || null); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
@@ -360,6 +380,44 @@ app.put('/api/machines-order', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error al actualizar orden:', error);
     res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Actualizar DNS de una maquina (FreeDNS)
+app.post('/api/machines/:id/update-dns', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query(
+      'SELECT * FROM machines WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+
+    const m = machine.rows[0];
+    if (!m.dns_update_url) return res.status(400).json({ error: 'No tiene URL de DNS configurada' });
+    if (!m.public_ip) return res.status(400).json({ error: 'La maquina no tiene IP publica' });
+
+    // Llamar a FreeDNS con la IP actual
+    const updateUrl = m.dns_update_url.includes('&address=')
+      ? m.dns_update_url
+      : `${m.dns_update_url}&address=${m.public_ip}`;
+
+    const https = require('https');
+    const http = require('http');
+    const result = await new Promise((resolve, reject) => {
+      const client = updateUrl.startsWith('https') ? https : http;
+      client.get(updateUrl, (r) => {
+        let data = '';
+        r.on('data', c => data += c);
+        r.on('end', () => resolve({ status: r.statusCode, body: data }));
+      }).on('error', reject);
+    });
+
+    await pool.query('UPDATE machines SET dns_last_update = NOW() WHERE id = $1', [m.id]);
+
+    res.json({ message: 'DNS actualizado', result, ip: m.public_ip, host: m.dns_host });
+  } catch (error) {
+    console.error('Error al actualizar DNS:', error);
+    res.status(500).json({ error: 'Error al actualizar DNS' });
   }
 });
 

@@ -31,6 +31,9 @@ export default function App() {
   const [editingMachine, setEditingMachine] = useState<any>(null);
   const [editName, setEditName] = useState('');
   const [editGrupo, setEditGrupo] = useState('');
+  const [editDnsUrl, setEditDnsUrl] = useState('');
+  const [editDnsHost, setEditDnsHost] = useState('');
+  const [dnsUpdating, setDnsUpdating] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | 'groups'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
@@ -114,8 +117,21 @@ export default function App() {
 
   const saveEdit = () => {
     if (!editingMachine) return;
-    updateMachine(editingMachine.id, { machine_name: editName, grupo: editGrupo || null });
+    updateMachine(editingMachine.id, {
+      machine_name: editName, grupo: editGrupo || null,
+      dns_update_url: editDnsUrl || null, dns_host: editDnsHost || null
+    });
     setEditingMachine(null);
+  };
+
+  const triggerDnsUpdate = async (machineId: number) => {
+    setDnsUpdating(true);
+    try {
+      const res = await apiRequest(`/api/machines/${machineId}/update-dns`, { method: 'POST' }, token);
+      if (res.ok) Alert.alert('DNS Actualizado', `${res.data.host || 'Host'} apunta a ${res.data.ip}`);
+      else Alert.alert('Error', res.data.error || 'No se pudo actualizar');
+    } catch { Alert.alert('Error', 'Error de conexion'); }
+    setDnsUpdating(false);
   };
 
   const moveMachineUp = (machine: any) => {
@@ -296,7 +312,7 @@ export default function App() {
     <TouchableOpacity
       key={item.id}
       style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
-      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); }}
+      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); }}
       onLongPress={() => deleteMachine(item)}>
       <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
         <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
@@ -305,7 +321,8 @@ export default function App() {
           {item.is_online ? 'ONLINE' : 'OFFLINE'}
         </Text>
       </View>
-      {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 6}}>📁 {item.grupo}</Text>}
+      {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📁 {item.grupo}</Text>}
+      {item.dns_host && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 6}}>🌐 {item.dns_host}</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
         <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>
         <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.public_ip || '---'}</Text>
@@ -389,6 +406,21 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+        <Text style={{color: '#888', fontSize: 12, marginBottom: 4, marginTop: 8}}>FreeDNS - Dominio:</Text>
+        <TextInput style={s.input} value={editDnsHost} onChangeText={setEditDnsHost} placeholder="ej: miserver.nuware.com.ar" placeholderTextColor="#666" />
+        <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>FreeDNS - URL de update:</Text>
+        <TextInput style={[s.input, {fontSize: 12}]} value={editDnsUrl} onChangeText={setEditDnsUrl} placeholder="https://freedns.afraid.org/dynamic/update.php?..." placeholderTextColor="#666" autoCapitalize="none" />
+        {editDnsUrl ? (
+          <TouchableOpacity
+            style={[s.btn, {backgroundColor: '#ff9800', marginBottom: 8}]}
+            onPress={() => triggerDnsUpdate(editingMachine.id)}
+            disabled={dnsUpdating}>
+            <Text style={s.btnTxt}>{dnsUpdating ? 'Actualizando...' : '🌐 Actualizar DNS ahora'}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {editingMachine.dns_last_update && (
+          <Text style={{color: '#555', fontSize: 11, textAlign: 'center', marginBottom: 8}}>Ultimo update DNS: {new Date(editingMachine.dns_last_update).toLocaleString()}</Text>
         )}
         <TouchableOpacity style={s.btn} onPress={saveEdit}>
           <Text style={s.btnTxt}>Guardar</Text>
