@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration, Share, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import RNFS from 'react-native-fs';
+import RNShare from 'react-native-share';
 
 const API_URL = 'https://servereyes-production.up.railway.app';
 const MAX_LOGS = 500;
@@ -321,8 +323,25 @@ export default function App() {
           <View style={{flexDirection: 'row'}}>
             <TouchableOpacity
               onPress={async () => {
-                const text = _logs.slice(-200).join('\n');
-                await Share.share({ message: `ServerEyes Logs\n${new Date().toLocaleString()}\n\n${text}` });
+                try {
+                  const now = new Date();
+                  const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                  const hora = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+                  const fileName = `log-${fecha}-${hora}.txt`;
+                  const filePath = `${RNFS.CachesDirectoryPath}/${fileName}`;
+                  const text = `ServerEyes Logs - ${now.toLocaleString()}\n${'='.repeat(50)}\n\n${_logs.join('\n')}`;
+                  await RNFS.writeFile(filePath, text, 'utf8');
+                  await RNShare.open({
+                    url: `file://${filePath}`,
+                    type: 'text/plain',
+                    filename: fileName,
+                    title: 'ServerEyes Logs',
+                  });
+                } catch (e: any) {
+                  if (e.message !== 'User did not share') {
+                    Alert.alert('Error', `No se pudo compartir: ${e.message}`);
+                  }
+                }
               }}
               style={{backgroundColor: '#00d4ff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
               <Text style={{color: '#1a1a2e', fontWeight: '600', fontSize: 13}}>Compartir</Text>
