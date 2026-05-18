@@ -84,6 +84,7 @@ export default function App() {
   const [editGrupo, setEditGrupo] = useState('');
   const [editDnsUrl, setEditDnsUrl] = useState('');
   const [editDnsHost, setEditDnsHost] = useState('');
+  const [editCheckIp, setEditCheckIp] = useState(true);
   const [dnsUpdating, setDnsUpdating] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logText, setLogText] = useState('');
@@ -298,7 +299,8 @@ export default function App() {
     if (!editingMachine) return;
     updateMachine(editingMachine.id, {
       machine_name: editName, grupo: editGrupo || null,
-      dns_update_url: editDnsUrl || null, dns_host: editDnsHost || null
+      dns_update_url: editDnsUrl || null, dns_host: editDnsHost || null,
+      check_ip_change: editCheckIp
     });
     setEditingMachine(null);
   };
@@ -672,7 +674,7 @@ export default function App() {
     <TouchableOpacity
       key={item.id}
       style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
-      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); }}
+      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); }}
       onLongPress={() => deleteMachine(item)}>
       <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
         <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
@@ -683,6 +685,7 @@ export default function App() {
       </View>
       {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📁 {item.grupo}</Text>}
       {item.dns_host && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 6}}>🌐 {item.dns_host}</Text>}
+      {item.check_ip_change === false && <Text style={{color: '#666', fontSize: 11, marginBottom: 6}}>🔕 Monitoreo de IP desactivado</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
         <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>
         <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.public_ip || '---'}</Text>
@@ -807,6 +810,17 @@ export default function App() {
         {editingMachine.dns_last_update && (
           <Text style={{color: '#555', fontSize: 11, textAlign: 'center', marginBottom: 8}}>Ultimo update DNS: {new Date(editingMachine.dns_last_update).toLocaleString()}</Text>
         )}
+        <TouchableOpacity
+          onPress={() => setEditCheckIp(!editCheckIp)}
+          style={{flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 16, paddingVertical: 8}}>
+          <View style={{width: 22, height: 22, borderWidth: 2, borderColor: editCheckIp ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 10, backgroundColor: editCheckIp ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+            {editCheckIp && <Text style={{color: '#1a1a2e', fontSize: 15, fontWeight: '700'}}>✓</Text>}
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#ddd', fontSize: 14, fontWeight: '600'}}>Monitorear cambio de IP publica</Text>
+            <Text style={{color: '#666', fontSize: 11, marginTop: 2}}>Desactiva si la IP es fija para evitar alertas innecesarias</Text>
+          </View>
+        </TouchableOpacity>
         <TouchableOpacity style={s.btn} onPress={saveEdit}>
           <Text style={s.btnTxt}>Guardar</Text>
         </TouchableOpacity>

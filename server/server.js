@@ -87,6 +87,11 @@ async function initDB() {
     )
   `);
 
+  // Agregar columna check_ip_change si no existe
+  await pool.query(`
+    ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_ip_change BOOLEAN DEFAULT true
+  `).catch(() => {});
+
   console.log('Base de datos inicializada');
 }
 
@@ -345,12 +350,12 @@ app.post('/api/heartbeat', async (req, res) => {
       return res.json({ status: 'speed_test_saved' });
     }
 
-    // Actualizar maquina
+    // Actualizar maquina (solo detectar cambio de IP si check_ip_change = true)
     const result = await pool.query(
       `UPDATE machines SET
-        previous_public_ip = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN public_ip ELSE previous_public_ip END,
-        ip_changed_at = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN NOW() ELSE ip_changed_at END,
-        ip_change_seen = CASE WHEN public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN false ELSE ip_change_seen END,
+        previous_public_ip = CASE WHEN check_ip_change = true AND public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN public_ip ELSE previous_public_ip END,
+        ip_changed_at = CASE WHEN check_ip_change = true AND public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN NOW() ELSE ip_changed_at END,
+        ip_change_seen = CASE WHEN check_ip_change = true AND public_ip IS NOT NULL AND public_ip != $1 AND (previous_public_ip IS NULL OR previous_public_ip != $1) THEN false ELSE ip_change_seen END,
         public_ip = $1,
         local_ip = $2,
         os_info = $3,
@@ -386,14 +391,14 @@ app.post('/api/heartbeat', async (req, res) => {
       }
     }
 
-    // Push notification si cambio la IP
-    if (updatedMachine && updatedMachine.previous_public_ip &&
+    // Push notification si cambio la IP (solo si check_ip_change esta activo)
+    if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.previous_public_ip &&
         updatedMachine.previous_public_ip !== public_ip && updatedMachine.user_id) {
       sendPush(updatedMachine.user_id, '🌐 IP cambio', `${updatedMachine.machine_name}: ${updatedMachine.previous_public_ip} → ${public_ip}`, { type: 'ip_change', machineId: String(updatedMachine.id) });
     }
 
-    // Auto-update DNS si cambio la IP y tiene URL configurada
-    if (updatedMachine && updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
+    // Auto-update DNS si cambio la IP y tiene URL configurada (solo si check_ip_change esta activo)
+    if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
         updatedMachine.previous_public_ip !== public_ip) {
       try {
         const dnsUrl = `${updatedMachine.dns_update_url}&address=${public_ip}`;
@@ -463,7 +468,7 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 // Actualizar maquina (nombre, grupo, orden)
 app.put('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
-    const { machine_name, grupo, orden, dns_update_url, dns_host } = req.body;
+    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change } = req.body;
     const fields = [];
     const values = [];
     let idx = 1;
@@ -473,6 +478,7 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (orden !== undefined) { fields.push(`orden = $${idx++}`); values.push(orden); }
     if (dns_update_url !== undefined) { fields.push(`dns_update_url = $${idx++}`); values.push(dns_update_url || null); }
     if (dns_host !== undefined) { fields.push(`dns_host = $${idx++}`); values.push(dns_host || null); }
+    if (check_ip_change !== undefined) { fields.push(`check_ip_change = $${idx++}`); values.push(check_ip_change); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
