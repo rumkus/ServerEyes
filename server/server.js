@@ -87,10 +87,9 @@ async function initDB() {
     )
   `);
 
-  // Agregar columna check_ip_change si no existe
-  await pool.query(`
-    ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_ip_change BOOLEAN DEFAULT true
-  `).catch(() => {});
+  // Agregar columnas nuevas si no existen
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_ip_change BOOLEAN DEFAULT true`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`).catch(() => {});
 
   console.log('Base de datos inicializada');
 }
@@ -468,7 +467,7 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 // Actualizar maquina (nombre, grupo, orden)
 app.put('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
-    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change } = req.body;
+    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes } = req.body;
     const fields = [];
     const values = [];
     let idx = 1;
@@ -479,6 +478,7 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (dns_update_url !== undefined) { fields.push(`dns_update_url = $${idx++}`); values.push(dns_update_url || null); }
     if (dns_host !== undefined) { fields.push(`dns_host = $${idx++}`); values.push(dns_host || null); }
     if (check_ip_change !== undefined) { fields.push(`check_ip_change = $${idx++}`); values.push(check_ip_change); }
+    if (notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(notes); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
