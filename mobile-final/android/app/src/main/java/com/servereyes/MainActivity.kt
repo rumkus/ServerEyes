@@ -1,4 +1,4 @@
-package com.servereyesapp
+package com.servereyes
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

@@ -3,6 +3,8 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import RNShare from 'react-native-share';
+import messaging from '@react-native-firebase/messaging';
+import { Platform, PermissionsAndroid } from 'react-native';
 
 const API_URL = 'https://servereyes-production.up.railway.app';
 const MAX_LOGS = 500;
@@ -92,6 +94,43 @@ export default function App() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
   const [newGroupName, setNewGroupName] = useState('');
+
+  // Registrar token FCM para push notifications
+  const registerFCM = async () => {
+    try {
+      // Pedir permiso de notificaciones (Android 13+)
+      if (Platform.OS === 'android' && Platform.Version >= 33) {
+        await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      }
+      const authStatus = await messaging().requestPermission();
+      const enabled = authStatus === messaging.AuthorizationStatus.AUTHORIZED || authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+      if (enabled) {
+        const fcmToken = await messaging().getToken();
+        log.info(`FCM token: ${fcmToken.slice(0, 20)}...`);
+        await apiRequest('/api/fcm-token', { method: 'POST', body: JSON.stringify({ fcm_token: fcmToken }) }, tokenRef.current);
+        log.info('FCM token registrado en servidor');
+      } else {
+        log.warn('Permiso de notificaciones denegado');
+      }
+    } catch (e: any) {
+      log.error(`FCM error: ${e.message}`);
+    }
+  };
+
+  // Listener de mensajes en primer plano
+  useEffect(() => {
+    const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+      log.info(`Push recibido: ${remoteMessage.notification?.title}`);
+      if (remoteMessage.notification) {
+        Alert.alert(
+          remoteMessage.notification.title || 'ServerEyes',
+          remoteMessage.notification.body || ''
+        );
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Detectar cuando la app vuelve del background
   useEffect(() => {
@@ -207,6 +246,8 @@ export default function App() {
         await loadMachines();
         // Consumir IP changes pendientes sin mostrar alerta (evita crash post-login)
         await apiRequest('/api/ip-changes', {}, token);
+        // Registrar token FCM para push notifications
+        await registerFCM();
         log.info('Primera carga completada');
       } catch (e: any) { log.error(`Primera carga error: ${e.message}`); }
       firstLoadDone.current = true;

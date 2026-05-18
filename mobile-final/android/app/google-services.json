@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "373357070208",
+    "project_id": "servereyesapp",
+    "storage_bucket": "servereyesapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373357070208:android:b90913dd29ba32964ce365",
+        "android_client_info": {
+          "package_name": "com.servereyes"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBmK81kqIInh2f9oxqdcsfC7GX_pxkO-bQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373357070208:android:e9f53bff0df4228c4ce365",
+        "android_client_info": {
+          "package_name": "com.servereyesapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBmK81kqIInh2f9oxqdcsfC7GX_pxkO-bQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

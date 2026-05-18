@@ -1,4 +1,4 @@
-package com.servereyesapp
+package com.servereyes
 
 import android.app.Application
 import com.facebook.react.PackageList

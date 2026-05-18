@@ -4,8 +4,28 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'servereyes-secret-key-change-in-production';
+
+// Firebase Admin
+let firebaseAdmin = null;
+try {
+  const admin = require('firebase-admin');
+  const serviceAccountPath = path.join(__dirname, 'firebase-service-account.json');
+  const fs = require('fs');
+  if (fs.existsSync(serviceAccountPath)) {
+    admin.initializeApp({
+      credential: admin.credential.cert(require(serviceAccountPath))
+    });
+    firebaseAdmin = admin;
+    console.log('Firebase Admin inicializado');
+  } else {
+    console.log('firebase-service-account.json no encontrado, push deshabilitado');
+  }
+} catch (err) {
+  console.error('Error inicializando Firebase:', err.message);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -137,6 +157,45 @@ app.post('/api/auth/clerk-login', async (req, res) => {
     res.status(500).json({ error: 'Error interno' });
   }
 });
+
+// ============== PUSH NOTIFICATIONS ==============
+
+// Registrar token FCM del dispositivo
+app.post('/api/fcm-token', authenticateToken, async (req, res) => {
+  try {
+    const { fcm_token } = req.body;
+    if (!fcm_token) return res.status(400).json({ error: 'fcm_token requerido' });
+    await pool.query('UPDATE users SET fcm_token = $1 WHERE id = $2', [fcm_token, req.user.id]);
+    res.json({ message: 'Token FCM registrado' });
+  } catch (error) {
+    console.error('Error registrando FCM token:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Funcion para enviar push a un usuario
+async function sendPush(userId, title, body, data = {}) {
+  if (!firebaseAdmin) return;
+  try {
+    const user = await pool.query('SELECT fcm_token FROM users WHERE id = $1', [userId]);
+    const fcmToken = user.rows[0]?.fcm_token;
+    if (!fcmToken) return;
+
+    await firebaseAdmin.messaging().send({
+      token: fcmToken,
+      notification: { title, body },
+      data: { ...data, click_action: 'FLUTTER_NOTIFICATION_CLICK' },
+      android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
+    });
+    console.log(`[PUSH] Enviado a user ${userId}: ${title}`);
+  } catch (err) {
+    console.error(`[PUSH] Error enviando a user ${userId}:`, err.message);
+    // Si el token es invalido, limpiarlo
+    if (err.code === 'messaging/registration-token-not-registered') {
+      await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
+    }
+  }
+}
 
 // ============== PAIRING (vinculacion por codigo) ==============
 
@@ -282,6 +341,12 @@ app.post('/api/heartbeat', async (req, res) => {
       if (lastLog.rows.length === 0 || lastLog.rows[0].status === 'offline') {
         await pool.query('INSERT INTO uptime_log (machine_id, status) VALUES ($1, $2)', [updatedMachine.id, 'online']);
       }
+    }
+
+    // Push notification si cambio la IP
+    if (updatedMachine && updatedMachine.previous_public_ip &&
+        updatedMachine.previous_public_ip !== public_ip && updatedMachine.user_id) {
+      sendPush(updatedMachine.user_id, '🌐 IP cambio', `${updatedMachine.machine_name}: ${updatedMachine.previous_public_ip} → ${public_ip}`, { type: 'ip_change', machineId: String(updatedMachine.id) });
     }
 
     // Auto-update DNS si cambio la IP y tiene URL configurada
@@ -489,6 +554,8 @@ setInterval(async () => {
           'UPDATE machines SET offline_notified = true WHERE id = $1',
           [machine.id]
         );
+        // Push notification
+        sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) });
       }
     }
   } catch (error) {
