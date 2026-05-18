@@ -128,6 +128,14 @@ body { background: #1a1a2e; color: #eee; font-family: -apple-system, BlinkMacSys
   .filter-bar input { width: 100%; }
 }
 
+/* Update alert banner */
+.update-banner { background: linear-gradient(135deg, #3d2e00, #4a3500); margin: 0 24px 12px; padding: 16px 20px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; border: 1px solid #ff9800; }
+.update-banner .msg { color: #ff9800; font-weight: 600; font-size: 14px; }
+.update-banner .msg small { color: #888; font-weight: 400; display: block; font-size: 12px; margin-top: 2px; }
+.update-banner .btn-update { background: #ff9800; color: #1a1a2e; border: none; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.update-banner .btn-update:hover { background: #e68900; }
+.update-banner .btn-dismiss { background: none; border: none; color: #888; cursor: pointer; font-size: 18px; padding: 4px 8px; }
+
 /* Auto-refresh indicator */
 .refresh-dot { width: 8px; height: 8px; border-radius: 50%; background: #00e676; display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -144,6 +152,7 @@ let machines = [];
 let filter = '';
 let agentInfo = { version: null, url: null };
 let showUpdateModal = false;
+let dismissedUpdate = false;
 let statusFilter = 'all';
 let viewMode = 'list'; // list | groups
 let expandedGroups = new Set();
@@ -352,6 +361,7 @@ function renderDashboard() {
       <div class="stat-card stat-online"><div class="num">${online}</div><div class="label">Online</div></div>
       <div class="stat-card stat-offline"><div class="num">${offline}</div><div class="label">Offline</div></div>
     </div>
+    ${renderUpdateAlert()}
     <div class="filter-bar">
       <input type="text" placeholder="Buscar por nombre, IP, grupo, notas..." value="${filter}" oninput="setFilter(this.value)" />
       <button class="filter-btn ${statusFilter === 'all' ? 'active' : ''}" onclick="setStatus('all')">Todas</button>
@@ -384,6 +394,22 @@ async function startDashboard() {
   await loadAgentInfo();
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(loadMachines, 10000);
+}
+
+// Update alert banner
+function renderUpdateAlert() {
+  if (dismissedUpdate || !agentInfo.version) return '';
+  const outdated = machines.filter(m => m.agent_version && m.agent_version !== agentInfo.version);
+  if (outdated.length === 0) return '';
+  return `<div class="update-banner">
+    <div class="msg">&#9888; ${outdated.length} maquina(s) con agente desactualizado
+      <small>${outdated.map(m => m.machine_name + ' (v' + m.agent_version + ')').join(', ')} — ultima: v${agentInfo.version}</small>
+    </div>
+    <div>
+      <span style="color:#888;font-size:12px;margin-right:10px">Se actualizan solas en el proximo heartbeat</span>
+      <button class="btn-dismiss" onclick="dismissedUpdate=true;renderDashboard()" title="Cerrar">&#10005;</button>
+    </div>
+  </div>`;
 }
 
 // Agent update management

@@ -40,7 +40,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '60mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Base de datos
@@ -123,6 +123,22 @@ async function initDB() {
   `);
   // Columna para que cada maquina reporte su version
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_version VARCHAR(20)`).catch(() => {});
+  // Admin flag
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false`).catch(() => {});
+  // Hacer admin al primer usuario
+  await pool.query(`UPDATE users SET is_admin = true WHERE id = 1 AND is_admin = false`).catch(() => {});
+  // Tabla para almacenar archivo del agente
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_files (
+      id SERIAL PRIMARY KEY,
+      version VARCHAR(20) NOT NULL,
+      filename VARCHAR(255),
+      file_data BYTEA,
+      file_size INTEGER,
+      changelog TEXT DEFAULT '',
+      uploaded_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
 
   console.log('Base de datos inicializada');
 }
@@ -740,6 +756,88 @@ setInterval(async () => {
     console.error('Error en detector offline:', error);
   }
 }, 30000);
+
+// ============== ADMIN ==============
+
+// Middleware admin
+async function requireAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+  const user = await pool.query('SELECT is_admin FROM users WHERE id = $1', [req.user.id]);
+  if (!user.rows[0]?.is_admin) return res.status(403).json({ error: 'No autorizado' });
+  next();
+}
+
+// Dashboard admin: todos los usuarios y maquinas
+app.get('/api/admin/overview', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const users = await pool.query('SELECT id, email, nombre, is_admin, created_at, fcm_token IS NOT NULL as has_push FROM users ORDER BY id');
+    const machines = await pool.query(`SELECT m.*, u.email as owner_email FROM machines m LEFT JOIN users u ON m.user_id = u.id ORDER BY m.id`);
+    const totalUsers = users.rows.length;
+    const totalMachines = machines.rows.length;
+    const onlineMachines = machines.rows.filter(m => m.is_online).length;
+    const agentFile = await pool.query('SELECT id, version, filename, file_size, changelog, uploaded_at FROM agent_files ORDER BY uploaded_at DESC LIMIT 1');
+    const ver = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
+    res.json({
+      stats: { totalUsers, totalMachines, onlineMachines, offlineMachines: totalMachines - onlineMachines },
+      users: users.rows,
+      machines: machines.rows,
+      latestAgent: agentFile.rows[0] || null,
+      configuredVersion: ver.rows[0]?.value || null
+    });
+  } catch (error) {
+    console.error('Error en admin overview:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Subir nuevo agente (base64)
+app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { version, filename, file_base64, changelog } = req.body;
+    if (!version || !file_base64) return res.status(400).json({ error: 'version y file_base64 requeridos' });
+    const buffer = Buffer.from(file_base64, 'base64');
+    if (buffer.length < 1024 * 100) return res.status(400).json({ error: 'Archivo muy chico, parece invalido' });
+
+    await pool.query(
+      'INSERT INTO agent_files (version, filename, file_data, file_size, changelog) VALUES ($1, $2, $3, $4, $5)',
+      [version, filename || 'ServerEyes-Agent.exe', buffer, buffer.length, changelog || '']
+    );
+
+    // Actualizar version configurada y URL de descarga automaticamente
+    const downloadUrl = `${req.protocol}://${req.get('host')}/api/agent/download`;
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
+
+    res.json({ message: 'Agente subido', version, size: buffer.length, downloadUrl });
+  } catch (error) {
+    console.error('Error subiendo agente:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Descargar agente (publico, sin auth - los agentes lo descargan)
+app.get('/api/agent/download', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT filename, file_data FROM agent_files ORDER BY uploaded_at DESC LIMIT 1');
+    if (result.rows.length === 0) return res.status(404).json({ error: 'No hay agente disponible' });
+    const { filename, file_data } = result.rows[0];
+    res.set({ 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${filename}"` });
+    res.send(file_data);
+  } catch (error) {
+    console.error('Error descargando agente:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Historial de versiones del agente
+app.get('/api/admin/agent/history', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, version, filename, file_size, changelog, uploaded_at FROM agent_files ORDER BY uploaded_at DESC LIMIT 20');
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // ============== GESTION DE AGENTE ==============
 

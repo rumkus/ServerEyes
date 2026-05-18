@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ServerEyes - Admin</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0f0f23; color: #eee; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; }
+
+.login-wrap { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+.login-box { background: #16213e; border-radius: 16px; padding: 40px; width: 380px; max-width: 90vw; }
+.login-box h1 { color: #ff9800; text-align: center; margin-bottom: 8px; font-size: 28px; }
+.login-box .sub { color: #888; text-align: center; margin-bottom: 24px; font-size: 14px; }
+.login-box input { width: 100%; background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 10px; padding: 12px 14px; color: #eee; font-size: 15px; margin-bottom: 12px; outline: none; }
+.login-box input:focus { border-color: #ff9800; }
+.login-box .btn { width: 100%; background: #ff9800; color: #1a1a2e; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer; }
+.login-box .btn:hover { background: #e68900; }
+.login-box .err { color: #ff5252; text-align: center; font-size: 13px; margin-top: 8px; }
+
+.header { background: #16213e; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; border-bottom: 2px solid #ff9800; }
+.header h1 { color: #ff9800; font-size: 22px; }
+.header .actions { display: flex; gap: 10px; }
+.header .btn-sm { background: #2a2a4a; color: #888; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.header .btn-sm:hover { background: #3a3a5a; color: #eee; }
+.header .btn-sm.active { background: #ff9800; color: #1a1a2e; }
+
+.content { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+/* Stats */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat { background: #16213e; border-radius: 12px; padding: 20px; text-align: center; }
+.stat .num { font-size: 36px; font-weight: 800; }
+.stat .label { color: #888; font-size: 13px; margin-top: 4px; }
+.stat-users .num { color: #00d4ff; }
+.stat-machines .num { color: #ff9800; }
+.stat-online .num { color: #00e676; }
+.stat-offline .num { color: #ff5252; }
+
+/* Tables */
+.section { background: #16213e; border-radius: 14px; padding: 20px; margin-bottom: 24px; }
+.section h2 { color: #00d4ff; font-size: 18px; margin-bottom: 16px; }
+.section h2.orange { color: #ff9800; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: #888; padding: 8px 10px; border-bottom: 1px solid #2a2a4a; font-weight: 600; }
+td { padding: 8px 10px; border-bottom: 1px solid #1a1a2e; }
+tr:hover { background: #1a1a3e; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.badge-on { background: #0d2818; color: #00e676; }
+.badge-off { background: #2d1117; color: #ff5252; }
+.badge-admin { background: #3d2e00; color: #ff9800; }
+.badge-version { background: #0a3d62; color: #00d4ff; }
+.badge-outdated { background: #3d2e00; color: #ff9800; }
+
+/* Upload section */
+.upload-area { border: 2px dashed #2a2a4a; border-radius: 12px; padding: 30px; text-align: center; margin-bottom: 16px; cursor: pointer; transition: border-color 0.2s; }
+.upload-area:hover { border-color: #ff9800; }
+.upload-area.active { border-color: #00e676; background: #0d281822; }
+.upload-area input[type=file] { display: none; }
+.upload-area .icon { font-size: 40px; margin-bottom: 8px; }
+.upload-area .text { color: #888; font-size: 14px; }
+.upload-area .filename { color: #00e676; font-size: 14px; font-weight: 600; margin-top: 8px; }
+
+.form-row { display: flex; gap: 12px; margin-bottom: 12px; }
+.form-row .field { flex: 1; }
+.form-row label { color: #888; font-size: 12px; display: block; margin-bottom: 4px; }
+.form-row input, .form-row textarea { width: 100%; background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 8px; padding: 10px; color: #eee; font-size: 14px; outline: none; }
+.form-row input:focus, .form-row textarea:focus { border-color: #ff9800; }
+.form-row textarea { resize: vertical; min-height: 60px; }
+
+.btn-upload { background: #ff9800; color: #1a1a2e; border: none; border-radius: 10px; padding: 14px 28px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.btn-upload:hover { background: #e68900; }
+.btn-upload:disabled { background: #555; cursor: not-allowed; }
+
+.progress { height: 6px; background: #2a2a4a; border-radius: 3px; margin-top: 12px; overflow: hidden; display: none; }
+.progress.show { display: block; }
+.progress-bar { height: 100%; background: #ff9800; border-radius: 3px; transition: width 0.3s; }
+
+/* Current agent info */
+.agent-info { background: #0f0f23; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.agent-info .row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
+.agent-info .row .lbl { color: #888; }
+.agent-info .row .val { font-weight: 600; }
+
+/* History */
+.history-item { background: #0f0f23; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.history-item .ver { color: #00d4ff; font-weight: 700; }
+.history-item .date { color: #888; font-size: 12px; }
+.history-item .size { color: #555; font-size: 12px; }
+.history-item .log { color: #aaa; font-size: 12px; flex: 1; margin: 0 16px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .content { padding: 12px; }
+  .form-row { flex-direction: column; }
+  table { font-size: 11px; }
+  th, td { padding: 6px 4px; }
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const API = window.location.origin;
+let token = localStorage.getItem('se_admin_token');
+let data = null;
+let tab = 'overview';
+let selectedFile = null;
+let uploading = false;
+let agentHistory = [];
+
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...opts.headers };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(API + path, { ...opts, headers });
+  const d = await res.json();
+  return { ok: res.ok, status: res.status, data: d };
+}
+
+function renderLogin(err) {
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap"><div class="login-box">
+      <h1>&#9881; Admin Panel</h1>
+      <p class="sub">ServerEyes - Administracion</p>
+      <input type="email" id="l-email" placeholder="Email" />
+      <input type="password" id="l-pass" placeholder="Contrasena" />
+      ${err ? '<p class="err">' + err + '</p>' : ''}
+      <button class="btn" onclick="doLogin()">Entrar</button>
+    </div></div>`;
+  document.getElementById('l-pass')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+}
+
+async function doLogin() {
+  const email = document.getElementById('l-email').value.trim();
+  const pass = document.getElementById('l-pass').value;
+  if (!email || !pass) { renderLogin('Completa los campos'); return; }
+  const res = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password: pass }) });
+  if (res.ok && res.data.token) {
+    token = res.data.token;
+    localStorage.setItem('se_admin_token', token);
+    await loadData();
+  } else renderLogin(res.data?.error || 'Error');
+}
+
+function logout() { token = null; localStorage.removeItem('se_admin_token'); renderLogin(); }
+
+async function loadData() {
+  const res = await api('/api/admin/overview');
+  if (res.ok) { data = res.data; render(); }
+  else if (res.status === 403) { renderLogin('No tienes permisos de admin'); token = null; localStorage.removeItem('se_admin_token'); }
+  else if (res.status === 401) { logout(); }
+}
+
+function fmtDate(ts) { return ts ? new Date(ts).toLocaleString('es') : '---'; }
+function fmtSize(bytes) { return bytes ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : '---'; }
+function timeSince(ts) {
+  if (!ts) return 'Nunca';
+  const d = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (d < 60) return d + 's'; if (d < 3600) return Math.floor(d / 60) + 'min';
+  if (d < 86400) return Math.floor(d / 3600) + 'h'; return Math.floor(d / 86400) + 'd';
+}
+
+function renderOverview() {
+  const s = data.stats;
+  return `
+    <div class="stats">
+      <div class="stat stat-users"><div class="num">${s.totalUsers}</div><div class="label">Usuarios</div></div>
+      <div class="stat stat-machines"><div class="num">${s.totalMachines}</div><div class="label">Maquinas</div></div>
+      <div class="stat stat-online"><div class="num">${s.onlineMachines}</div><div class="label">Online</div></div>
+      <div class="stat stat-offline"><div class="num">${s.offlineMachines}</div><div class="label">Offline</div></div>
+    </div>
+    <div class="section"><h2>&#128100; Usuarios (${data.users.length})</h2>
+      <table><tr><th>ID</th><th>Email</th><th>Nombre</th><th>Admin</th><th>Push</th><th>Registrado</th></tr>
+      ${data.users.map(u => `<tr>
+        <td>${u.id}</td><td>${u.email}</td><td>${u.nombre || '---'}</td>
+        <td>${u.is_admin ? '<span class="badge badge-admin">ADMIN</span>' : ''}</td>
+        <td>${u.has_push ? '&#9989;' : '&#10060;'}</td>
+        <td>${fmtDate(u.created_at)}</td>
+      </tr>`).join('')}</table>
+    </div>`;
+}
+
+function renderMachines() {
+  const cv = data.configuredVersion;
+  return `<div class="section"><h2>&#128421; Todas las Maquinas (${data.machines.length})</h2>
+    <table><tr><th>Nombre</th><th>Owner</th><th>Estado</th><th>IP Publica</th><th>Ping</th><th>CPU</th><th>RAM</th><th>Disco</th><th>Version</th><th>Heartbeat</th></tr>
+    ${data.machines.map(m => {
+      const ramPct = m.ram_usage && m.ram_total ? Math.round(m.ram_usage / m.ram_total * 100) : null;
+      const diskPct = m.disk_usage && m.disk_total ? Math.round(m.disk_usage / m.disk_total * 100) : null;
+      const vBadge = m.agent_version ? (cv && m.agent_version !== cv ? 'badge-outdated' : 'badge-version') : '';
+      return `<tr>
+        <td><strong>${m.machine_name}</strong>${m.grupo ? '<br><span style="color:#00d4ff;font-size:11px">' + m.grupo + '</span>' : ''}</td>
+        <td style="color:#888;font-size:12px">${m.owner_email || '---'}</td>
+        <td>${m.is_online ? '<span class="badge badge-on">ONLINE</span>' : '<span class="badge badge-off">OFFLINE</span>'}</td>
+        <td>${m.public_ip || '---'}</td>
+        <td style="color:${m.ping_ms ? (m.ping_ms < 50 ? '#00e676' : m.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555'}">${m.ping_ms ? m.ping_ms + 'ms' : '---'}</td>
+        <td style="color:${m.cpu_usage > 90 ? '#ff5252' : m.cpu_usage > 70 ? '#ff9800' : '#00e676'}">${m.cpu_usage != null ? m.cpu_usage + '%' : '---'}</td>
+        <td>${ramPct != null ? ramPct + '%' : '---'}</td>
+        <td>${diskPct != null ? diskPct + '%' : '---'}</td>
+        <td>${m.agent_version ? '<span class="badge ' + vBadge + '">v' + m.agent_version + '</span>' : '<span style="color:#555">---</span>'}</td>
+        <td>${timeSince(m.last_heartbeat)}</td>
+      </tr>`;
+    }).join('')}</table>
+  </div>`;
+}
+
+function renderAgent() {
+  const a = data.latestAgent;
+  const cv = data.configuredVersion;
+  const outdated = data.machines.filter(m => m.agent_version && cv && m.agent_version !== cv);
+
+  return `
+    <div class="section"><h2 class="orange">&#128228; Agente Actual</h2>
+      ${a ? `<div class="agent-info">
+        <div class="row"><span class="lbl">Version configurada:</span><span class="val" style="color:#00e676">${cv || '---'}</span></div>
+        <div class="row"><span class="lbl">Archivo:</span><span class="val">${a.filename}</span></div>
+        <div class="row"><span class="lbl">Tamano:</span><span class="val">${fmtSize(a.file_size)}</span></div>
+        <div class="row"><span class="lbl">Subido:</span><span class="val">${fmtDate(a.uploaded_at)}</span></div>
+        ${a.changelog ? '<div class="row"><span class="lbl">Cambios:</span><span class="val">' + a.changelog + '</span></div>' : ''}
+        <div class="row"><span class="lbl">URL descarga:</span><span class="val" style="font-size:11px;color:#00d4ff">${API}/api/agent/download</span></div>
+      </div>` : '<p style="color:#888;margin-bottom:16px">No hay agente subido todavia</p>'}
+      ${outdated.length > 0 ? `<div style="background:#3d2e00;border-radius:10px;padding:14px;margin-bottom:16px">
+        <strong style="color:#ff9800">&#9888; ${outdated.length} maquina(s) con version desactualizada:</strong>
+        <div style="margin-top:8px">${outdated.map(m => '<span style="color:#ddd;font-size:13px;margin-right:16px">' + m.machine_name + ' <span style="color:#888">v' + m.agent_version + '</span></span>').join('')}</div>
+        <div style="color:#888;font-size:12px;margin-top:8px">Se actualizaran automaticamente en el proximo heartbeat.</div>
+      </div>` : (cv ? '<div style="background:#0d2818;border-radius:10px;padding:14px;margin-bottom:16px;color:#00e676">&#9989; Todas las maquinas estan actualizadas</div>' : '')}
+    </div>
+
+    <div class="section"><h2 class="orange">&#128194; Subir Nueva Version</h2>
+      <div class="upload-area ${selectedFile ? 'active' : ''}" onclick="document.getElementById('file-input').click()">
+        <input type="file" id="file-input" accept=".exe" onchange="onFileSelect(this)" />
+        <div class="icon">${selectedFile ? '&#9989;' : '&#128193;'}</div>
+        <div class="text">${selectedFile ? '' : 'Click para seleccionar el exe del agente'}</div>
+        ${selectedFile ? '<div class="filename">' + selectedFile.name + ' (' + fmtSize(selectedFile.size) + ')</div>' : ''}
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Version:</label><input type="text" id="up-version" placeholder="ej: 1.1.0" /></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Changelog (opcional):</label><textarea id="up-changelog" placeholder="Que cambio en esta version..."></textarea></div>
+      </div>
+      <button class="btn-upload" id="btn-up" onclick="doUpload()" ${!selectedFile || uploading ? 'disabled' : ''}>
+        ${uploading ? 'Subiendo...' : '&#128640; Subir y Distribuir'}
+      </button>
+      <div class="progress ${uploading ? 'show' : ''}" id="up-progress"><div class="progress-bar" id="up-bar" style="width:0%"></div></div>
+    </div>
+
+    <div class="section"><h2>&#128218; Historial de Versiones</h2>
+      <div id="history-list"><p style="color:#888">Cargando...</p></div>
+    </div>`;
+}
+
+function onFileSelect(input) {
+  selectedFile = input.files[0] || null;
+  render();
+  if (selectedFile) {
+    const suggestedVer = data.configuredVersion ? bumpVersion(data.configuredVersion) : '1.0.0';
+    document.getElementById('up-version').value = suggestedVer;
+  }
+}
+
+function bumpVersion(v) {
+  const parts = v.split('.').map(Number);
+  parts[2] = (parts[2] || 0) + 1;
+  return parts.join('.');
+}
+
+async function doUpload() {
+  if (!selectedFile) return;
+  const version = document.getElementById('up-version').value.trim();
+  const changelog = document.getElementById('up-changelog').value.trim();
+  if (!version) { alert('Ingresa la version'); return; }
+
+  uploading = true;
+  render();
+
+  const bar = document.getElementById('up-bar');
+  if (bar) bar.style.width = '30%';
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    if (bar) bar.style.width = '60%';
+    const base64 = reader.result.split(',')[1];
+    const res = await api('/api/admin/agent/upload', {
+      method: 'POST',
+      body: JSON.stringify({ version, filename: selectedFile.name, file_base64: base64, changelog })
+    });
+    if (bar) bar.style.width = '100%';
+
+    if (res.ok) {
+      alert('Agente v' + version + ' subido exitosamente!\\nLos agentes se actualizaran en el proximo heartbeat.');
+      selectedFile = null;
+      uploading = false;
+      await loadData();
+    } else {
+      alert('Error: ' + (res.data?.error || 'Error'));
+      uploading = false;
+      render();
+    }
+  };
+  reader.readAsDataURL(selectedFile);
+}
+
+async function loadHistory() {
+  const res = await api('/api/admin/agent/history');
+  if (res.ok) {
+    const el = document.getElementById('history-list');
+    if (el) {
+      el.innerHTML = res.data.length === 0 ? '<p style="color:#888">Sin historial</p>' :
+        res.data.map(h => `<div class="history-item">
+          <span class="ver">v${h.version}</span>
+          <span class="log">${h.changelog || ''}</span>
+          <span class="size">${fmtSize(h.file_size)}</span>
+          <span class="date">${fmtDate(h.uploaded_at)}</span>
+        </div>`).join('');
+    }
+  }
+}
+
+function render() {
+  if (!data) return;
+  let content = '';
+  if (tab === 'overview') content = renderOverview() + renderMachines();
+  else if (tab === 'agent') content = renderAgent();
+
+  document.getElementById('app').innerHTML = `
+    <div class="header">
+      <h1>&#9881; ServerEyes Admin</h1>
+      <div class="actions">
+        <button class="btn-sm ${tab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">&#128202; Overview</button>
+        <button class="btn-sm ${tab === 'agent' ? 'active' : ''}" onclick="setTab('agent')">&#128228; Agente</button>
+        <a href="/" class="btn-sm" style="text-decoration:none">&#128065; Dashboard</a>
+        <button class="btn-sm" style="color:#ff5252" onclick="logout()">Salir</button>
+      </div>
+    </div>
+    <div class="content">${content}</div>`;
+
+  if (tab === 'agent') loadHistory();
+}
+
+function setTab(t) { tab = t; render(); }
+
+// Init
+if (token) { loadData(); } else { renderLogin(); }
+setInterval(() => { if (token && data) loadData(); }, 15000);
+</script>
+</body>
+</html>
