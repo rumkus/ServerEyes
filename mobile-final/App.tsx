@@ -100,6 +100,9 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'all' | 'groups'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
+  const [ipHistoryMachine, setIpHistoryMachine] = useState<any>(null);
+  const [ipHistoryData, setIpHistoryData] = useState<any[]>([]);
+  const [ipHistoryLoading, setIpHistoryLoading] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
 
   // Registrar token FCM para push notifications
@@ -321,6 +324,20 @@ export default function App() {
     loadUptime(machine.id, 7);
   };
 
+  const loadIpHistory = async (machineId: number) => {
+    setIpHistoryLoading(true);
+    try {
+      const res = await apiRequest(`/api/machines/${machineId}/ip-history`, {}, token);
+      if (res.ok) setIpHistoryData(res.data);
+    } catch {}
+    setIpHistoryLoading(false);
+  };
+
+  const openIpHistory = (machine: any) => {
+    setIpHistoryMachine(machine);
+    loadIpHistory(machine.id);
+  };
+
   const triggerDnsUpdate = async (machineId: number) => {
     setDnsUpdating(true);
     try {
@@ -513,6 +530,68 @@ export default function App() {
                 </View>
               ))}
             </View>
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
+  // IP HISTORY
+  if (ipHistoryMachine) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
+        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <View>
+              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>🌐 Historial de IPs</Text>
+              <Text style={{color: '#888', fontSize: 13}}>{ipHistoryMachine.machine_name}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setIpHistoryMachine(null)}
+              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
+              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={{color: '#aaa', fontSize: 12, marginTop: 8}}>IP actual: <Text style={{color: '#00e676', fontWeight: '700'}}>{ipHistoryMachine.public_ip || '---'}</Text></Text>
+        </View>
+
+        {ipHistoryLoading ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+            <ActivityIndicator size="large" color="#00d4ff" />
+          </View>
+        ) : ipHistoryData.length === 0 ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+            <Text style={{fontSize: 40, marginBottom: 10}}>📋</Text>
+            <Text style={{color: '#888', fontSize: 16}}>Sin cambios de IP registrados</Text>
+            <Text style={{color: '#555', fontSize: 13, marginTop: 4}}>Los cambios futuros apareceran aqui</Text>
+          </View>
+        ) : (
+          <ScrollView style={{flex: 1, padding: 16}}>
+            {ipHistoryData.map((entry: any, i: number) => {
+              const date = new Date(entry.changed_at);
+              const dateStr = date.toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
+              const timeStr = date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+              return (
+                <View key={i} style={{backgroundColor: '#16213e', borderRadius: 12, padding: 14, marginBottom: 10}}>
+                  <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8}}>
+                    <Text style={{color: '#888', fontSize: 12}}>{dateStr}</Text>
+                    <Text style={{color: '#888', fontSize: 12}}>{timeStr}</Text>
+                  </View>
+                  <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <View style={{flex: 1, alignItems: 'center'}}>
+                      <Text style={{color: '#666', fontSize: 10, marginBottom: 2}}>anterior</Text>
+                      <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '600'}}>{entry.previous_ip || '---'}</Text>
+                    </View>
+                    <Text style={{color: '#555', fontSize: 18, marginHorizontal: 8}}>→</Text>
+                    <View style={{flex: 1, alignItems: 'center'}}>
+                      <Text style={{color: '#666', fontSize: 10, marginBottom: 2}}>nueva</Text>
+                      <Text style={{color: '#00e676', fontSize: 14, fontWeight: '600'}}>{entry.public_ip}</Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+            <View style={{height: 30}} />
           </ScrollView>
         )}
       </View>
@@ -717,8 +796,11 @@ export default function App() {
       {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
         <View style={{flexDirection: 'row'}}>
-          <TouchableOpacity onPress={() => openUptime(item)} style={{padding: 6, marginRight: 12}}>
+          <TouchableOpacity onPress={() => openUptime(item)} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#00d4ff', fontSize: 12}}>📊 Uptime</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => openIpHistory(item)} style={{padding: 6, marginRight: 10}}>
+            <Text style={{color: '#aaa', fontSize: 12}}>🌐 IPs</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={async () => {
             const res = await apiRequest(`/api/machines/${item.id}/speedtest`, { method: 'POST' }, token);

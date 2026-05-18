@@ -87,6 +87,16 @@ async function initDB() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ip_history (
+      id SERIAL PRIMARY KEY,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      public_ip VARCHAR(45) NOT NULL,
+      previous_ip VARCHAR(45),
+      changed_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // Agregar columnas nuevas si no existen
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_ip_change BOOLEAN DEFAULT true`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`).catch(() => {});
@@ -390,6 +400,15 @@ app.post('/api/heartbeat', async (req, res) => {
       }
     }
 
+    // Registrar cambio de IP en historial (siempre, independiente de check_ip_change)
+    if (updatedMachine && updatedMachine.previous_public_ip &&
+        updatedMachine.previous_public_ip !== public_ip) {
+      await pool.query(
+        'INSERT INTO ip_history (machine_id, public_ip, previous_ip) VALUES ($1, $2, $3)',
+        [updatedMachine.id, public_ip, updatedMachine.previous_public_ip]
+      );
+    }
+
     // Push notification si cambio la IP (solo si check_ip_change esta activo)
     if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.previous_public_ip &&
         updatedMachine.previous_public_ip !== public_ip && updatedMachine.user_id) {
@@ -578,6 +597,24 @@ app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Maquina eliminada' });
   } catch (error) {
     console.error('Error al eliminar maquina:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Obtener historial de IPs de una maquina
+app.get('/api/machines/:id/ip-history', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+
+    const result = await pool.query(
+      `SELECT public_ip, previous_ip, changed_at FROM ip_history
+       WHERE machine_id = $1 ORDER BY changed_at DESC LIMIT 50`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error en ip-history:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });
