@@ -84,6 +84,10 @@ export default function App() {
   const [dnsUpdating, setDnsUpdating] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logText, setLogText] = useState('');
+  const [uptimeMachine, setUptimeMachine] = useState<any>(null);
+  const [uptimeData, setUptimeData] = useState<any[]>([]);
+  const [uptimeDays, setUptimeDays] = useState(7);
+  const [uptimeLoading, setUptimeLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'all' | 'groups'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
@@ -243,6 +247,21 @@ export default function App() {
     setEditingMachine(null);
   };
 
+  const loadUptime = async (machineId: number, days: number = 7) => {
+    setUptimeLoading(true);
+    try {
+      const res = await apiRequest(`/api/machines/${machineId}/uptime?days=${days}`, {}, token);
+      if (res.ok) setUptimeData(res.data);
+    } catch {}
+    setUptimeLoading(false);
+  };
+
+  const openUptime = (machine: any) => {
+    setUptimeMachine(machine);
+    setUptimeDays(7);
+    loadUptime(machine.id, 7);
+  };
+
   const triggerDnsUpdate = async (machineId: number) => {
     setDnsUpdating(true);
     try {
@@ -334,6 +353,80 @@ export default function App() {
     if (d < 86400) return `${Math.floor(d / 3600)}h`;
     return `${Math.floor(d / 86400)}d`;
   };
+
+  // UPTIME
+  if (uptimeMachine) {
+    const avgUptime = uptimeData.length > 0
+      ? Math.round(uptimeData.reduce((a: number, d: any) => a + d.percentage, 0) / uptimeData.length)
+      : 0;
+
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
+        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <View>
+              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>📊 Uptime</Text>
+              <Text style={{color: '#888', fontSize: 13}}>{uptimeMachine.machine_name}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setUptimeMachine(null)}
+              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
+              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{flexDirection: 'row', marginTop: 12}}>
+            {[7, 14, 30].map(d => (
+              <TouchableOpacity key={d}
+                onPress={() => { setUptimeDays(d); loadUptime(uptimeMachine.id, d); }}
+                style={{backgroundColor: uptimeDays === d ? '#00d4ff' : '#2a2a4a', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6, marginRight: 8}}>
+                <Text style={{color: uptimeDays === d ? '#1a1a2e' : '#888', fontWeight: '600', fontSize: 13}}>{d} dias</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {uptimeLoading ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+            <ActivityIndicator size="large" color="#00d4ff" />
+          </View>
+        ) : (
+          <ScrollView style={{flex: 1, padding: 16}}>
+            <View style={{alignItems: 'center', marginBottom: 20}}>
+              <Text style={{fontSize: 48, fontWeight: '800', color: avgUptime >= 95 ? '#00e676' : avgUptime >= 80 ? '#ff9800' : '#ff5252'}}>
+                {avgUptime}%
+              </Text>
+              <Text style={{color: '#888', fontSize: 14}}>Promedio ultimos {uptimeDays} dias</Text>
+            </View>
+
+            {uptimeData.map((day: any, i: number) => {
+              const barColor = day.percentage >= 95 ? '#00e676' : day.percentage >= 80 ? '#ff9800' : '#ff5252';
+              const dateStr = new Date(day.date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
+              return (
+                <View key={i} style={{flexDirection: 'row', alignItems: 'center', marginBottom: 8}}>
+                  <Text style={{color: '#888', fontSize: 11, width: 75}}>{dateStr}</Text>
+                  <View style={{flex: 1, height: 20, backgroundColor: '#2a2a4a', borderRadius: 4, overflow: 'hidden'}}>
+                    <View style={{width: `${day.percentage}%`, height: '100%', backgroundColor: barColor, borderRadius: 4}} />
+                  </View>
+                  <Text style={{color: '#ddd', fontSize: 12, fontWeight: '600', width: 40, textAlign: 'right'}}>{day.percentage}%</Text>
+                </View>
+              );
+            })}
+
+            <View style={{marginTop: 20, backgroundColor: '#16213e', borderRadius: 12, padding: 16}}>
+              <Text style={{color: '#888', fontSize: 12, marginBottom: 8}}>Detalle:</Text>
+              {uptimeData.slice(-7).reverse().map((day: any, i: number) => (
+                <View key={i} style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
+                  <Text style={{color: '#aaa', fontSize: 12}}>{day.date}</Text>
+                  <Text style={{color: '#00e676', fontSize: 12}}>{Math.round(day.online_minutes)}min online</Text>
+                  <Text style={{color: '#ff5252', fontSize: 12}}>{Math.round(day.offline_minutes)}min offline</Text>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
 
   // LOGS
   if (showLogs) {
@@ -511,13 +604,18 @@ export default function App() {
         <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{timeSince(item.last_heartbeat)}</Text>
       </View>
       {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
-      <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8}}>
-        <TouchableOpacity onPress={() => moveMachineUp(item)} style={{padding: 6}}>
-          <Text style={{color: '#555', fontSize: 16}}>▲</Text>
+      <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
+        <TouchableOpacity onPress={() => openUptime(item)} style={{flexDirection: 'row', alignItems: 'center', padding: 6}}>
+          <Text style={{color: '#00d4ff', fontSize: 12}}>📊 Uptime</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => moveMachineDown(item)} style={{padding: 6, marginLeft: 8}}>
-          <Text style={{color: '#555', fontSize: 16}}>▼</Text>
-        </TouchableOpacity>
+        <View style={{flexDirection: 'row'}}>
+          <TouchableOpacity onPress={() => moveMachineUp(item)} style={{padding: 6}}>
+            <Text style={{color: '#555', fontSize: 16}}>▲</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => moveMachineDown(item)} style={{padding: 6, marginLeft: 8}}>
+            <Text style={{color: '#555', fontSize: 16}}>▼</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </TouchableOpacity>
   );

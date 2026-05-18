@@ -271,6 +271,19 @@ app.post('/api/heartbeat', async (req, res) => {
       [result.rows[0].id, public_ip]
     );
 
+    // Registrar cambio a online si estaba offline
+    const updatedMachine = result.rows[0];
+    if (updatedMachine) {
+      // Chequeamos si es la primera vez o si estaba offline antes
+      const lastLog = await pool.query(
+        'SELECT status FROM uptime_log WHERE machine_id = $1 ORDER BY timestamp DESC LIMIT 1',
+        [updatedMachine.id]
+      );
+      if (lastLog.rows.length === 0 || lastLog.rows[0].status === 'offline') {
+        await pool.query('INSERT INTO uptime_log (machine_id, status) VALUES ($1, $2)', [updatedMachine.id, 'online']);
+      }
+    }
+
     // Auto-update DNS si cambio la IP y tiene URL configurada
     const updatedMachine = result.rows[0];
     if (updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
@@ -471,6 +484,7 @@ setInterval(async () => {
     for (const machine of offlineMachines.rows) {
       if (!machine.offline_notified) {
         console.log(`[OFFLINE] ${machine.machine_name} (${machine.public_ip})`);
+        await pool.query('INSERT INTO uptime_log (machine_id, status) VALUES ($1, $2)', [machine.id, 'offline']);
         await pool.query(
           'UPDATE machines SET offline_notified = true WHERE id = $1',
           [machine.id]
@@ -486,6 +500,94 @@ setInterval(async () => {
 
 app.get('/api/status', (req, res) => {
   res.json({ status: 'ServerEyes running', timestamp: new Date().toISOString() });
+});
+
+// Historial de uptime de una maquina (ultimos N dias)
+app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days as string) || 7;
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+
+    // Obtener eventos de uptime
+    const events = await pool.query(
+      `SELECT status, timestamp FROM uptime_log
+       WHERE machine_id = $1 AND timestamp > NOW() - INTERVAL '1 day' * $2
+       ORDER BY timestamp ASC`,
+      [req.params.id, days]
+    );
+
+    // Calcular uptime por dia
+    const dailyUptime: any = {};
+    const now = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const key = date.toISOString().split('T')[0];
+      dailyUptime[key] = { date: key, online_minutes: 0, offline_minutes: 0, total_minutes: 1440, percentage: 0 };
+    }
+
+    // Procesar eventos para calcular minutos online/offline por dia
+    let lastStatus = 'offline';
+    let lastTime = new Date(now.getTime() - days * 86400000);
+
+    for (const event of events.rows) {
+      const eventTime = new Date(event.timestamp);
+      const diffMinutes = (eventTime.getTime() - lastTime.getTime()) / 60000;
+
+      // Distribuir minutos entre dias
+      let remaining = diffMinutes;
+      let cursor = new Date(lastTime);
+      while (remaining > 0) {
+        const dayKey = cursor.toISOString().split('T')[0];
+        const endOfDay = new Date(cursor);
+        endOfDay.setHours(23, 59, 59, 999);
+        const minutesInDay = Math.min(remaining, (endOfDay.getTime() - cursor.getTime()) / 60000);
+
+        if (dailyUptime[dayKey]) {
+          if (lastStatus === 'online') dailyUptime[dayKey].online_minutes += minutesInDay;
+          else dailyUptime[dayKey].offline_minutes += minutesInDay;
+        }
+
+        remaining -= minutesInDay;
+        cursor = new Date(endOfDay.getTime() + 1);
+      }
+
+      lastStatus = event.status;
+      lastTime = eventTime;
+    }
+
+    // Desde el ultimo evento hasta ahora
+    const finalDiff = (now.getTime() - lastTime.getTime()) / 60000;
+    let remaining = finalDiff;
+    let cursor = new Date(lastTime);
+    while (remaining > 0) {
+      const dayKey = cursor.toISOString().split('T')[0];
+      const endOfDay = new Date(cursor);
+      endOfDay.setHours(23, 59, 59, 999);
+      const minutesInDay = Math.min(remaining, (endOfDay.getTime() - cursor.getTime()) / 60000);
+
+      if (dailyUptime[dayKey]) {
+        if (lastStatus === 'online') dailyUptime[dayKey].online_minutes += minutesInDay;
+        else dailyUptime[dayKey].offline_minutes += minutesInDay;
+      }
+
+      remaining -= minutesInDay;
+      cursor = new Date(endOfDay.getTime() + 1);
+    }
+
+    // Calcular porcentajes
+    const result = Object.values(dailyUptime).map((d: any) => {
+      const total = d.online_minutes + d.offline_minutes;
+      d.percentage = total > 0 ? Math.round((d.online_minutes / total) * 100) : 0;
+      return d;
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error en uptime:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
 });
 
 // Endpoint para cambios de IP no vistos
