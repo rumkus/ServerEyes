@@ -109,6 +109,9 @@ export default function App() {
   const [ipHistoryData, setIpHistoryData] = useState<any[]>([]);
   const [ipHistoryLoading, setIpHistoryLoading] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [showAgentUpdate, setShowAgentUpdate] = useState(false);
+  const [agentVersion, setAgentVersion] = useState('');
+  const [agentUrl, setAgentUrl] = useState('');
 
   // Registrar token FCM para push notifications
   const registerFCM = async () => {
@@ -900,6 +903,63 @@ export default function App() {
     );
   };
 
+  // AGENT UPDATE
+  if (showAgentUpdate) {
+    const outdated = machines.filter(m => m.agent_version && agentVersion && m.agent_version !== agentVersion);
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
+          <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>&#128228;</Text>
+          <Text style={s.title}>Actualizar Agente</Text>
+          <Text style={[s.sub, {marginBottom: 20}]}>Los agentes se actualizan en el proximo heartbeat</Text>
+
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Version:</Text>
+          <TextInput style={s.input} value={agentVersion} onChangeText={setAgentVersion} placeholder="ej: 1.1.0" placeholderTextColor="#666" />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>URL de descarga del exe:</Text>
+          <TextInput style={[s.input, {fontSize: 13}]} value={agentUrl} onChangeText={setAgentUrl} placeholder="https://..." placeholderTextColor="#666" autoCapitalize="none" />
+          <Text style={{color: '#555', fontSize: 11, marginBottom: 16}}>Los agentes descargan el exe automaticamente cuando detectan una version nueva.</Text>
+
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            if (!agentVersion.trim() || !agentUrl.trim()) { Alert.alert('Error', 'Completa version y URL'); return; }
+            const res = await apiRequest('/api/agent/version', { method: 'POST', body: JSON.stringify({ version: agentVersion.trim(), url: agentUrl.trim() }) }, token);
+            if (res.ok) { Alert.alert('Guardado', `Version ${agentVersion} configurada`); setShowAgentUpdate(false); }
+            else Alert.alert('Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Guardar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowAgentUpdate(false)}>
+            <Text style={s.link}>Cancelar</Text>
+          </TouchableOpacity>
+
+          {outdated.length > 0 && (
+            <View style={{marginTop: 24, backgroundColor: '#16213e', borderRadius: 12, padding: 16}}>
+              <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginBottom: 8}}>{outdated.length} maquina(s) pendientes</Text>
+              {outdated.map(m => (
+                <View key={m.id} style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
+                  <Text style={{color: '#ddd', fontSize: 13}}>{m.machine_name}</Text>
+                  <Text style={{color: '#888', fontSize: 13}}>v{m.agent_version}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {machines.filter(m => m.agent_version).length > 0 && (
+            <View style={{marginTop: 16, backgroundColor: '#16213e', borderRadius: 12, padding: 16}}>
+              <Text style={{color: '#888', fontSize: 12, marginBottom: 8}}>Versiones instaladas:</Text>
+              {machines.filter(m => m.agent_version).map(m => (
+                <View key={m.id} style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
+                  <Text style={{color: '#ddd', fontSize: 13}}>{m.machine_name}</Text>
+                  <Text style={{color: m.agent_version === agentVersion ? '#00e676' : '#ff9800', fontSize: 13, fontWeight: '600'}}>v{m.agent_version}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
   // GROUP PICKER (long-press)
   if (showGroupPicker) {
     const pickerMachine = showGroupPicker;
@@ -1080,6 +1140,15 @@ export default function App() {
             onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}
             style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
             <Text style={{color: '#888', fontSize: 13}}>📋</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={async () => {
+              const res = await apiRequest('/api/agent/version', {}, token);
+              if (res.ok) { setAgentVersion(res.data.version || ''); setAgentUrl(res.data.url || ''); }
+              setShowAgentUpdate(true);
+            }}
+            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+            <Text style={{color: '#888', fontSize: 13}}>&#128228;</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setShowChangePass(true)}

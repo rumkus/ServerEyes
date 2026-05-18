@@ -6,10 +6,14 @@ const path = require('path');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
+const { spawn } = require('child_process');
+
+const AGENT_VERSION = '1.0.0';
 const EXE_PATH = process.execPath;
-const CONFIG_FILE = path.join(path.dirname(EXE_PATH), 'servereyes-config.json');
-const LOG_FILE = path.join(path.dirname(EXE_PATH), 'servereyes.log');
-const VBS_FILE = path.join(path.dirname(EXE_PATH), 'ServerEyes-Silent.vbs');
+const EXE_DIR = path.dirname(EXE_PATH);
+const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
+const LOG_FILE = path.join(EXE_DIR, 'servereyes.log');
+const VBS_FILE = path.join(EXE_DIR, 'ServerEyes-Silent.vbs');
 const TASK_NAME = 'ServerEyes Agent';
 
 function loadConfig() {
@@ -140,6 +144,62 @@ async function measureSpeed() {
   });
 }
 
+// Auto-update: descarga nuevo exe, crea un bat que reemplaza y reinicia
+async function selfUpdate(url, newVersion, config) {
+  const newPath = path.join(EXE_DIR, 'servereyes-new.exe');
+  const batPath = path.join(EXE_DIR, 'servereyes-update.bat');
+
+  log(`Descargando actualizacion v${newVersion} desde ${url}`);
+  try {
+    // Descargar archivo
+    await new Promise((resolve, reject) => {
+      const client = url.startsWith('https') ? https : http;
+      const download = (downloadUrl) => {
+        client.get(downloadUrl, (res) => {
+          // Seguir redirects
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            const redirectClient = res.headers.location.startsWith('https') ? https : http;
+            redirectClient.get(res.headers.location, (res2) => {
+              if (res2.statusCode !== 200) { reject(new Error(`HTTP ${res2.statusCode}`)); return; }
+              const file = fs.createWriteStream(newPath);
+              res2.pipe(file);
+              file.on('finish', () => { file.close(); resolve(); });
+            }).on('error', reject);
+            return;
+          }
+          if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+          const file = fs.createWriteStream(newPath);
+          res.pipe(file);
+          file.on('finish', () => { file.close(); resolve(); });
+        }).on('error', reject);
+      };
+      download(url);
+    });
+
+    // Verificar que el archivo descargado tiene tamaño razonable (>1MB)
+    const stats = fs.statSync(newPath);
+    if (stats.size < 1024 * 1024) {
+      log('Archivo descargado muy chico, abortando update');
+      fs.unlinkSync(newPath);
+      return;
+    }
+
+    log(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), aplicando update...`);
+
+    // Crear bat que espera, reemplaza y reinicia
+    const exeName = path.basename(EXE_PATH);
+    const batContent = `@echo off\r\ntimeout /t 3 /nobreak >nul\r\ndel "${EXE_PATH}" 2>nul\r\nmove "${newPath}" "${EXE_PATH}" >nul\r\nstart "" "${EXE_PATH}"\r\ndel "%~f0"\r\n`;
+    fs.writeFileSync(batPath, batContent);
+
+    log('Reiniciando con nueva version...');
+    spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' }).unref();
+    process.exit(0);
+  } catch (err) {
+    log(`Error en update: ${err.message}`);
+    try { if (fs.existsSync(newPath)) fs.unlinkSync(newPath); } catch {}
+  }
+}
+
 // Heartbeat
 async function sendHeartbeat(config) {
   if (!config.serverUrl || !config.machineKey) return;
@@ -153,11 +213,18 @@ async function sendHeartbeat(config) {
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, ...metrics
       })
     });
     if (res.ok) {
-      log(`Heartbeat OK - IP: ${publicIP} - Ping: ${pingMs || '?'}ms`);
+      log(`Heartbeat OK - IP: ${publicIP} - Ping: ${pingMs || '?'}ms - v${AGENT_VERSION}`);
+
+      // Chequear si hay actualizacion disponible
+      if (res.data && res.data.update && res.data.update.url) {
+        log(`Actualizacion disponible: v${res.data.update.version}`);
+        await selfUpdate(res.data.update.url, res.data.update.version, config);
+      }
+
       // Chequear si el server pide speed test
       if (res.data && res.data.run_speedtest) {
         log('Speed test solicitado, ejecutando...');

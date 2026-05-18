@@ -5,8 +5,9 @@ const os = require('os');
 const https = require('https');
 const http = require('http');
 
-const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain } = electron;
+const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, dialog } = electron;
 
+const CLIENT_VERSION = '1.0.0';
 let tray = null;
 let configWindow = null;
 let heartbeatTimer = null;
@@ -205,11 +206,18 @@ async function sendHeartbeat() {
         local_ip: getLocalIP(),
         os_info: getOSInfo(),
         ping_ms: pingMs,
+        agent_version: CLIENT_VERSION,
         ...metrics
       })
     });
 
-    if (tray) tray.setToolTip(res.ok ? `ServerEyes - Conectado (${publicIP}) - ${pingMs || '?'}ms` : 'ServerEyes - Error');
+    if (tray) tray.setToolTip(res.ok ? `ServerEyes v${CLIENT_VERSION} - ${publicIP} - ${pingMs || '?'}ms` : 'ServerEyes - Error');
+
+    // Notificar si hay update disponible
+    if (res.ok && res.data && res.data.update) {
+      const { version, url } = res.data.update;
+      if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Update v${version} disponible`);
+    }
 
     // Speed test si el servidor lo pide
     if (res.ok && res.data && res.data.run_speedtest) {

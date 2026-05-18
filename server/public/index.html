@@ -100,6 +100,25 @@ body { background: #1a1a2e; color: #eee; font-family: -apple-system, BlinkMacSys
 
 .no-group-label { color: #555; font-size: 13px; padding: 12px 24px 4px; }
 
+/* Update modal */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 200; }
+.modal { background: #16213e; border-radius: 16px; padding: 30px; width: 460px; max-width: 90vw; }
+.modal h2 { color: #00d4ff; margin-bottom: 16px; font-size: 20px; }
+.modal label { color: #888; font-size: 12px; display: block; margin-bottom: 4px; }
+.modal input { width: 100%; background: #1a1a2e; border: 2px solid #2a2a4a; border-radius: 10px; padding: 10px 14px; color: #eee; font-size: 14px; margin-bottom: 12px; outline: none; }
+.modal input:focus { border-color: #00d4ff; }
+.modal .btn { width: 100%; background: #00d4ff; color: #1a1a2e; border: none; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 4px; }
+.modal .btn:hover { background: #00b8d9; }
+.modal .btn-cancel { background: #2a2a4a; color: #888; margin-top: 8px; }
+.modal .btn-cancel:hover { background: #3a3a5a; color: #eee; }
+.modal .current { color: #888; font-size: 13px; margin-bottom: 16px; }
+.modal .current span { color: #00e676; font-weight: 600; }
+.modal .hint { color: #555; font-size: 11px; margin-bottom: 8px; }
+
+/* Agent version badge on cards */
+.card-version { color: #555; font-size: 11px; margin-top: 4px; }
+.card-version .outdated { color: #ff9800; }
+
 /* Responsive */
 @media (max-width: 500px) {
   .grid { grid-template-columns: 1fr; padding: 0 12px 12px; }
@@ -123,6 +142,8 @@ const API = window.location.origin;
 let token = localStorage.getItem('se_token');
 let machines = [];
 let filter = '';
+let agentInfo = { version: null, url: null };
+let showUpdateModal = false;
 let statusFilter = 'all';
 let viewMode = 'list'; // list | groups
 let expandedGroups = new Set();
@@ -264,6 +285,7 @@ function renderCard(m) {
       ${m.download_mbps ? '<div class="card-row"><span class="lbl">Velocidad:</span><span class="val" style="color:#00d4ff">' + m.download_mbps + ' Mbps</span></div>' : ''}
       ${bars}
       ${m.os_info ? '<div class="card-os">' + m.os_info + '</div>' : ''}
+      ${m.agent_version ? '<div class="card-version">v' + m.agent_version + (agentInfo.version && m.agent_version !== agentInfo.version ? ' <span class="outdated">(update disponible: v' + agentInfo.version + ')</span>' : '') + '</div>' : ''}
     </div>`;
 }
 
@@ -320,6 +342,7 @@ function renderDashboard() {
         <span class="info"><span class="refresh-dot"></span>Auto-refresh 10s</span>
       </div>
       <div class="actions">
+        <button class="btn-sm" onclick="openUpdateModal()">&#128228; Agente</button>
         <button class="btn-sm" onclick="toggleView()">${viewMode === 'groups' ? '&#128203; Lista' : '&#128193; Grupos'}</button>
         <button class="btn-sm btn-logout" onclick="logout()">Salir</button>
       </div>
@@ -336,6 +359,7 @@ function renderDashboard() {
       <button class="filter-btn ${statusFilter === 'offline' ? 'active' : ''}" onclick="setStatus('offline')">Offline</button>
     </div>
     ${list.length === 0 ? '<div style="text-align:center;padding:80px 0"><div style="font-size:60px">&#128421;</div><div style="color:#888;font-size:18px;margin-top:16px">No hay maquinas</div></div>' : content}
+    ${showUpdateModal ? renderUpdateModal() : ''}
   `;
 }
 
@@ -357,8 +381,62 @@ async function loadMachines() {
 // Start
 async function startDashboard() {
   await loadMachines();
+  await loadAgentInfo();
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(loadMachines, 10000);
+}
+
+// Agent update management
+function renderUpdateModal() {
+  const outdatedCount = machines.filter(m => m.agent_version && agentInfo.version && m.agent_version !== agentInfo.version).length;
+  return `
+    <div class="modal-overlay" onclick="if(event.target===this)closeUpdateModal()">
+      <div class="modal">
+        <h2>&#128228; Actualizar Agente</h2>
+        <div class="current">
+          Version configurada: <span>${agentInfo.version || 'No configurada'}</span>
+          ${outdatedCount > 0 ? '<br><span style="color:#ff9800">' + outdatedCount + ' maquina(s) pendientes de actualizar</span>' : ''}
+        </div>
+        <label>Nueva version:</label>
+        <input type="text" id="update-version" placeholder="ej: 1.1.0" value="${agentInfo.version || ''}" />
+        <label>URL de descarga del exe:</label>
+        <input type="text" id="update-url" placeholder="https://github.com/.../agent.exe" value="${agentInfo.url || ''}" />
+        <div class="hint">Los agentes descargan automaticamente la nueva version en el proximo heartbeat.</div>
+        <button class="btn" onclick="saveAgentVersion()">Guardar</button>
+        <button class="btn btn-cancel" onclick="closeUpdateModal()">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function openUpdateModal() {
+  const res = await api('/api/agent/version');
+  if (res.ok) agentInfo = res.data;
+  showUpdateModal = true;
+  renderDashboard();
+}
+
+function closeUpdateModal() {
+  showUpdateModal = false;
+  renderDashboard();
+}
+
+async function saveAgentVersion() {
+  const version = document.getElementById('update-version').value.trim();
+  const url = document.getElementById('update-url').value.trim();
+  if (!version || !url) { alert('Completa version y URL'); return; }
+  const res = await api('/api/agent/version', { method: 'POST', body: JSON.stringify({ version, url }) });
+  if (res.ok) {
+    agentInfo = { version, url };
+    showUpdateModal = false;
+    renderDashboard();
+  } else {
+    alert(res.data?.error || 'Error');
+  }
+}
+
+async function loadAgentInfo() {
+  const res = await api('/api/agent/version');
+  if (res.ok) agentInfo = res.data;
 }
 
 // Init

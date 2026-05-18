@@ -114,6 +114,16 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_offline BOOLEAN DEFAULT true`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS last_alert_at TIMESTAMP`).catch(() => {});
 
+  // Tabla de configuracion general
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key VARCHAR(50) PRIMARY KEY,
+      value TEXT
+    )
+  `);
+  // Columna para que cada maquina reporte su version
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_version VARCHAR(20)`).catch(() => {});
+
   console.log('Base de datos inicializada');
 }
 
@@ -357,7 +367,7 @@ const pendingSpeedTests = new Set();
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, agent_version: reportedVersion } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
@@ -387,12 +397,13 @@ app.post('/api/heartbeat', async (req, res) => {
         ram_total = COALESCE($8, ram_total),
         disk_usage = COALESCE($9, disk_usage),
         disk_total = COALESCE($10, disk_total),
+        agent_version = COALESCE($11, agent_version),
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
       WHERE machine_key = $5
       RETURNING *`,
-      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total]
+      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion]
     );
 
     if (result.rows.length === 0) {
@@ -480,7 +491,21 @@ app.post('/api/heartbeat', async (req, res) => {
     const runSpeedtest = pendingSpeedTests.has(updatedMachine.id);
     if (runSpeedtest) pendingSpeedTests.delete(updatedMachine.id);
 
-    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest });
+    // Chequear si hay update disponible
+    let updateInfo = null;
+    try {
+      const verRow = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
+      const urlRow = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
+      if (verRow.rows.length > 0 && urlRow.rows.length > 0) {
+        const latestVersion = verRow.rows[0].value;
+        const agentUrl = urlRow.rows[0].value;
+        if (latestVersion && agentUrl && reportedVersion && reportedVersion !== latestVersion) {
+          updateInfo = { version: latestVersion, url: agentUrl };
+        }
+      }
+    } catch {}
+
+    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo });
   } catch (error) {
     console.error('Error en heartbeat:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -715,6 +740,36 @@ setInterval(async () => {
     console.error('Error en detector offline:', error);
   }
 }, 30000);
+
+// ============== GESTION DE AGENTE ==============
+
+// Obtener version del agente
+app.get('/api/agent/version', authenticateToken, async (req, res) => {
+  try {
+    const ver = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
+    const url = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
+    res.json({
+      version: ver.rows[0]?.value || null,
+      url: url.rows[0]?.value || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Configurar version del agente
+app.post('/api/agent/version', authenticateToken, async (req, res) => {
+  try {
+    const { version, url } = req.body;
+    if (!version || !url) return res.status(400).json({ error: 'version y url requeridos' });
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [url]);
+    res.json({ message: 'Version actualizada', version, url });
+  } catch (error) {
+    console.error('Error actualizando version agente:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // ============== RUTA DE ESTADO ==============
 
