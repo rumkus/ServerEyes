@@ -319,14 +319,22 @@ function install() {
   const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False\r\n`;
   fs.writeFileSync(VBS_FILE, vbsContent);
 
-  // Crear VBS watchdog que chequea si el proceso existe y lo levanta si no
+  // Crear VBS watchdog que chequea si el proceso existe y lo levanta si no (100% silencioso)
   const watchdogVbs = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
+  const tempCheck = 'fso.GetSpecialFolder(2) & "\\se_check.tmp"';
   const watchdogContent = [
     'Set WshShell = CreateObject("WScript.Shell")',
-    `Set objExec = WshShell.Exec("tasklist /FI ""IMAGENAME eq ${exeName}"" /NH")`,
-    'strOutput = objExec.StdOut.ReadAll',
-    `If InStr(strOutput, "${exeName}") = 0 Then`,
-    `  WshShell.Run chr(34) & "${EXE_PATH}" & chr(34), 0, False`,
+    'Set fso = CreateObject("Scripting.FileSystemObject")',
+    `tempFile = ${tempCheck}`,
+    `WshShell.Run "cmd /c tasklist /FI ""IMAGENAME eq ${exeName}"" /NH > """ & tempFile & """", 0, True`,
+    'If fso.FileExists(tempFile) Then',
+    '  Set f = fso.OpenTextFile(tempFile, 1)',
+    '  strOutput = f.ReadAll',
+    '  f.Close',
+    '  fso.DeleteFile tempFile',
+    `  If InStr(strOutput, "${exeName}") = 0 Then`,
+    `    WshShell.Run chr(34) & "${EXE_PATH}" & chr(34), 0, False`,
+    '  End If',
     'End If',
   ].join('\r\n') + '\r\n';
   fs.writeFileSync(watchdogVbs, watchdogContent);
