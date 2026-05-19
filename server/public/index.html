@@ -313,7 +313,12 @@ function renderCard(m) {
     const pct = Math.round((m.ram_usage / m.ram_total) * 100);
     bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">RAM</span><span class="val" style="color:${textColor(pct)}">${m.ram_usage}/${m.ram_total} GB</span></div><div class="bar"><div class="bar-fill ${barColor(pct)}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
   }
-  if (m.disk_usage !== null && m.disk_usage !== undefined && m.disk_total) {
+  if (m.disks && Array.isArray(m.disks) && m.disks.length > 0) {
+    for (const disk of m.disks) {
+      const pct = disk.total > 0 ? Math.round((disk.used / disk.total) * 100) : 0;
+      bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">Disco ${disk.drive}</span><span class="val" style="color:${textColor(pct, [85, 95])}">${disk.used}/${disk.total} GB (${disk.free} GB libre)</span></div><div class="bar"><div class="bar-fill ${barColor(pct, [85, 95])}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
+    }
+  } else if (m.disk_usage !== null && m.disk_usage !== undefined && m.disk_total) {
     const pct = Math.round((m.disk_usage / m.disk_total) * 100);
     bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">Disco C:</span><span class="val" style="color:${textColor(pct, [85, 95])}">${m.disk_usage}/${m.disk_total} GB</span></div><div class="bar"><div class="bar-fill ${barColor(pct, [85, 95])}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
   }

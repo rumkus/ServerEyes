@@ -844,7 +844,22 @@ export default function App() {
           </View>
         </View>
       )}
-      {(item.disk_usage !== null && item.disk_usage !== undefined) && (
+      {item.disks && Array.isArray(item.disks) && item.disks.length > 0 ? (
+        item.disks.map((disk: any, idx: number) => {
+          const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
+          return (
+            <View key={idx} style={{marginTop: 6}}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
+                <Text style={{color: '#888', fontSize: 12}}>Disco {disk.drive}</Text>
+                <Text style={{color: '#aaa', fontSize: 12, fontWeight: '600'}}>{disk.used}/{disk.total} GB ({Math.round(disk.free)} GB libre)</Text>
+              </View>
+              <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
+                <View style={{width: `${Math.min(pct * 100, 100)}%`, height: '100%', backgroundColor: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+              </View>
+            </View>
+          );
+        })
+      ) : (item.disk_usage !== null && item.disk_usage !== undefined) ? (
         <View style={{marginTop: 6}}>
           <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
             <Text style={{color: '#888', fontSize: 12}}>Disco C:</Text>
@@ -854,7 +869,7 @@ export default function App() {
             <View style={{width: `${Math.min((item.disk_usage / item.disk_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.disk_usage / item.disk_total) > 0.95 ? '#ff5252' : (item.disk_usage / item.disk_total) > 0.85 ? '#ff9800' : '#00e676', borderRadius: 3}} />
           </View>
         </View>
-      )}
+      ) : null}
       {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
         <View style={{flexDirection: 'row'}}>

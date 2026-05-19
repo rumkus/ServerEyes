@@ -78,7 +78,7 @@ function getOSInfo() {
   return `${os.type()} ${os.release()} | ${os.cpus()[0]?.model || 'Unknown'} | RAM: ${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`;
 }
 
-// Metricas del sistema (CPU, RAM, Disco)
+// Metricas del sistema (CPU, RAM, todos los Discos)
 function getSystemMetrics() {
   return new Promise((resolve) => {
     const { exec } = require('child_process');
@@ -92,19 +92,30 @@ function getSystemMetrics() {
       const freeMem = os.freemem();
       const ramTotal = Math.round(totalMem / 1024 / 1024 / 1024 * 10) / 10;
       const ramUsage = Math.round((totalMem - freeMem) / 1024 / 1024 / 1024 * 10) / 10;
-      exec('wmic logicaldisk where "DeviceID=\'C:\'" get Size,FreeSpace /value', (err2, diskOut) => {
-        let diskTotal = null, diskUsage = null;
+
+      // Obtener TODOS los discos fijos (DriveType=3)
+      exec('wmic logicaldisk where "DriveType=3" get DeviceID,Size,FreeSpace /format:csv', (err2, diskOut) => {
+        const disks = [];
+        let diskUsage = null, diskTotal = null; // mantener C: para compatibilidad
         if (!err2) {
-          const freeMatch = diskOut.match(/FreeSpace=(\d+)/);
-          const sizeMatch = diskOut.match(/Size=(\d+)/);
-          if (freeMatch && sizeMatch) {
-            const total = parseInt(sizeMatch[1]);
-            const free = parseInt(freeMatch[1]);
-            diskTotal = Math.round(total / 1024 / 1024 / 1024 * 10) / 10;
-            diskUsage = Math.round((total - free) / 1024 / 1024 / 1024 * 10) / 10;
+          const lines = diskOut.trim().split('\n').filter(l => l.trim() && !l.startsWith('Node'));
+          for (const line of lines) {
+            const parts = line.trim().split(',');
+            // CSV: Node,DeviceID,FreeSpace,Size
+            if (parts.length >= 4) {
+              const drive = parts[1];
+              const free = parseInt(parts[2]);
+              const total = parseInt(parts[3]);
+              if (total > 0) {
+                const dTotal = Math.round(total / 1024 / 1024 / 1024 * 10) / 10;
+                const dUsage = Math.round((total - free) / 1024 / 1024 / 1024 * 10) / 10;
+                disks.push({ drive, total: dTotal, used: dUsage, free: Math.round(free / 1024 / 1024 / 1024 * 10) / 10 });
+                if (drive === 'C:') { diskTotal = dTotal; diskUsage = dUsage; }
+              }
+            }
           }
         }
-        resolve({ cpu_usage: cpuUsage, ram_usage: ramUsage, ram_total: ramTotal, disk_usage: diskUsage, disk_total: diskTotal });
+        resolve({ cpu_usage: cpuUsage, ram_usage: ramUsage, ram_total: ramTotal, disk_usage: diskUsage, disk_total: diskTotal, disks });
       });
     });
   });
