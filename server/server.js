@@ -1058,6 +1058,30 @@ app.get('/api/agent/download', async (req, res) => {
   }
 });
 
+// Toggle admin de un usuario
+app.post('/api/admin/toggle-admin', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { user_id, is_admin } = req.body;
+    await pool.query('UPDATE users SET is_admin = $1 WHERE id = $2', [is_admin, user_id]);
+    res.json({ message: 'Actualizado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Resetear contraseña de un usuario
+app.post('/api/admin/reset-password', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { user_id, new_password } = req.body;
+    if (!new_password || new_password.length < 6) return res.status(400).json({ error: 'Minimo 6 caracteres' });
+    const hash = await bcrypt.hash(new_password, 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, user_id]);
+    res.json({ message: 'Contraseña reseteada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // Historial de versiones del agente
 app.get('/api/admin/agent/history', authenticateToken, requireAdmin, async (req, res) => {
   try {

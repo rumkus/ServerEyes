@@ -128,6 +128,45 @@ body { background: #1a1a2e; color: #eee; font-family: -apple-system, BlinkMacSys
   .filter-bar input { width: 100%; }
 }
 
+/* Card action buttons */
+.card-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.card-btn { background: #2a2a4a; color: #888; border: none; border-radius: 6px; padding: 5px 10px; font-size: 11px; cursor: pointer; font-weight: 600; }
+.card-btn:hover { background: #3a3a5a; color: #eee; }
+.card-btn.btn-edit { color: #00d4ff; }
+
+/* Detail modal */
+.detail-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: flex-start; padding-top: 60px; z-index: 200; overflow-y: auto; }
+.detail-panel { background: #16213e; border-radius: 16px; padding: 24px; width: 560px; max-width: 92vw; margin-bottom: 40px; }
+.detail-panel h2 { color: #00d4ff; font-size: 18px; margin-bottom: 16px; }
+.detail-panel .close-btn { float: right; background: #2a2a4a; border: none; color: #888; border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+.detail-panel .close-btn:hover { color: #eee; }
+.detail-panel label { color: #888; font-size: 12px; display: block; margin-bottom: 4px; margin-top: 10px; }
+.detail-panel input, .detail-panel textarea { width: 100%; background: #1a1a2e; border: 2px solid #2a2a4a; border-radius: 8px; padding: 10px; color: #eee; font-size: 14px; outline: none; }
+.detail-panel input:focus, .detail-panel textarea:focus { border-color: #00d4ff; }
+.detail-panel textarea { resize: vertical; min-height: 60px; }
+.detail-panel .save-btn { background: #00d4ff; color: #1a1a2e; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 16px; }
+.detail-panel .save-btn:hover { background: #00b8d9; }
+.detail-panel .del-btn { background: none; border: none; color: #ff5252; cursor: pointer; font-size: 13px; margin-top: 12px; }
+
+/* Uptime bars */
+.uptime-bar-row { display: flex; align-items: center; margin-bottom: 6px; }
+.uptime-bar-row .day { color: #888; font-size: 11px; width: 80px; }
+.uptime-bar-row .bar-bg { flex: 1; height: 18px; background: #2a2a4a; border-radius: 4px; overflow: hidden; }
+.uptime-bar-row .bar-fg { height: 100%; border-radius: 4px; }
+.uptime-bar-row .pct { color: #ddd; font-size: 12px; font-weight: 600; width: 40px; text-align: right; }
+
+/* IP history */
+.ip-entry { background: #1a1a2e; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; }
+.ip-entry .date { color: #888; font-size: 12px; width: 130px; }
+.ip-entry .old-ip { color: #ff9800; font-size: 13px; font-weight: 600; }
+.ip-entry .arrow { color: #555; margin: 0 10px; }
+.ip-entry .new-ip { color: #00e676; font-size: 13px; font-weight: 600; }
+
+/* Day selector */
+.day-selector { display: flex; gap: 8px; margin-bottom: 16px; }
+.day-btn { background: #2a2a4a; color: #888; border: none; border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+.day-btn.active { background: #00d4ff; color: #1a1a2e; }
+
 /* Update alert banner */
 .update-banner { background: linear-gradient(135deg, #3d2e00, #4a3500); margin: 0 24px 12px; padding: 16px 20px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; border: 1px solid #ff9800; }
 .update-banner .msg { color: #ff9800; font-weight: 600; font-size: 14px; }
@@ -153,6 +192,8 @@ let filter = '';
 let agentInfo = { version: null, url: null };
 let showUpdateModal = false;
 let dismissedUpdate = false;
+let activeModal = null; // {type: 'uptime'|'ips'|'edit', machineId, data}
+let uptimeDays = 7;
 let statusFilter = 'all';
 let viewMode = 'list'; // list | groups
 let expandedGroups = new Set();
@@ -295,6 +336,12 @@ function renderCard(m) {
       ${bars}
       ${m.os_info ? '<div class="card-os">' + m.os_info + '</div>' : ''}
       ${m.agent_version ? '<div class="card-version">v' + m.agent_version + (agentInfo.version && m.agent_version !== agentInfo.version ? ' <span class="outdated">(update disponible: v' + agentInfo.version + ')</span>' : '') + '</div>' : ''}
+      <div class="card-actions">
+        <button class="card-btn" onclick="event.stopPropagation();openUptime(${m.id})">&#128202; Uptime</button>
+        <button class="card-btn" onclick="event.stopPropagation();openIpHistory(${m.id})">&#127760; IPs</button>
+        <button class="card-btn" onclick="event.stopPropagation();requestSpeedTest(${m.id})">&#9889; Speed</button>
+        <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
+      </div>
     </div>`;
 }
 
@@ -370,6 +417,7 @@ function renderDashboard() {
     </div>
     ${list.length === 0 ? '<div style="text-align:center;padding:80px 0"><div style="font-size:60px">&#128421;</div><div style="color:#888;font-size:18px;margin-top:16px">No hay maquinas</div></div>' : content}
     ${showUpdateModal ? renderUpdateModal() : ''}
+    ${activeModal ? renderActiveModal() : ''}
   `;
 }
 
@@ -394,6 +442,142 @@ async function startDashboard() {
   await loadAgentInfo();
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(loadMachines, 10000);
+}
+
+// ============ MACHINE MODALS ============
+
+function closeModal() { activeModal = null; renderDashboard(); }
+
+function renderActiveModal() {
+  if (!activeModal) return '';
+  if (activeModal.type === 'uptime') return renderUptimeModal();
+  if (activeModal.type === 'ips') return renderIpHistoryModal();
+  if (activeModal.type === 'edit') return renderEditModal();
+  return '';
+}
+
+// --- UPTIME ---
+async function openUptime(machineId) {
+  uptimeDays = 7;
+  activeModal = { type: 'uptime', machineId, data: null };
+  renderDashboard();
+  await loadUptimeData(machineId, 7);
+}
+
+async function loadUptimeData(machineId, days) {
+  const res = await api('/api/machines/' + machineId + '/uptime?days=' + days);
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+
+function renderUptimeModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const data = activeModal.data || [];
+  const avg = data.length > 0 ? Math.round(data.reduce((a, d) => a + d.percentage, 0) / data.length) : 0;
+  const avgColor = avg >= 95 ? '#00e676' : avg >= 80 ? '#ff9800' : '#ff5252';
+
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128202; Uptime — ${m?.machine_name || ''}</h2>
+    <div class="day-selector">
+      ${[7,14,30].map(d => '<button class="day-btn ' + (uptimeDays === d ? 'active' : '') + '" onclick="uptimeDays=' + d + ';loadUptimeData(' + activeModal.machineId + ',' + d + ')">' + d + ' dias</button>').join('')}
+    </div>
+    ${!activeModal.data ? '<p style="color:#888">Cargando...</p>' : `
+      <div style="text-align:center;margin-bottom:20px">
+        <span style="font-size:42px;font-weight:800;color:${avgColor}">${avg}%</span>
+        <div style="color:#888;font-size:13px">Promedio ultimos ${uptimeDays} dias</div>
+      </div>
+      ${data.map(day => {
+        const color = day.percentage >= 95 ? '#00e676' : day.percentage >= 80 ? '#ff9800' : '#ff5252';
+        const dateStr = new Date(day.date + 'T12:00:00').toLocaleDateString('es', {weekday:'short',day:'numeric',month:'short'});
+        return '<div class="uptime-bar-row"><span class="day">' + dateStr + '</span><div class="bar-bg"><div class="bar-fg" style="width:' + day.percentage + '%;background:' + color + '"></div></div><span class="pct">' + day.percentage + '%</span></div>';
+      }).join('')}
+    `}
+  </div></div>`;
+}
+
+// --- IP HISTORY ---
+async function openIpHistory(machineId) {
+  activeModal = { type: 'ips', machineId, data: null };
+  renderDashboard();
+  const res = await api('/api/machines/' + machineId + '/ip-history');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+
+function renderIpHistoryModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const data = activeModal.data || [];
+
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#127760; Historial de IPs — ${m?.machine_name || ''}</h2>
+    <p style="color:#888;font-size:13px;margin-bottom:12px">IP actual: <strong style="color:#00e676">${m?.public_ip || '---'}</strong></p>
+    ${!activeModal.data ? '<p style="color:#888">Cargando...</p>' : data.length === 0 ? '<p style="color:#888;text-align:center;padding:30px 0">Sin cambios de IP registrados</p>' : data.map(e => {
+      const d = new Date(e.changed_at);
+      return '<div class="ip-entry"><span class="date">' + d.toLocaleDateString('es') + ' ' + d.toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'}) + '</span><span class="old-ip">' + (e.previous_ip||'?') + '</span><span class="arrow">&#8594;</span><span class="new-ip">' + e.public_ip + '</span></div>';
+    }).join('')}
+  </div></div>`;
+}
+
+// --- EDIT MACHINE ---
+function openEditMachine(machineId) {
+  const m = machines.find(x => x.id === machineId);
+  if (!m) return;
+  activeModal = { type: 'edit', machineId, data: { ...m } };
+  renderDashboard();
+}
+
+function renderEditModal() {
+  const d = activeModal.data;
+  const groups = [...new Set(machines.map(m => m.grupo).filter(Boolean))];
+
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#9998; Editar — ${d.machine_name}</h2>
+    <label>Nombre:</label>
+    <input id="ed-name" value="${d.machine_name || ''}" />
+    <label>Grupo:</label>
+    <input id="ed-grupo" value="${d.grupo || ''}" placeholder="Sin grupo" />
+    ${groups.length > 0 ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + groups.map(g => '<button class="day-btn" onclick="document.getElementById(\'ed-grupo\').value=\'' + g.replace(/'/g,"\\'") + '\'">' + g + '</button>').join('') + '</div>' : ''}
+    <label>Notas:</label>
+    <textarea id="ed-notes" rows="3">${d.notes || ''}</textarea>
+    <label>FreeDNS — Dominio:</label>
+    <input id="ed-dns-host" value="${d.dns_host || ''}" placeholder="miserver.nuware.com.ar" />
+    <label>FreeDNS — URL update:</label>
+    <input id="ed-dns-url" value="${d.dns_update_url || ''}" placeholder="https://freedns.afraid.org/dynamic/update.php?..." style="font-size:12px" />
+    <div style="margin-top:12px;display:flex;align-items:center;cursor:pointer" onclick="var cb=document.getElementById('ed-checkip');cb.checked=!cb.checked">
+      <input type="checkbox" id="ed-checkip" ${d.check_ip_change !== false ? 'checked' : ''} style="margin-right:8px;width:18px;height:18px" onclick="event.stopPropagation()">
+      <span style="color:#ddd;font-size:13px">Monitorear cambio de IP publica</span>
+    </div>
+    <button class="save-btn" onclick="saveEditMachine()">Guardar</button>
+    <br><button class="del-btn" onclick="deleteMachine(${d.id})">Eliminar maquina</button>
+  </div></div>`;
+}
+
+async function saveEditMachine() {
+  const data = {
+    machine_name: document.getElementById('ed-name').value.trim(),
+    grupo: document.getElementById('ed-grupo').value.trim() || null,
+    notes: document.getElementById('ed-notes').value,
+    dns_host: document.getElementById('ed-dns-host').value.trim() || null,
+    dns_update_url: document.getElementById('ed-dns-url').value.trim() || null,
+    check_ip_change: document.getElementById('ed-checkip').checked
+  };
+  const res = await api('/api/machines/' + activeModal.machineId, { method: 'PUT', body: JSON.stringify(data) });
+  if (res.ok) { closeModal(); loadMachines(); }
+  else alert(res.data?.error || 'Error');
+}
+
+async function deleteMachine(id) {
+  if (!confirm('Eliminar esta maquina?')) return;
+  await api('/api/machines/' + id, { method: 'DELETE' });
+  closeModal();
+  loadMachines();
+}
+
+async function requestSpeedTest(id) {
+  const res = await api('/api/machines/' + id + '/speedtest', { method: 'POST' });
+  if (res.ok) alert('Speed test solicitado. Resultado en ~30 segundos.');
+  else alert(res.data?.error || 'Error');
 }
 
 // Update alert banner
