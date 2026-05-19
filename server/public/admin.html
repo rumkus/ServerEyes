@@ -108,6 +108,7 @@ let tab = 'overview';
 let selectedFile = null;
 let uploading = false;
 let agentHistory = [];
+let serverStatus = null;
 
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...opts.headers };
@@ -145,6 +146,7 @@ async function doLogin() {
 function logout() { token = null; localStorage.removeItem('se_admin_token'); renderLogin(); }
 
 async function loadData() {
+  await loadServerStatus();
   const res = await api('/api/admin/overview');
   if (res.ok) { data = res.data; render(); }
   else if (res.status === 403) { renderLogin('No tienes permisos de admin'); token = null; localStorage.removeItem('se_admin_token'); }
@@ -317,11 +319,61 @@ async function loadHistory() {
   }
 }
 
+function renderSystem() {
+  const fb = serverStatus?.firebase;
+  return `
+    <div class="section"><h2>&#9881; Estado del Servidor</h2>
+      <div class="agent-info">
+        <div class="row"><span class="lbl">Estado:</span><span class="val" style="color:#00e676">${serverStatus ? 'Corriendo' : 'Sin datos'}</span></div>
+        <div class="row"><span class="lbl">Version servidor:</span><span class="val">${serverStatus?.version || '---'}</span></div>
+        <div class="row"><span class="lbl">Firebase:</span><span class="val" style="color:${fb === 'active' ? '#00e676' : '#ff5252'}">${fb === 'active' ? 'Activo' : 'NO CONFIGURADO'}</span></div>
+        ${fb !== 'active' ? '<div style="margin-top:8px;padding:10px;background:#2d1117;border-radius:8px;color:#ff9800;font-size:13px">&#9888; Firebase no esta configurado. Las push notifications no funcionan.<br><br><strong>Para activar:</strong> En Railway, agrega la variable de entorno <code style="background:#0f0f23;padding:2px 6px;border-radius:4px">FIREBASE_SERVICE_ACCOUNT</code> con el contenido JSON del archivo firebase-service-account.json</div>' : ''}
+      </div>
+    </div>
+
+    <div class="section"><h2>&#128276; Push Notifications</h2>
+      <p style="color:#888;font-size:13px;margin-bottom:12px">Usuarios con token FCM registrado:</p>
+      <table><tr><th>Email</th><th>Push</th></tr>
+      ${data.users.map(u => '<tr><td>' + u.email + '</td><td>' + (u.has_push ? '<span style="color:#00e676">&#9989; Registrado</span>' : '<span style="color:#ff5252">&#10060; Sin token</span>') + '</td></tr>').join('')}
+      </table>
+      <button class="btn-upload" style="margin-top:16px;width:auto" onclick="testPush()">&#128276; Enviar push de prueba a mi celular</button>
+      <div id="push-result" style="margin-top:8px"></div>
+    </div>
+
+    <div class="section"><h2>&#128209; Diagnostico</h2>
+      <div class="agent-info">
+        <div class="row"><span class="lbl">URL del servidor:</span><span class="val" style="font-size:12px">${API}</span></div>
+        <div class="row"><span class="lbl">URL heartbeat:</span><span class="val" style="font-size:12px">${API}/api/heartbeat</span></div>
+        <div class="row"><span class="lbl">URL descarga agente:</span><span class="val" style="font-size:12px">${API}/api/agent/download</span></div>
+        <div class="row"><span class="lbl">Dashboard usuario:</span><span class="val" style="font-size:12px">${API}/</span></div>
+        <div class="row"><span class="lbl">Panel admin:</span><span class="val" style="font-size:12px">${API}/admin</span></div>
+      </div>
+    </div>`;
+}
+
+async function testPush() {
+  const el = document.getElementById('push-result');
+  if (el) el.innerHTML = '<span style="color:#888">Enviando...</span>';
+  const res = await api('/api/admin/test-push', { method: 'POST' });
+  if (el) {
+    if (res.ok) el.innerHTML = '<span style="color:#00e676">&#9989; ' + res.data.message + '</span>';
+    else el.innerHTML = '<span style="color:#ff5252">&#10060; ' + (res.data?.error || 'Error') + (res.data?.hint ? '<br><span style="color:#888">' + res.data.hint + '</span>' : '') + '</span>';
+  }
+}
+
+async function loadServerStatus() {
+  try {
+    const res = await fetch(API + '/api/status');
+    serverStatus = await res.json();
+  } catch (_) {}
+}
+
 function render() {
   if (!data) return;
   let content = '';
   if (tab === 'overview') content = renderOverview() + renderMachines();
   else if (tab === 'agent') content = renderAgent();
+  else if (tab === 'system') content = renderSystem();
 
   document.getElementById('app').innerHTML = `
     <div class="header">
@@ -329,6 +381,7 @@ function render() {
       <div class="actions">
         <button class="btn-sm ${tab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">&#128202; Overview</button>
         <button class="btn-sm ${tab === 'agent' ? 'active' : ''}" onclick="setTab('agent')">&#128228; Agente</button>
+        <button class="btn-sm ${tab === 'system' ? 'active' : ''}" onclick="setTab('system')">&#9881; Sistema</button>
         <a href="/" class="btn-sm" style="text-decoration:none">&#128065; Dashboard</a>
         <button class="btn-sm" style="color:#ff5252" onclick="logout()">Salir</button>
       </div>

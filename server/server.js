@@ -1099,8 +1099,33 @@ app.post('/api/agent/version', authenticateToken, async (req, res) => {
 
 // ============== RUTA DE ESTADO ==============
 
+// Test push notification (admin only)
+app.post('/api/admin/test-push', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    if (!firebaseAdmin) return res.status(400).json({ error: 'Firebase no esta configurado en el servidor', hint: 'Configura la variable FIREBASE_SERVICE_ACCOUNT en Railway' });
+    const user = await pool.query('SELECT fcm_token FROM users WHERE id = $1', [req.user.id]);
+    const fcmToken = user.rows[0]?.fcm_token;
+    if (!fcmToken) return res.status(400).json({ error: 'No tenes token FCM registrado. Abri la app en el celular primero.' });
+
+    await firebaseAdmin.messaging().send({
+      token: fcmToken,
+      notification: { title: 'Test ServerEyes', body: 'Push notification funcionando correctamente!' },
+      android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
+    });
+    res.json({ message: 'Push enviado exitosamente' });
+  } catch (error) {
+    console.error('Error test push:', error);
+    res.status(500).json({ error: 'Error enviando push: ' + error.message });
+  }
+});
+
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ServerEyes running', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ServerEyes running',
+    timestamp: new Date().toISOString(),
+    firebase: firebaseAdmin ? 'active' : 'disabled',
+    version: '1.0.0'
+  });
 });
 
 // Historial de uptime de una maquina (ultimos N dias)
