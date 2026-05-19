@@ -114,6 +114,10 @@ export default function App() {
   const [detailMachine, setDetailMachine] = useState<any>(null);
   const [detailMonitored, setDetailMonitored] = useState<string[]>([]);
   const [detailAlertDisks, setDetailAlertDisks] = useState<{[key: string]: string}>({});
+  const [metricsMachine, setMetricsMachine] = useState<any>(null);
+  const [metricsData, setMetricsData] = useState<any[]>([]);
+  const [metricsHours, setMetricsHours] = useState(24);
+  const [metricsLoading, setMetricsLoading] = useState(false);
   const [agentVersion, setAgentVersion] = useState('');
   const [agentUrl, setAgentUrl] = useState('');
   const [showTeam, setShowTeam] = useState(false);
@@ -362,6 +366,21 @@ export default function App() {
       if (res.ok) setIpHistoryData(res.data);
     } catch {}
     setIpHistoryLoading(false);
+  };
+
+  const loadMetrics = async (machineId: number, hours: number) => {
+    setMetricsLoading(true);
+    try {
+      const res = await apiRequest(`/api/machines/${machineId}/metrics?hours=${hours}`, {}, token);
+      if (res.ok) setMetricsData(res.data);
+    } catch {}
+    setMetricsLoading(false);
+  };
+
+  const openMetrics = (machine: any) => {
+    setMetricsMachine(machine);
+    setMetricsHours(24);
+    loadMetrics(machine.id, 24);
   };
 
   const openIpHistory = (machine: any) => {
@@ -629,6 +648,86 @@ export default function App() {
     );
   }
 
+  // METRICS HISTORY
+  if (metricsMachine) {
+    const cpuVals = metricsData.filter(d => d.cpu != null).map(d => parseFloat(d.cpu));
+    const ramVals = metricsData.filter(d => d.ram != null).map(d => parseFloat(d.ram));
+    const ramTotal = metricsData.find(d => d.ram_total)?.ram_total || 1;
+    const pingVals = metricsData.filter(d => d.ping != null).map(d => parseInt(d.ping));
+
+    const renderBar = (values: number[], maxVal: number, color: string) => {
+      if (values.length === 0) return <Text style={{color: '#555', fontSize: 12}}>Sin datos</Text>;
+      const barW = Math.max(2, Math.floor(300 / values.length));
+      return (
+        <View style={{flexDirection: 'row', alignItems: 'flex-end', height: 50, backgroundColor: '#0f0f23', borderRadius: 6, padding: 4, overflow: 'hidden'}}>
+          {values.map((v, i) => {
+            const h = Math.max(1, (v / maxVal) * 42);
+            const c = v/maxVal > 0.9 ? '#ff5252' : v/maxVal > 0.7 ? '#ff9800' : color;
+            return <View key={i} style={{width: barW, height: h, backgroundColor: c, borderRadius: 1, marginRight: 1}} />;
+          })}
+        </View>
+      );
+    };
+
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
+        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <View>
+              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>📈 Metricas</Text>
+              <Text style={{color: '#888', fontSize: 13}}>{metricsMachine.machine_name}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setMetricsMachine(null)} style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
+              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{flexDirection: 'row', marginTop: 12}}>
+            {[6, 24, 48, 72, 168].map(h => (
+              <TouchableOpacity key={h} onPress={() => { setMetricsHours(h); loadMetrics(metricsMachine.id, h); }}
+                style={{backgroundColor: metricsHours === h ? '#00d4ff' : '#2a2a4a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8}}>
+                <Text style={{color: metricsHours === h ? '#1a1a2e' : '#888', fontWeight: '600', fontSize: 13}}>{h < 24 ? `${h}h` : `${h/24}d`}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        {metricsLoading ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}><ActivityIndicator size="large" color="#00d4ff" /></View>
+        ) : (
+          <ScrollView style={{flex: 1, padding: 16}}>
+            <Text style={{color: '#555', fontSize: 11, marginBottom: 16}}>{metricsData.length} puntos de datos</Text>
+
+            <View style={{marginBottom: 20}}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
+                <Text style={{color: '#888', fontSize: 14, fontWeight: '600'}}>CPU</Text>
+                <Text style={{color: '#aaa', fontSize: 12}}>{cpuVals.length > 0 ? `Avg: ${Math.round(cpuVals.reduce((a,b) => a+b, 0)/cpuVals.length)}% | Max: ${Math.round(Math.max(...cpuVals))}%` : '---'}</Text>
+              </View>
+              {renderBar(cpuVals, 100, '#00e676')}
+            </View>
+
+            <View style={{marginBottom: 20}}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
+                <Text style={{color: '#888', fontSize: 14, fontWeight: '600'}}>RAM</Text>
+                <Text style={{color: '#aaa', fontSize: 12}}>{ramVals.length > 0 ? `Avg: ${(ramVals.reduce((a,b) => a+b, 0)/ramVals.length).toFixed(1)}/${ramTotal} GB` : '---'}</Text>
+              </View>
+              {renderBar(ramVals, ramTotal, '#00d4ff')}
+            </View>
+
+            <View style={{marginBottom: 20}}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
+                <Text style={{color: '#888', fontSize: 14, fontWeight: '600'}}>Ping</Text>
+                <Text style={{color: '#aaa', fontSize: 12}}>{pingVals.length > 0 ? `Avg: ${Math.round(pingVals.reduce((a,b) => a+b, 0)/pingVals.length)}ms | Max: ${Math.max(...pingVals)}ms` : '---'}</Text>
+              </View>
+              {renderBar(pingVals, Math.max(...pingVals, 200), '#ff9800')}
+            </View>
+
+            <View style={{height: 30}} />
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
   // LOGS
   if (showLogs) {
     return (
@@ -878,6 +977,9 @@ export default function App() {
         <View style={{flexDirection: 'row'}}>
           <TouchableOpacity onPress={() => openUptime(item)} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#00d4ff', fontSize: 12}}>📊 Uptime</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => openMetrics(item)} style={{padding: 6, marginRight: 10}}>
+            <Text style={{color: '#00d4ff', fontSize: 12}}>📈 Metricas</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => openIpHistory(item)} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#aaa', fontSize: 12}}>🌐 IPs</Text>

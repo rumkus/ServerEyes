@@ -111,6 +111,21 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_logs TEXT`).catch(() => {});
+
+  // Historial de metricas (1 registro por heartbeat, limpieza automatica)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS metrics_history (
+      id SERIAL PRIMARY KEY,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      cpu_usage REAL,
+      ram_usage REAL,
+      ram_total REAL,
+      disks JSONB,
+      ping_ms INTEGER,
+      timestamp TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_metrics_machine_time ON metrics_history (machine_id, timestamp DESC)`).catch(() => {});
   // Umbrales de alerta (null = desactivado)
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
@@ -655,6 +670,14 @@ app.post('/api/heartbeat', async (req, res) => {
       [result.rows[0].id, public_ip]
     );
 
+    // Guardar metricas historicas (si hay datos)
+    if (cpu_usage !== undefined || ram_usage !== undefined || ping_ms !== undefined) {
+      await pool.query(
+        'INSERT INTO metrics_history (machine_id, cpu_usage, ram_usage, ram_total, disks, ping_ms) VALUES ($1, $2, $3, $4, $5, $6)',
+        [result.rows[0].id, cpu_usage || null, ram_usage || null, ram_total || null, disks ? JSON.stringify(disks) : null, ping_ms || null]
+      );
+    }
+
     // Registrar cambio a online si estaba offline
     const updatedMachine = result.rows[0];
     if (updatedMachine) {
@@ -1112,6 +1135,52 @@ app.post('/api/admin/reset-password', authenticateToken, requireAdmin, async (re
     res.status(500).json({ error: 'Error interno' });
   }
 });
+
+// Historial de metricas de una maquina
+app.get('/api/machines/:id/metrics', authenticateToken, async (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours) || 24;
+    const machine = await pool.query(
+      'SELECT id FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))',
+      [req.params.id, req.user.id]
+    );
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+
+    // Agrupar por intervalos para no devolver miles de puntos
+    // < 6h: cada punto, 6-24h: cada 5 min, 24-72h: cada 15 min, >72h: cada hora
+    let interval = '1 minute';
+    if (hours > 72) interval = '1 hour';
+    else if (hours > 24) interval = '15 minutes';
+    else if (hours > 6) interval = '5 minutes';
+
+    const result = await pool.query(`
+      SELECT
+        date_trunc('${interval.split(' ')[1]}', timestamp) as time,
+        ROUND(AVG(cpu_usage)::numeric, 1) as cpu,
+        ROUND(AVG(ram_usage)::numeric, 1) as ram,
+        MAX(ram_total) as ram_total,
+        ROUND(AVG(ping_ms)::numeric, 0) as ping,
+        (array_agg(disks ORDER BY timestamp DESC))[1] as disks
+      FROM metrics_history
+      WHERE machine_id = $1 AND timestamp > NOW() - INTERVAL '1 hour' * $2
+      GROUP BY date_trunc('${interval.split(' ')[1]}', timestamp)
+      ORDER BY time ASC
+    `, [req.params.id, hours]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error en metrics:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Limpieza automatica de metricas viejas (>7 dias) cada hora
+setInterval(async () => {
+  try {
+    const result = await pool.query("DELETE FROM metrics_history WHERE timestamp < NOW() - INTERVAL '7 days'");
+    if (result.rowCount > 0) console.log(`[CLEANUP] Eliminadas ${result.rowCount} metricas viejas`);
+  } catch {}
+}, 3600000);
 
 // Exportar maquinas como CSV
 app.get('/api/machines/export/csv', authenticateToken, async (req, res) => {
