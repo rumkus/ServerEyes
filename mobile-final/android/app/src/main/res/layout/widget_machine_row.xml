@@ -7,7 +7,7 @@
     android:paddingTop="3dp"
     android:paddingBottom="3dp">
 
-    <View
+    <ImageView
         android:id="@+id/row_dot"
         android:layout_width="8dp"
         android:layout_height="8dp"
@@ -18,7 +18,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:textColor="#dddddd"
+        android:textColor="@color/widget_light"
         android:textSize="12sp"
         android:singleLine="true"
         android:ellipsize="end" />

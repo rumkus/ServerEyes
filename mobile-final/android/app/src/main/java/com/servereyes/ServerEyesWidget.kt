@@ -119,7 +119,7 @@ class ServerEyesWidget : AppWidgetProvider() {
                             row.setTextViewText(R.id.row_name, name)
                             row.setTextViewText(R.id.row_status, if (isOn) "ON" else "OFF")
                             row.setTextColor(R.id.row_status, if (isOn) 0xFF00E676.toInt() else 0xFFFF5252.toInt())
-                            row.setInt(R.id.row_dot, "setBackgroundResource", if (isOn) R.drawable.dot_online else R.drawable.dot_offline)
+                            row.setImageViewResource(R.id.row_dot, if (isOn) R.drawable.dot_online else R.drawable.dot_offline)
 
                             views.addView(R.id.widget_machines_list, row)
                         }
