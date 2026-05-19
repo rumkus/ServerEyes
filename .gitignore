@@ -4,3 +4,5 @@ node_modules/
 dist/
 out/
 *.exe
+firebase-service-account.json
+*-service-account.json
