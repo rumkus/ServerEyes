@@ -113,6 +113,7 @@ export default function App() {
   const [showAgentUpdate, setShowAgentUpdate] = useState(false);
   const [detailMachine, setDetailMachine] = useState<any>(null);
   const [detailMonitored, setDetailMonitored] = useState<string[]>([]);
+  const [detailAlertDisks, setDetailAlertDisks] = useState<{[key: string]: string}>({});
   const [agentVersion, setAgentVersion] = useState('');
   const [agentUrl, setAgentUrl] = useState('');
   const [showTeam, setShowTeam] = useState(false);
@@ -881,7 +882,7 @@ export default function App() {
           <TouchableOpacity onPress={() => openIpHistory(item)} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#aaa', fontSize: 12}}>🌐 IPs</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); }} style={{padding: 6, marginRight: 10}}>
+          <TouchableOpacity onPress={() => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#aaa', fontSize: 12}}>💾 Discos</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={async () => {
@@ -999,18 +1000,32 @@ export default function App() {
                 <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
                   <Text style={{color: '#888', fontSize: 12}}>Total:</Text><Text style={{color: '#ddd', fontSize: 12, fontWeight: '600'}}>{disk.total} GB</Text>
                 </View>
-                <TouchableOpacity onPress={() => toggleDisk(disk.drive)} style={{flexDirection: 'row', alignItems: 'center', paddingTop: 4, borderTopWidth: 1, borderTopColor: '#2a2a4a'}}>
-                  <View style={{width: 20, height: 20, borderWidth: 2, borderColor: isMonitored ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 8, backgroundColor: isMonitored ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
-                    {isMonitored && <Text style={{color: '#1a1a2e', fontSize: 13, fontWeight: '700'}}>✓</Text>}
-                  </View>
-                  <Text style={{color: '#888', fontSize: 12}}>Mostrar en resumen</Text>
-                </TouchableOpacity>
+                <View style={{flexDirection: 'row', alignItems: 'center', paddingTop: 6, borderTopWidth: 1, borderTopColor: '#2a2a4a'}}>
+                  <TouchableOpacity onPress={() => toggleDisk(disk.drive)} style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                    <View style={{width: 20, height: 20, borderWidth: 2, borderColor: isMonitored ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 8, backgroundColor: isMonitored ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+                      {isMonitored && <Text style={{color: '#1a1a2e', fontSize: 13, fontWeight: '700'}}>✓</Text>}
+                    </View>
+                    <Text style={{color: '#888', fontSize: 12}}>En resumen</Text>
+                  </TouchableOpacity>
+                  <Text style={{color: '#ff9800', fontSize: 11, marginRight: 6}}>Alerta %:</Text>
+                  <TextInput
+                    style={{backgroundColor: '#1a1a2e', borderWidth: 1, borderColor: '#2a2a4a', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, width: 50, color: '#eee', fontSize: 13, textAlign: 'center'}}
+                    value={detailAlertDisks[disk.drive] || ''}
+                    onChangeText={t => setDetailAlertDisks(prev => ({...prev, [disk.drive]: t.replace(/[^0-9]/g, '')}))}
+                    placeholder="--"
+                    placeholderTextColor="#555"
+                    keyboardType="number-pad"
+                    maxLength={3}
+                  />
+                </View>
               </View>
             );
           })}
 
           <TouchableOpacity style={[s.btn, {marginTop: 8}]} onPress={async () => {
-            await updateMachine(detailMachine.id, { monitored_disks: detailMonitored });
+            const alertDisksClean: {[k:string]: number} = {};
+            Object.entries(detailAlertDisks).forEach(([k, v]) => { if (v && parseInt(v) > 0) alertDisksClean[k] = parseInt(v as string); });
+            await updateMachine(detailMachine.id, { monitored_disks: detailMonitored, alert_disks: alertDisksClean });
             Alert.alert('Guardado', detailMonitored.length > 0 ? `Mostrando: ${detailMonitored.join(', ')}` : 'Mostrando todos los discos');
             setDetailMachine(null);
           }}>

@@ -109,6 +109,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_total REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_disks JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_disks JSONB`).catch(() => {});
   // Umbrales de alerta (null = desactivado)
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
@@ -677,7 +678,19 @@ app.post('/api/heartbeat', async (req, res) => {
           const ramPct = Math.round((ram_usage / ram_total) * 100);
           if (ramPct >= updatedMachine.alert_ram) alerts.push(`RAM al ${ramPct}% (umbral: ${updatedMachine.alert_ram}%)`);
         }
-        if (updatedMachine.alert_disk && disk_usage !== undefined && disk_total) {
+        if (disks && Array.isArray(disks) && disks.length > 0) {
+          const perDisk = updatedMachine.alert_disks || {};
+          const globalDisk = updatedMachine.alert_disk;
+          for (const disk of disks) {
+            if (disk.total > 0) {
+              const threshold = perDisk[disk.drive] || globalDisk;
+              if (threshold) {
+                const diskPct = Math.round((disk.used / disk.total) * 100);
+                if (diskPct >= threshold) alerts.push(`Disco ${disk.drive} al ${diskPct}% (umbral: ${threshold}%)`);
+              }
+            }
+          }
+        } else if (updatedMachine.alert_disk && disk_usage !== undefined && disk_total) {
           const diskPct = Math.round((disk_usage / disk_total) * 100);
           if (diskPct >= updatedMachine.alert_disk) alerts.push(`Disco al ${diskPct}% (umbral: ${updatedMachine.alert_disk}%)`);
         }
@@ -820,6 +833,7 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (alert_ping !== undefined) { fields.push(`alert_ping = $${idx++}`); values.push(alert_ping); }
     if (alert_offline !== undefined) { fields.push(`alert_offline = $${idx++}`); values.push(alert_offline); }
     if (monitored_disks !== undefined) { fields.push(`monitored_disks = $${idx++}`); values.push(JSON.stringify(monitored_disks)); }
+    if (req.body.alert_disks !== undefined) { fields.push(`alert_disks = $${idx++}`); values.push(JSON.stringify(req.body.alert_disks)); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
