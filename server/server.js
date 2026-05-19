@@ -604,7 +604,7 @@ const pendingSpeedTests = new Set();
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs, agent_type } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
@@ -742,16 +742,27 @@ app.post('/api/heartbeat', async (req, res) => {
     const runSpeedtest = pendingSpeedTests.has(updatedMachine.id);
     if (runSpeedtest) pendingSpeedTests.delete(updatedMachine.id);
 
-    // Chequear si hay update disponible
+    // Chequear si hay update disponible (busca por tipo: agent o client)
     let updateInfo = null;
     try {
-      const verRow = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
-      const urlRow = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
+      const type = agent_type || 'agent';
+      const verKey = type === 'client' ? 'client_version' : 'agent_version';
+      const urlKey = type === 'client' ? 'client_url' : 'agent_url';
+      const verRow = await pool.query("SELECT value FROM app_settings WHERE key = $1", [verKey]);
+      const urlRow = await pool.query("SELECT value FROM app_settings WHERE key = $1", [urlKey]);
       if (verRow.rows.length > 0 && urlRow.rows.length > 0) {
         const latestVersion = verRow.rows[0].value;
-        const agentUrl = urlRow.rows[0].value;
-        if (latestVersion && agentUrl && reportedVersion && reportedVersion !== latestVersion) {
-          updateInfo = { version: latestVersion, url: agentUrl };
+        const updateUrl = urlRow.rows[0].value;
+        if (latestVersion && updateUrl && reportedVersion && reportedVersion !== latestVersion) {
+          updateInfo = { version: latestVersion, url: updateUrl };
+        }
+      }
+      // Fallback: si no hay version especifica para client, probar con agent
+      if (!updateInfo && type === 'client') {
+        const verRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
+        const urlRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
+        if (verRow2.rows.length > 0 && urlRow2.rows.length > 0 && verRow2.rows[0].value && urlRow2.rows[0].value && reportedVersion && reportedVersion !== verRow2.rows[0].value) {
+          updateInfo = { version: verRow2.rows[0].value, url: urlRow2.rows[0].value };
         }
       }
     } catch {}

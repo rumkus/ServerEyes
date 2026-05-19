@@ -191,6 +191,61 @@ function measureSpeed() {
   });
 }
 
+// Auto-update del client
+async function selfUpdateClient(url, newVersion) {
+  const { spawn } = require('child_process');
+  const exePath = process.execPath; // ruta del electron exe
+  const exeDir = path.dirname(exePath);
+  const newPath = path.join(exeDir, 'servereyes-client-new.exe');
+  const oldPath = path.join(exeDir, 'servereyes-client-old.exe');
+  const batPath = path.join(exeDir, 'servereyes-client-update.bat');
+
+  clog(`Descargando v${newVersion} desde ${url}`);
+
+  // Descargar siguiendo redirects
+  await new Promise((resolve, reject) => {
+    const downloadFile = (downloadUrl, redirects) => {
+      if (redirects > 5) { reject(new Error('Demasiados redirects')); return; }
+      const client = downloadUrl.startsWith('https') ? https : http;
+      client.get(downloadUrl, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+          downloadFile(res.headers.location, redirects + 1); return;
+        }
+        if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+        const file = fs.createWriteStream(newPath);
+        res.pipe(file);
+        file.on('finish', () => { file.close(resolve); });
+        file.on('error', reject);
+      }).on('error', reject);
+    };
+    downloadFile(url, 0);
+  });
+
+  const stats = fs.statSync(newPath);
+  if (stats.size < 1024 * 1024) {
+    clog('Archivo muy chico, abortando');
+    try { fs.unlinkSync(newPath); } catch {}
+    return;
+  }
+
+  clog(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), reiniciando...`);
+
+  const exeName = path.basename(exePath);
+  const batContent = [
+    '@echo off',
+    'timeout /t 5 /nobreak >nul',
+    `if exist "${oldPath}" del /f "${oldPath}"`,
+    `if exist "${exePath}" rename "${exePath}" servereyes-client-old.exe`,
+    `if exist "${newPath}" move /y "${newPath}" "${exePath}"`,
+    `if exist "${exePath}" start "" "${exePath}"`,
+    'del "%~f0"'
+  ].join('\r\n') + '\r\n';
+  fs.writeFileSync(batPath, batContent);
+
+  spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  setTimeout(() => { app.isQuiting = true; app.quit(); }, 1000);
+}
+
 // Enviar heartbeat
 async function sendHeartbeat() {
   const config = loadConfig();
@@ -214,6 +269,7 @@ async function sendHeartbeat() {
         os_info: getOSInfo(),
         ping_ms: pingMs,
         agent_version: CLIENT_VERSION,
+        agent_type: 'client',
         agent_logs: getClientLogs(),
         ...metrics
       })
@@ -222,10 +278,14 @@ async function sendHeartbeat() {
 
     if (tray) tray.setToolTip(res.ok ? `ServerEyes v${CLIENT_VERSION} - ${publicIP} - ${pingMs || '?'}ms` : 'ServerEyes - Error');
 
-    // Notificar si hay update disponible
-    if (res.ok && res.data && res.data.update) {
+    // Auto-update si hay version nueva
+    if (res.ok && res.data && res.data.update && res.data.update.url) {
       const { version, url } = res.data.update;
-      if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Update v${version} disponible`);
+      clog(`Update disponible: v${version}`);
+      if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Actualizando a v${version}...`);
+      try {
+        await selfUpdateClient(url, version);
+      } catch (e) { clog(`Update error: ${e.message}`); }
     }
 
     // Speed test si el servidor lo pide

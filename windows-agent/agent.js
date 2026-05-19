@@ -246,7 +246,7 @@ async function sendHeartbeat(config) {
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_logs: getLastLogs(30), ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), ...metrics
       })
     });
     if (res.ok) {
