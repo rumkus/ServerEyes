@@ -311,11 +311,11 @@ function install() {
   // Crear VBS watchdog que chequea si el proceso existe y lo levanta si no
   const watchdogVbs = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
   const watchdogContent = [
-    'Set objWMI = GetObject("winmgmts:\\\\.\\.\\root\\cimv2")',
-    `Set colProcs = objWMI.ExecQuery("Select * from Win32_Process Where Name = '${exeName}'")`,
-    'If colProcs.Count = 0 Then',
-    '  Set WshShell = CreateObject("WScript.Shell")',
-    `  WshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False`,
+    'Set WshShell = CreateObject("WScript.Shell")',
+    `Set objExec = WshShell.Exec("tasklist /FI ""IMAGENAME eq ${exeName}"" /NH")`,
+    'strOutput = objExec.StdOut.ReadAll',
+    `If InStr(strOutput, "${exeName}") = 0 Then`,
+    `  WshShell.Run chr(34) & "${EXE_PATH}" & chr(34), 0, False`,
     'End If',
   ].join('\r\n') + '\r\n';
   fs.writeFileSync(watchdogVbs, watchdogContent);
