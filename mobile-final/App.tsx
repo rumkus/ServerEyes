@@ -886,10 +886,16 @@ export default function App() {
             <Text style={{color: '#aaa', fontSize: 12}}>💾 Discos</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={async () => {
+            const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token);
+            if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || 'Sin logs', [{text: 'OK'}]);
+          }} style={{padding: 6, marginRight: 10}}>
+            <Text style={{color: '#aaa', fontSize: 12}}>📋 Logs</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={async () => {
             const res = await apiRequest(`/api/machines/${item.id}/speedtest`, { method: 'POST' }, token);
             if (res.ok) Alert.alert('Speed Test', 'Solicitado. El resultado aparece en ~30 segundos.');
           }} style={{padding: 6}}>
-            <Text style={{color: '#ff9800', fontSize: 12}}>⚡ Speed Test</Text>
+            <Text style={{color: '#ff9800', fontSize: 12}}>⚡ Speed</Text>
           </TouchableOpacity>
         </View>
         <View style={{flexDirection: 'row'}}>

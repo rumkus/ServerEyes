@@ -31,6 +31,15 @@ function log(msg) {
   try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch {}
 }
 
+function getLastLogs(count) {
+  try {
+    if (!fs.existsSync(LOG_FILE)) return '';
+    const content = fs.readFileSync(LOG_FILE, 'utf8');
+    const lines = content.trim().split('\n');
+    return lines.slice(-count).join('\n');
+  } catch { return ''; }
+}
+
 // HTTP
 function httpRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -237,7 +246,7 @@ async function sendHeartbeat(config) {
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, agent_version: AGENT_VERSION, ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_logs: getLastLogs(30), ...metrics
       })
     });
     if (res.ok) {

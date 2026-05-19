@@ -347,6 +347,7 @@ function renderCard(m) {
         <button class="card-btn" onclick="event.stopPropagation();openIpHistory(${m.id})">&#127760; IPs</button>
         <button class="card-btn" onclick="event.stopPropagation();requestSpeedTest(${m.id})">&#9889; Speed</button>
         <button class="card-btn" onclick="event.stopPropagation();openDiskDetail(${m.id})">&#128190; Discos</button>
+        <button class="card-btn" onclick="event.stopPropagation();openAgentLogs(${m.id})">&#128203; Logs</button>
         <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
       </div>
     </div>`;
@@ -461,6 +462,7 @@ function renderActiveModal() {
   if (activeModal.type === 'ips') return renderIpHistoryModal();
   if (activeModal.type === 'edit') return renderEditModal();
   if (activeModal.type === 'disks') return renderDiskDetailModal();
+  if (activeModal.type === 'logs') return renderLogsModal();
   return '';
 }
 
@@ -586,6 +588,24 @@ async function requestSpeedTest(id) {
   const res = await api('/api/machines/' + id + '/speedtest', { method: 'POST' });
   if (res.ok) alert('Speed test solicitado. Resultado en ~30 segundos.');
   else alert(res.data?.error || 'Error');
+}
+
+// --- AGENT LOGS ---
+async function openAgentLogs(machineId) {
+  activeModal = { type: 'logs', machineId, data: null };
+  renderDashboard();
+  const res = await api('/api/machines/' + machineId + '/logs');
+  if (res.ok) { activeModal.data = res.data.logs; renderDashboard(); }
+}
+
+function renderLogsModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128203; Logs — ${m?.machine_name || ''}</h2>
+    <pre style="background:#0f0f23;border-radius:8px;padding:14px;color:#aaa;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;line-height:1.6">${activeModal.data || 'Cargando...'}</pre>
+    <p style="color:#555;font-size:11px;margin-top:8px">Ultimas 30 lineas del log del agente. Se actualiza en cada heartbeat.</p>
+  </div></div>`;
 }
 
 // --- DISK DETAIL ---

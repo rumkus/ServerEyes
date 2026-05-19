@@ -110,6 +110,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_disks JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_logs TEXT`).catch(() => {});
   // Umbrales de alerta (null = desactivado)
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
@@ -603,7 +604,7 @@ const pendingSpeedTests = new Set();
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
@@ -635,12 +636,13 @@ app.post('/api/heartbeat', async (req, res) => {
         disk_total = COALESCE($10, disk_total),
         agent_version = COALESCE($11, agent_version),
         disks = COALESCE($12, disks),
+        agent_logs = COALESCE($13, agent_logs),
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
       WHERE machine_key = $5
       RETURNING *`,
-      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion, disks ? JSON.stringify(disks) : null]
+      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion, disks ? JSON.stringify(disks) : null, agent_logs || null]
     );
 
     if (result.rows.length === 0) {
@@ -1095,6 +1097,20 @@ app.post('/api/admin/reset-password', authenticateToken, requireAdmin, async (re
     const hash = await bcrypt.hash(new_password, 10);
     await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, user_id]);
     res.json({ message: 'Contraseña reseteada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Obtener logs de un agente
+app.get('/api/machines/:id/logs', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT m.agent_logs FROM machines m WHERE m.id = $1 AND (m.user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = m.id AND ms.user_id = $2))',
+      [req.params.id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    res.json({ logs: result.rows[0].agent_logs || 'Sin logs disponibles' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }

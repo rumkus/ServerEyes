@@ -9,6 +9,9 @@ const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, dialog } = electro
 
 const CLIENT_VERSION = '1.0.0';
 let tray = null;
+const _clientLogs = [];
+function clog(msg) { const line = `[${new Date().toLocaleString()}] ${msg}`; _clientLogs.push(line); if (_clientLogs.length > 50) _clientLogs.splice(0, _clientLogs.length - 50); }
+function getClientLogs() { return _clientLogs.slice(-30).join('\n'); }
 let configWindow = null;
 let heartbeatTimer = null;
 let configPath = null;
@@ -211,9 +214,11 @@ async function sendHeartbeat() {
         os_info: getOSInfo(),
         ping_ms: pingMs,
         agent_version: CLIENT_VERSION,
+        agent_logs: getClientLogs(),
         ...metrics
       })
     });
+    clog(`Heartbeat OK - ${publicIP} - ${pingMs || '?'}ms`);
 
     if (tray) tray.setToolTip(res.ok ? `ServerEyes v${CLIENT_VERSION} - ${publicIP} - ${pingMs || '?'}ms` : 'ServerEyes - Error');
 
