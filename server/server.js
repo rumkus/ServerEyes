@@ -1032,7 +1032,8 @@ app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req,
     );
 
     // Actualizar version configurada y URL de descarga automaticamente
-    const downloadUrl = `${req.protocol}://${req.get('host')}/api/agent/download`;
+    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const downloadUrl = `${protocol}://${req.get('host')}/api/agent/download`;
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
 
