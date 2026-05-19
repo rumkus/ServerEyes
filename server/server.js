@@ -1102,6 +1102,46 @@ app.post('/api/admin/reset-password', authenticateToken, requireAdmin, async (re
   }
 });
 
+// Exportar maquinas como CSV
+app.get('/api/machines/export/csv', authenticateToken, async (req, res) => {
+  try {
+    const own = await pool.query('SELECT * FROM machines WHERE user_id = $1 ORDER BY grupo NULLS LAST, machine_name', [req.user.id]);
+    const machines = own.rows;
+
+    const headers = ['Nombre', 'Grupo', 'Estado', 'IP Publica', 'IP Local', 'Ping (ms)', 'CPU %', 'RAM Usada (GB)', 'RAM Total (GB)', 'Discos', 'OS', 'Version Agente', 'Ultimo Heartbeat', 'Notas'];
+    const rows = machines.map(m => {
+      const disksStr = m.disks && Array.isArray(m.disks) ? m.disks.map(d => `${d.drive} ${d.used}/${d.total}GB`).join(' | ') : `${m.disk_usage || ''}/${m.disk_total || ''}GB`;
+      return [
+        m.machine_name,
+        m.grupo || '',
+        m.is_online ? 'Online' : 'Offline',
+        m.public_ip || '',
+        m.local_ip || '',
+        m.ping_ms || '',
+        m.cpu_usage != null ? m.cpu_usage : '',
+        m.ram_usage != null ? m.ram_usage : '',
+        m.ram_total != null ? m.ram_total : '',
+        disksStr,
+        m.os_info || '',
+        m.agent_version || '',
+        m.last_heartbeat ? new Date(m.last_heartbeat).toLocaleString() : '',
+        (m.notes || '').replace(/"/g, '""')
+      ].map(v => `"${v}"`).join(',');
+    });
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const fecha = new Date().toISOString().split('T')[0];
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="servereyes-${fecha}.csv"`
+    });
+    res.send('\uFEFF' + csv); // BOM for Excel UTF-8
+  } catch (error) {
+    console.error('Error exportando CSV:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // Obtener logs de un agente
 app.get('/api/machines/:id/logs', authenticateToken, async (req, res) => {
   try {

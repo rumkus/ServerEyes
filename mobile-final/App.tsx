@@ -1452,6 +1452,21 @@ export default function App() {
             <Text style={{color: '#00d4ff', fontSize: 13}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            onPress={async () => {
+              try {
+                const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } });
+                const csv = await res.text();
+                const now = new Date();
+                const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`;
+                await RNFS.writeFile(filePath, csv, 'utf8');
+                await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Exportar maquinas' });
+              } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export error: ${e.message}`); }
+            }}
+            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
+            <Text style={{color: '#888', fontSize: 13}}>&#128196;</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}
             style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
             <Text style={{color: '#888', fontSize: 13}}>📋</Text>

@@ -406,6 +406,7 @@ function renderDashboard() {
         <span class="info"><span class="refresh-dot"></span>Auto-refresh 10s</span>
       </div>
       <div class="actions">
+        <button class="btn-sm" onclick="exportCSV()">&#128196; CSV</button>
         <button class="btn-sm" onclick="openUpdateModal()">&#128228; Agente</button>
         <button class="btn-sm" onclick="toggleView()">${viewMode === 'groups' ? '&#128203; Lista' : '&#128193; Grupos'}</button>
         <button class="btn-sm btn-logout" onclick="logout()">Salir</button>
@@ -450,6 +451,18 @@ async function startDashboard() {
   await loadAgentInfo();
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(loadMachines, 10000);
+}
+
+// Export CSV
+function exportCSV() {
+  const a = document.createElement('a');
+  a.href = API + '/api/machines/export/csv';
+  a.setAttribute('download', '');
+  // Add auth header via fetch and blob
+  fetch(API + '/api/machines/export/csv', { headers: { Authorization: 'Bearer ' + token } })
+    .then(r => r.blob())
+    .then(blob => { a.href = URL.createObjectURL(blob); a.click(); })
+    .catch(() => alert('Error al exportar'));
 }
 
 // ============ MACHINE MODALS ============
