@@ -108,6 +108,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_usage REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disk_total REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS disks JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_disks JSONB`).catch(() => {});
   // Umbrales de alerta (null = desactivado)
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
@@ -801,7 +802,7 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 // Actualizar maquina (nombre, grupo, orden)
 app.put('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
-    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes, alert_cpu, alert_ram, alert_disk, alert_ping, alert_offline } = req.body;
+    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes, alert_cpu, alert_ram, alert_disk, alert_ping, alert_offline, monitored_disks } = req.body;
     const fields = [];
     const values = [];
     let idx = 1;
@@ -818,6 +819,7 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (alert_disk !== undefined) { fields.push(`alert_disk = $${idx++}`); values.push(alert_disk); }
     if (alert_ping !== undefined) { fields.push(`alert_ping = $${idx++}`); values.push(alert_ping); }
     if (alert_offline !== undefined) { fields.push(`alert_offline = $${idx++}`); values.push(alert_offline); }
+    if (monitored_disks !== undefined) { fields.push(`monitored_disks = $${idx++}`); values.push(JSON.stringify(monitored_disks)); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 

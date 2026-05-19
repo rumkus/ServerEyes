@@ -111,6 +111,8 @@ export default function App() {
   const [ipHistoryLoading, setIpHistoryLoading] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [showAgentUpdate, setShowAgentUpdate] = useState(false);
+  const [detailMachine, setDetailMachine] = useState<any>(null);
+  const [detailMonitored, setDetailMonitored] = useState<string[]>([]);
   const [agentVersion, setAgentVersion] = useState('');
   const [agentUrl, setAgentUrl] = useState('');
   const [showTeam, setShowTeam] = useState(false);
@@ -845,7 +847,7 @@ export default function App() {
         </View>
       )}
       {item.disks && Array.isArray(item.disks) && item.disks.length > 0 ? (
-        item.disks.map((disk: any, idx: number) => {
+        item.disks.filter((disk: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(disk.drive)).map((disk: any, idx: number) => {
           const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
           return (
             <View key={idx} style={{marginTop: 6}}>
@@ -878,6 +880,9 @@ export default function App() {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => openIpHistory(item)} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#aaa', fontSize: 12}}>🌐 IPs</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); }} style={{padding: 6, marginRight: 10}}>
+            <Text style={{color: '#aaa', fontSize: 12}}>💾 Discos</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={async () => {
             const res = await apiRequest(`/api/machines/${item.id}/speedtest`, { method: 'POST' }, token);
@@ -933,6 +938,89 @@ export default function App() {
       </View>
     );
   };
+
+  // MACHINE DETAIL - ver todos los discos y elegir cuales monitorear
+  if (detailMachine) {
+    const allDisks: any[] = detailMachine.disks && Array.isArray(detailMachine.disks) ? detailMachine.disks : [];
+    const toggleDisk = (drive: string) => {
+      setDetailMonitored(prev => prev.includes(drive) ? prev.filter(d => d !== drive) : [...prev, drive]);
+    };
+    return (
+      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
+        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
+          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <View>
+              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>{detailMachine.machine_name}</Text>
+              <Text style={{color: detailMachine.is_online ? '#00e676' : '#ff5252', fontSize: 12, fontWeight: '700'}}>{detailMachine.is_online ? 'ONLINE' : 'OFFLINE'}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setDetailMachine(null)}
+              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
+              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <ScrollView style={{flex: 1, padding: 16}}>
+          {/* Info general */}
+          <View style={{backgroundColor: '#16213e', borderRadius: 12, padding: 14, marginBottom: 12}}>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}><Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text><Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{detailMachine.public_ip || '---'}</Text></View>
+            <View style={{marginBottom: 4}}><Text style={{color: '#888', fontSize: 13}}>IP Local:</Text>
+              {(detailMachine.local_ip || '---').split(' | ').map((ip: string, i: number) => <Text key={i} style={{color: '#ddd', fontSize: 13, fontWeight: '600', paddingLeft: 8}}>{ip.trim()}</Text>)}
+            </View>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}><Text style={{color: '#888', fontSize: 13}}>Ping:</Text><Text style={{color: detailMachine.ping_ms ? (detailMachine.ping_ms < 50 ? '#00e676' : detailMachine.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555', fontSize: 13, fontWeight: '600'}}>{detailMachine.ping_ms ? `${detailMachine.ping_ms}ms` : '---'}</Text></View>
+            {detailMachine.cpu_usage != null && <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}><Text style={{color: '#888', fontSize: 13}}>CPU:</Text><Text style={{color: detailMachine.cpu_usage > 90 ? '#ff5252' : detailMachine.cpu_usage > 70 ? '#ff9800' : '#00e676', fontSize: 13, fontWeight: '600'}}>{detailMachine.cpu_usage}%</Text></View>}
+            {detailMachine.ram_usage != null && <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}><Text style={{color: '#888', fontSize: 13}}>RAM:</Text><Text style={{color: '#aaa', fontSize: 13, fontWeight: '600'}}>{detailMachine.ram_usage}/{detailMachine.ram_total} GB</Text></View>}
+            {detailMachine.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 4}}>{detailMachine.os_info}</Text>}
+            {detailMachine.agent_version && <Text style={{color: '#555', fontSize: 11, marginTop: 2}}>Agente v{detailMachine.agent_version}</Text>}
+          </View>
+
+          {/* Todos los discos */}
+          <Text style={{color: '#00d4ff', fontSize: 16, fontWeight: '700', marginBottom: 10}}>Discos ({allDisks.length})</Text>
+          {allDisks.length === 0 ? (
+            <Text style={{color: '#888', fontSize: 13, textAlign: 'center', paddingVertical: 20}}>Sin datos de discos. Actualiza el agente.</Text>
+          ) : allDisks.map((disk: any, idx: number) => {
+            const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
+            const isMonitored = detailMonitored.includes(disk.drive);
+            return (
+              <View key={idx} style={{backgroundColor: '#16213e', borderRadius: 12, padding: 14, marginBottom: 10}}>
+                <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 8}}>
+                  <Text style={{flex: 1, color: '#eee', fontSize: 16, fontWeight: '700'}}>Disco {disk.drive}</Text>
+                  <Text style={{color: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', fontSize: 16, fontWeight: '800'}}>{Math.round(pct * 100)}%</Text>
+                </View>
+                <View style={{height: 8, backgroundColor: '#2a2a4a', borderRadius: 4, overflow: 'hidden', marginBottom: 8}}>
+                  <View style={{width: `${Math.min(pct * 100, 100)}%`, height: '100%', backgroundColor: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', borderRadius: 4}} />
+                </View>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2}}>
+                  <Text style={{color: '#888', fontSize: 12}}>Usado:</Text><Text style={{color: '#ddd', fontSize: 12, fontWeight: '600'}}>{disk.used} GB</Text>
+                </View>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2}}>
+                  <Text style={{color: '#888', fontSize: 12}}>Libre:</Text><Text style={{color: '#00e676', fontSize: 12, fontWeight: '600'}}>{disk.free} GB</Text>
+                </View>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
+                  <Text style={{color: '#888', fontSize: 12}}>Total:</Text><Text style={{color: '#ddd', fontSize: 12, fontWeight: '600'}}>{disk.total} GB</Text>
+                </View>
+                <TouchableOpacity onPress={() => toggleDisk(disk.drive)} style={{flexDirection: 'row', alignItems: 'center', paddingTop: 4, borderTopWidth: 1, borderTopColor: '#2a2a4a'}}>
+                  <View style={{width: 20, height: 20, borderWidth: 2, borderColor: isMonitored ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 8, backgroundColor: isMonitored ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+                    {isMonitored && <Text style={{color: '#1a1a2e', fontSize: 13, fontWeight: '700'}}>✓</Text>}
+                  </View>
+                  <Text style={{color: '#888', fontSize: 12}}>Mostrar en resumen</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+
+          <TouchableOpacity style={[s.btn, {marginTop: 8}]} onPress={async () => {
+            await updateMachine(detailMachine.id, { monitored_disks: detailMonitored });
+            Alert.alert('Guardado', detailMonitored.length > 0 ? `Mostrando: ${detailMonitored.join(', ')}` : 'Mostrando todos los discos');
+            setDetailMachine(null);
+          }}>
+            <Text style={s.btnTxt}>Guardar seleccion</Text>
+          </TouchableOpacity>
+          <Text style={{color: '#666', fontSize: 11, textAlign: 'center', marginTop: 6, marginBottom: 30}}>Si no seleccionas ninguno, se muestran todos en el resumen.</Text>
+        </ScrollView>
+      </View>
+    );
+  }
 
   // SHARE PICKER - elegir maquinas para compartir con un tecnico
   if (shareUserId) {

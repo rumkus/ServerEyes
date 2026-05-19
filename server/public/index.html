@@ -314,7 +314,8 @@ function renderCard(m) {
     bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">RAM</span><span class="val" style="color:${textColor(pct)}">${m.ram_usage}/${m.ram_total} GB</span></div><div class="bar"><div class="bar-fill ${barColor(pct)}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
   }
   if (m.disks && Array.isArray(m.disks) && m.disks.length > 0) {
-    for (const disk of m.disks) {
+    const monitored = m.monitored_disks && m.monitored_disks.length > 0 ? m.monitored_disks : null;
+    for (const disk of m.disks.filter(d => !monitored || monitored.includes(d.drive))) {
       const pct = disk.total > 0 ? Math.round((disk.used / disk.total) * 100) : 0;
       bars += `<div class="bar-wrap"><div class="bar-header"><span class="lbl">Disco ${disk.drive}</span><span class="val" style="color:${textColor(pct, [85, 95])}">${disk.used}/${disk.total} GB (${disk.free} GB libre)</span></div><div class="bar"><div class="bar-fill ${barColor(pct, [85, 95])}" style="width:${Math.min(pct, 100)}%"></div></div></div>`;
     }
@@ -345,6 +346,7 @@ function renderCard(m) {
         <button class="card-btn" onclick="event.stopPropagation();openUptime(${m.id})">&#128202; Uptime</button>
         <button class="card-btn" onclick="event.stopPropagation();openIpHistory(${m.id})">&#127760; IPs</button>
         <button class="card-btn" onclick="event.stopPropagation();requestSpeedTest(${m.id})">&#9889; Speed</button>
+        <button class="card-btn" onclick="event.stopPropagation();openDiskDetail(${m.id})">&#128190; Discos</button>
         <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
       </div>
     </div>`;
@@ -458,6 +460,7 @@ function renderActiveModal() {
   if (activeModal.type === 'uptime') return renderUptimeModal();
   if (activeModal.type === 'ips') return renderIpHistoryModal();
   if (activeModal.type === 'edit') return renderEditModal();
+  if (activeModal.type === 'disks') return renderDiskDetailModal();
   return '';
 }
 
@@ -582,6 +585,63 @@ async function deleteMachine(id) {
 async function requestSpeedTest(id) {
   const res = await api('/api/machines/' + id + '/speedtest', { method: 'POST' });
   if (res.ok) alert('Speed test solicitado. Resultado en ~30 segundos.');
+  else alert(res.data?.error || 'Error');
+}
+
+// --- DISK DETAIL ---
+function openDiskDetail(machineId) {
+  const m = machines.find(x => x.id === machineId);
+  if (!m) return;
+  activeModal = { type: 'disks', machineId, data: m.monitored_disks || [] };
+  renderDashboard();
+}
+
+function renderDiskDetailModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const allDisks = (m?.disks && Array.isArray(m.disks)) ? m.disks : [];
+  const monitored = activeModal.data || [];
+
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128190; Discos — ${m?.machine_name || ''}</h2>
+    <p style="color:#888;font-size:13px;margin-bottom:16px">Tilda los discos que queres ver en el resumen. Si no tildas ninguno, se muestran todos.</p>
+    ${allDisks.length === 0 ? '<p style="color:#888;text-align:center;padding:20px">Sin datos de discos. Actualiza el agente.</p>' :
+      allDisks.map(disk => {
+        const pct = disk.total > 0 ? Math.round((disk.used / disk.total) * 100) : 0;
+        const color = pct >= 95 ? '#ff5252' : pct >= 85 ? '#ff9800' : '#00e676';
+        const checked = monitored.includes(disk.drive);
+        return `<div style="background:#1a1a2e;border-radius:10px;padding:14px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;margin-bottom:8px">
+            <strong style="flex:1;color:#eee;font-size:16px">Disco ${disk.drive}</strong>
+            <span style="color:${color};font-size:18px;font-weight:800">${pct}%</span>
+          </div>
+          <div class="bar" style="height:8px;margin-bottom:8px"><div class="bar-fill" style="width:${pct}%;background:${color};height:100%;border-radius:4px"></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:2px"><span>Usado:</span><span style="color:#ddd;font-weight:600">${disk.used} GB</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:2px"><span>Libre:</span><span style="color:#00e676;font-weight:600">${disk.free} GB</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:8px"><span>Total:</span><span style="color:#ddd;font-weight:600">${disk.total} GB</span></div>
+          <label style="display:flex;align-items:center;cursor:pointer;padding-top:6px;border-top:1px solid #2a2a4a;margin:0">
+            <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleDiskMonitor('${disk.drive}')" style="width:16px;height:16px;margin-right:8px">
+            <span style="color:#888;font-size:12px">Mostrar en resumen</span>
+          </label>
+        </div>`;
+      }).join('')}
+    <button class="save-btn" onclick="saveDiskSelection()">Guardar seleccion</button>
+  </div></div>`;
+}
+
+function toggleDiskMonitor(drive) {
+  if (!activeModal || activeModal.type !== 'disks') return;
+  const idx = activeModal.data.indexOf(drive);
+  if (idx >= 0) activeModal.data.splice(idx, 1);
+  else activeModal.data.push(drive);
+  renderDashboard();
+}
+
+async function saveDiskSelection() {
+  const res = await api('/api/machines/' + activeModal.machineId, {
+    method: 'PUT', body: JSON.stringify({ monitored_disks: activeModal.data })
+  });
+  if (res.ok) { closeModal(); loadMachines(); }
   else alert(res.data?.error || 'Error');
 }
 
