@@ -144,56 +144,69 @@ async function measureSpeed() {
   });
 }
 
-// Auto-update: descarga nuevo exe, crea un bat que reemplaza y reinicia
+// Auto-update: descarga nuevo exe, renombra viejo, pone nuevo en su lugar
 async function selfUpdate(url, newVersion, config) {
   const newPath = path.join(EXE_DIR, 'servereyes-new.exe');
+  const oldPath = path.join(EXE_DIR, 'servereyes-old.exe');
   const batPath = path.join(EXE_DIR, 'servereyes-update.bat');
 
   log(`Descargando actualizacion v${newVersion} desde ${url}`);
   try {
-    // Descargar archivo
+    // Descargar archivo siguiendo redirects
     await new Promise((resolve, reject) => {
-      const client = url.startsWith('https') ? https : http;
-      const download = (downloadUrl) => {
+      const downloadFile = (downloadUrl, redirects) => {
+        if (redirects > 5) { reject(new Error('Demasiados redirects')); return; }
+        const client = downloadUrl.startsWith('https') ? https : http;
         client.get(downloadUrl, (res) => {
-          // Seguir redirects
-          if (res.statusCode === 301 || res.statusCode === 302) {
-            const redirectClient = res.headers.location.startsWith('https') ? https : http;
-            redirectClient.get(res.headers.location, (res2) => {
-              if (res2.statusCode !== 200) { reject(new Error(`HTTP ${res2.statusCode}`)); return; }
-              const file = fs.createWriteStream(newPath);
-              res2.pipe(file);
-              file.on('finish', () => { file.close(); resolve(); });
-            }).on('error', reject);
+          if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+            downloadFile(res.headers.location, redirects + 1);
             return;
           }
           if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
           const file = fs.createWriteStream(newPath);
           res.pipe(file);
-          file.on('finish', () => { file.close(); resolve(); });
+          file.on('finish', () => { file.close(resolve); });
+          file.on('error', reject);
         }).on('error', reject);
       };
-      download(url);
+      downloadFile(url, 0);
     });
 
     // Verificar que el archivo descargado tiene tamaño razonable (>1MB)
     const stats = fs.statSync(newPath);
     if (stats.size < 1024 * 1024) {
       log('Archivo descargado muy chico, abortando update');
-      fs.unlinkSync(newPath);
+      try { fs.unlinkSync(newPath); } catch {}
       return;
     }
 
     log(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), aplicando update...`);
 
-    // Crear bat que espera, reemplaza y reinicia
+    // Estrategia: el bat renombra el exe actual (se puede renombrar un exe en uso),
+    // mueve el nuevo al nombre original, y lo arranca.
+    // El watchdog tambien ayuda a levantarlo si el bat falla.
     const exeName = path.basename(EXE_PATH);
-    const batContent = `@echo off\r\ntimeout /t 3 /nobreak >nul\r\ndel "${EXE_PATH}" 2>nul\r\nmove "${newPath}" "${EXE_PATH}" >nul\r\nstart "" "${EXE_PATH}"\r\ndel "%~f0"\r\n`;
+    const batContent = [
+      '@echo off',
+      'timeout /t 5 /nobreak >nul',
+      // Limpiar old anterior si existe
+      `if exist "${oldPath}" del /f "${oldPath}"`,
+      // Renombrar exe actual a old (Windows permite renombrar exe en uso)
+      `if exist "${EXE_PATH}" rename "${EXE_PATH}" servereyes-old.exe`,
+      // Mover nuevo al nombre correcto
+      `if exist "${newPath}" move /y "${newPath}" "${EXE_PATH}"`,
+      // Arrancar
+      `if exist "${EXE_PATH}" start "" "${EXE_PATH}"`,
+      // Limpiar bat
+      'del "%~f0"'
+    ].join('\r\n') + '\r\n';
     fs.writeFileSync(batPath, batContent);
 
     log('Reiniciando con nueva version...');
-    spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' }).unref();
-    process.exit(0);
+    spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+
+    // Esperar un momento para que el bat se lance antes de salir
+    setTimeout(() => process.exit(0), 1000);
   } catch (err) {
     log(`Error en update: ${err.message}`);
     try { if (fs.existsSync(newPath)) fs.unlinkSync(newPath); } catch {}
