@@ -1239,6 +1239,76 @@ app.get('/api/machines/:id/rdp', authenticateToken, async (req, res) => {
   }
 });
 
+// Reporte HTML imprimible (guardar como PDF desde el navegador)
+app.get('/api/machines/report/pdf', async (req, res, next) => {
+  // Soportar token en query param para abrir en nueva pestaña
+  if (req.query.token && !req.headers.authorization) {
+    req.headers.authorization = 'Bearer ' + req.query.token;
+  }
+  authenticateToken(req, res, next);
+}, async (req, res) => {
+  try {
+    const machines = await pool.query('SELECT * FROM machines WHERE user_id = $1 ORDER BY grupo NULLS LAST, machine_name', [req.user.id]);
+    const online = machines.rows.filter(m => m.is_online).length;
+    const offline = machines.rows.length - online;
+    const fecha = new Date().toLocaleString('es');
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ServerEyes - Reporte</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; padding: 30px; color: #222; }
+      h1 { font-size: 22px; margin-bottom: 4px; }
+      .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+      .stats { display: flex; gap: 20px; margin-bottom: 24px; }
+      .stat { border: 1px solid #ddd; border-radius: 8px; padding: 12px 20px; text-align: center; }
+      .stat .num { font-size: 28px; font-weight: 800; }
+      .stat .label { color: #888; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
+      th { background: #f5f5f5; text-align: left; padding: 8px; border: 1px solid #ddd; font-weight: 600; }
+      td { padding: 6px 8px; border: 1px solid #ddd; }
+      tr:nth-child(even) { background: #fafafa; }
+      .online { color: #2e7d32; font-weight: 600; }
+      .offline { color: #c62828; font-weight: 600; }
+      .bar { display: inline-block; height: 10px; border-radius: 3px; }
+      @media print { body { padding: 15px; } }
+    </style></head><body>
+    <h1>ServerEyes - Reporte de Maquinas</h1>
+    <p class="sub">Generado: ${fecha} | Total: ${machines.rows.length} | Online: ${online} | Offline: ${offline}</p>
+    <div class="stats">
+      <div class="stat"><div class="num">${machines.rows.length}</div><div class="label">Total</div></div>
+      <div class="stat"><div class="num" style="color:#2e7d32">${online}</div><div class="label">Online</div></div>
+      <div class="stat"><div class="num" style="color:#c62828">${offline}</div><div class="label">Offline</div></div>
+    </div>
+    <table>
+      <tr><th>Nombre</th><th>Grupo</th><th>Estado</th><th>IP Publica</th><th>IP Local</th><th>Ping</th><th>CPU</th><th>RAM</th><th>Discos</th><th>OS</th></tr>
+      ${machines.rows.map(m => {
+        const disksStr = m.disks && Array.isArray(m.disks) ? m.disks.map(d => d.drive + ' ' + d.used + '/' + d.total + 'GB').join(', ') : (m.disk_usage ? 'C: ' + m.disk_usage + '/' + m.disk_total + 'GB' : '');
+        const ramPct = m.ram_usage && m.ram_total ? Math.round(m.ram_usage / m.ram_total * 100) + '%' : '';
+        return `<tr>
+          <td><strong>${m.machine_name}</strong></td>
+          <td>${m.grupo || ''}</td>
+          <td class="${m.is_online ? 'online' : 'offline'}">${m.is_online ? 'ONLINE' : 'OFFLINE'}</td>
+          <td>${m.public_ip || ''}</td>
+          <td>${(m.local_ip || '').replace(/ \| /g, '<br>')}</td>
+          <td>${m.ping_ms ? m.ping_ms + 'ms' : ''}</td>
+          <td>${m.cpu_usage != null ? m.cpu_usage + '%' : ''}</td>
+          <td>${m.ram_usage ? m.ram_usage + '/' + m.ram_total + 'GB (' + ramPct + ')' : ''}</td>
+          <td style="font-size:11px">${disksStr}</td>
+          <td style="font-size:10px">${m.os_info || ''}</td>
+        </tr>`;
+      }).join('')}
+    </table>
+    <p style="color:#888;font-size:11px">ServerEyes - ${fecha}</p>
+    <script>window.print();</script>
+    </body></html>`;
+
+    res.send(html);
+  } catch (error) {
+    console.error('Error generando reporte:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // Resultado de comando remoto (desde el agente, sin auth)
 app.post('/api/command-result', async (req, res) => {
   try {

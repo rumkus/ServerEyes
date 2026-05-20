@@ -441,6 +441,7 @@ function renderDashboard() {
       <div class="actions">
         <button class="btn-sm" onclick="toggleTheme()">&#127763; Tema</button>
         <button class="btn-sm" onclick="exportCSV()">&#128196; CSV</button>
+        <button class="btn-sm" onclick="exportPDF()">&#128462; PDF</button>
         <button class="btn-sm" onclick="openUpdateModal()">&#128228; Agente</button>
         <button class="btn-sm" onclick="toggleView()">${viewMode === 'groups' ? '&#128203; Lista' : '&#128193; Grupos'}</button>
         <button class="btn-sm btn-logout" onclick="logout()">Salir</button>
@@ -505,6 +506,11 @@ function exportCSV() {
     .then(r => r.blob())
     .then(blob => { a.href = URL.createObjectURL(blob); a.click(); })
     .catch(() => alert('Error al exportar'));
+}
+
+// Export PDF
+function exportPDF() {
+  window.open(API + '/api/machines/report/pdf?token=' + token, '_blank');
 }
 
 // ============ MACHINE MODALS ============
