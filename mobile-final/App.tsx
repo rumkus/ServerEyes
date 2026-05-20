@@ -897,6 +897,7 @@ export default function App() {
       {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📁 {item.grupo}</Text>}
       {item.dns_host && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 6}}>🌐 {item.dns_host}</Text>}
       {item.notes ? <Text style={{color: '#aaa', fontSize: 11, marginBottom: 4}} numberOfLines={1}>📝 {item.notes}</Text> : null}
+      {item.geo_city && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📍 {item.geo_city}, {item.geo_region}, {item.geo_country}</Text>}
       {item.check_ip_change === false && <Text style={{color: '#666', fontSize: 11, marginBottom: 6}}>🔕 Monitoreo de IP desactivado</Text>}
       <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
         <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>

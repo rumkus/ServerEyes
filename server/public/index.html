@@ -371,6 +371,7 @@ function renderCard(m) {
       ${m.download_mbps ? '<div class="card-row"><span class="lbl">Velocidad:</span><span class="val" style="color:#00d4ff">' + m.download_mbps + ' Mbps</span></div>' : ''}
       ${bars}
       ${m.os_info ? '<div class="card-os">' + m.os_info + '</div>' : ''}
+      ${m.geo_city ? '<div class="card-row"><span class="lbl">Ubicacion:</span><span class="val" style="color:#00d4ff">&#128205; ' + m.geo_city + ', ' + m.geo_region + ', ' + m.geo_country + '</span></div>' : ''}
       ${m.agent_version ? '<div class="card-version">v' + m.agent_version + (agentInfo.version && m.agent_version !== agentInfo.version ? ' <span class="outdated">(update disponible: v' + agentInfo.version + ')</span>' : '') + '</div>' : ''}
       <div class="card-actions">
         <button class="card-btn" onclick="event.stopPropagation();openUptime(${m.id})">&#128202; Uptime</button>
@@ -512,20 +513,12 @@ function exportCSV() {
 
 // Map
 async function openMap() {
-  activeModal = { type: 'map', data: null };
-  renderDashboard();
-  // Geolocalizar IPs
-  const ips = [...new Set(machines.filter(m => m.public_ip).map(m => m.public_ip))];
+  // Usar geo data guardada en el server
   const locations = {};
-  for (const ip of ips.slice(0, 20)) {
-    try {
-      const res = await fetch('https://ipwho.is/' + ip);
-      const data = await res.json();
-      if (data.success) locations[ip] = { lat: data.latitude, lon: data.longitude, city: data.city, regionName: data.region, country: data.country };
-    } catch {}
-    await new Promise(r => setTimeout(r, 200)); // rate limit
-  }
-  activeModal.data = locations;
+  machines.filter(m => m.geo_lat && m.geo_lon).forEach(m => {
+    locations[m.public_ip || m.id] = { lat: m.geo_lat, lon: m.geo_lon, city: m.geo_city, regionName: m.geo_region, country: m.geo_country };
+  });
+  activeModal = { type: 'map', data: locations };
   renderDashboard();
 }
 
@@ -534,9 +527,8 @@ function renderMapModal() {
   if (!locs) return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel"><p style="color:#888;text-align:center;padding:40px">Geolocalizando IPs...</p></div></div>`;
 
   const points = [];
-  machines.filter(m => m.public_ip && locs[m.public_ip]).forEach(m => {
-    const loc = locs[m.public_ip];
-    points.push({ name: m.machine_name, ip: m.public_ip, lat: loc.lat, lon: loc.lon, city: loc.city, region: loc.regionName, country: loc.country, online: m.is_online });
+  machines.filter(m => m.geo_lat && m.geo_lon).forEach(m => {
+    points.push({ name: m.machine_name, ip: m.public_ip, lat: m.geo_lat, lon: m.geo_lon, city: m.geo_city, region: m.geo_region, country: m.geo_country, online: m.is_online });
   });
 
   if (points.length === 0) return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel"><button class="close-btn" onclick="closeModal()">Cerrar</button><h2>&#127758; Mapa</h2><p style="color:#888;text-align:center;padding:40px">No se pudieron geolocalizar las IPs</p></div></div>`;

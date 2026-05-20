@@ -113,6 +113,11 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_logs TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS rdp_port INTEGER DEFAULT 3389`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS rdp_user VARCHAR(100)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_city VARCHAR(100)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_region VARCHAR(100)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_country VARCHAR(100)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_lat REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_lon REAL`).catch(() => {});
 
   // Historial de metricas (1 registro por heartbeat, limpieza automatica)
   await pool.query(`
@@ -685,6 +690,26 @@ app.post('/api/heartbeat', async (req, res) => {
       'INSERT INTO heartbeat_log (machine_id, public_ip) VALUES ($1, $2)',
       [result.rows[0].id, public_ip]
     );
+
+    // Geolocalizar IP si no tiene geo o cambio la IP
+    if (public_ip && updatedMachine && (!updatedMachine.geo_city || updatedMachine.public_ip !== public_ip)) {
+      try {
+        const https = require('https');
+        https.get('https://ipwho.is/' + public_ip, (geoRes) => {
+          let geoData = '';
+          geoRes.on('data', c => geoData += c);
+          geoRes.on('end', () => {
+            try {
+              const geo = JSON.parse(geoData);
+              if (geo.success) {
+                pool.query('UPDATE machines SET geo_city = $1, geo_region = $2, geo_country = $3, geo_lat = $4, geo_lon = $5 WHERE id = $6',
+                  [geo.city, geo.region, geo.country, geo.latitude, geo.longitude, updatedMachine.id]);
+              }
+            } catch {}
+          });
+        }).on('error', () => {});
+      } catch {}
+    }
 
     // Guardar metricas historicas (si hay datos)
     if (cpu_usage !== undefined || ram_usage !== undefined || ping_ms !== undefined) {
