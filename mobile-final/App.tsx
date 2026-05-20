@@ -879,148 +879,116 @@ export default function App() {
     );
   }
 
-  // Render de una maquina
-  const renderMachineCard = (item: any) => (
-    <TouchableOpacity
-      key={item.id}
-      style={[s.card, item.is_online ? {backgroundColor: '#0d2818', borderColor: '#1a5c2e'} : {backgroundColor: '#2d1117', borderColor: '#5c1a1a'}]}
-      onPress={() => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); }}
-      onLongPress={() => { setShowGroupPicker(item); setNewGroupName(''); }}>
-      <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10}}>
-        <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 8, backgroundColor: item.is_online ? '#00e676' : '#ff5252'}} />
-        <Text style={{flex: 1, fontSize: 18, fontWeight: '700', color: '#eee'}}>{item.machine_name}</Text>
-        <Text style={{fontSize: 12, fontWeight: '700', color: item.is_online ? '#00e676' : '#ff5252'}}>
-          {item.is_online ? 'ONLINE' : 'OFFLINE'}
-        </Text>
-      </View>
-      {item.is_shared && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 4}}>&#128101; Compartida por {item.owner_name || item.owner_email}</Text>}
-      {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📁 {item.grupo}</Text>}
-      {item.dns_host && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 6}}>🌐 {item.dns_host}</Text>}
-      {item.notes ? <Text style={{color: '#aaa', fontSize: 11, marginBottom: 4}} numberOfLines={1}>📝 {item.notes}</Text> : null}
-      {item.geo_city && <Text style={{color: '#00d4ff', fontSize: 11, marginBottom: 4}}>📍 {item.geo_city}, {item.geo_region}, {item.geo_country}</Text>}
-      {item.check_ip_change === false && <Text style={{color: '#666', fontSize: 11, marginBottom: 6}}>🔕 Monitoreo de IP desactivado</Text>}
-      <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
-        <Text style={{color: '#888', fontSize: 13}}>IP Publica:</Text>
-        <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{item.public_ip || '---'}</Text>
-      </View>
-      <View style={{marginBottom: 4}}>
-        <Text style={{color: '#888', fontSize: 13, marginBottom: 2}}>IP Local:</Text>
-        {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
-          <Text key={i} style={{color: '#ddd', fontSize: 13, fontWeight: '600', paddingLeft: 8}}>{ip.trim()}</Text>
-        ))}
-      </View>
-      <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-        <Text style={{color: '#888', fontSize: 13}}>Heartbeat:</Text>
-        <Text style={{color: '#ddd', fontSize: 13, fontWeight: '600'}}>{timeSince(item.last_heartbeat)}</Text>
-      </View>
-      <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 4}}>
-        <Text style={{color: '#888', fontSize: 13}}>Ping:</Text>
-        <Text style={{color: item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555', fontSize: 13, fontWeight: '600'}}>
-          {item.ping_ms ? `${item.ping_ms}ms` : '---'}
-        </Text>
-      </View>
-      {item.download_mbps && (
-        <View style={{flexDirection: 'row', justifyContent: 'space-between', marginTop: 4}}>
-          <Text style={{color: '#888', fontSize: 13}}>Velocidad:</Text>
-          <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '600'}}>{item.download_mbps} Mbps</Text>
-        </View>
-      )}
-      {(item.cpu_usage !== null && item.cpu_usage !== undefined) && (
-        <View style={{marginTop: 8}}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
-            <Text style={{color: '#888', fontSize: 12}}>CPU</Text>
-            <Text style={{color: item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676', fontSize: 12, fontWeight: '600'}}>{item.cpu_usage}%</Text>
+  // Render de una maquina (nuevo diseño)
+  const renderMachineCard = (item: any) => {
+    const isOn = item.is_online;
+    const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
+    const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
+    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); };
+
+    const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
+
+    return (
+      <TouchableOpacity key={item.id} onPress={openEdit} onLongPress={() => { setShowGroupPicker(item); setNewGroupName(''); }}
+        style={{backgroundColor: '#0d1b2a', borderRadius: 16, marginBottom: 14, borderLeftWidth: 3, borderLeftColor: isOn ? '#00e676' : '#ff5252', overflow: 'hidden'}}>
+        {/* Header */}
+        <View style={{padding: 16, paddingBottom: 8}}>
+          <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
+            <View style={{width: 12, height: 12, borderRadius: 6, marginRight: 10, backgroundColor: isOn ? '#00e676' : '#ff5252'}} />
+            <Text style={{flex: 1, fontSize: 18, fontWeight: '800', color: '#eee'}}>{item.machine_name}</Text>
+            <View style={{backgroundColor: isOn ? '#0d2818' : '#2d1117', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6}}>
+              <Text style={{fontSize: 11, fontWeight: '800', color: isOn ? '#00e676' : '#ff5252'}}>{isOn ? 'ONLINE' : 'OFFLINE'}</Text>
+            </View>
           </View>
-          <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
-            <View style={{width: `${Math.min(item.cpu_usage, 100)}%`, height: '100%', backgroundColor: item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+          {item.grupo && <Text style={{color: '#00d4ff', fontSize: 12, fontWeight: '600', marginBottom: 2}}>{'📁'} {item.grupo}</Text>}
+          {item.is_shared && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 2}}>{'👥'} Compartida por {item.owner_name || item.owner_email}</Text>}
+          {item.geo_city && <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 2}}>{'📍'} {item.geo_city}, {item.geo_region}, {item.geo_country}</Text>}
+          {item.check_ip_change === false && <Text style={{color: '#555', fontSize: 10}}>{'🔕'} Monitoreo de IP desactivado</Text>}
+        </View>
+
+        {/* IPs box */}
+        <View style={{flexDirection: 'row', marginHorizontal: 16, marginBottom: 10, backgroundColor: '#111d2e', borderRadius: 10, overflow: 'hidden'}}>
+          <View style={{flex: 1, padding: 10, borderRightWidth: 1, borderRightColor: '#1a2a3a'}}>
+            <Text style={{color: '#607d8b', fontSize: 10, marginBottom: 3}}>{'🌐'} IP Publica</Text>
+            <Text style={{color: '#eee', fontSize: 14, fontWeight: '700'}}>{item.public_ip || '---'}</Text>
+          </View>
+          <View style={{flex: 1, padding: 10}}>
+            <Text style={{color: '#607d8b', fontSize: 10, marginBottom: 3}}>{'🏠'} IP Local</Text>
+            {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
+              <Text key={i} style={{color: '#eee', fontSize: 12, fontWeight: '600'}}>{ip.trim()}</Text>
+            ))}
           </View>
         </View>
-      )}
-      {(item.ram_usage !== null && item.ram_usage !== undefined) && (
-        <View style={{marginTop: 6}}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
-            <Text style={{color: '#888', fontSize: 12}}>RAM</Text>
-            <Text style={{color: '#aaa', fontSize: 12, fontWeight: '600'}}>{item.ram_usage}/{item.ram_total} GB</Text>
+
+        {/* Metrics grid */}
+        <View style={{flexDirection: 'row', marginHorizontal: 16, marginBottom: 10}}>
+          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+            <Text style={{color: '#607d8b', fontSize: 9}}>{'💓'} Heartbeat</Text>
+            <Text style={{color: '#eee', fontSize: 15, fontWeight: '800', marginTop: 2}}>{timeSince(item.last_heartbeat)}</Text>
           </View>
-          <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
-            <View style={{width: `${Math.min((item.ram_usage / item.ram_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.ram_usage / item.ram_total) > 0.9 ? '#ff5252' : (item.ram_usage / item.ram_total) > 0.7 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+            <Text style={{color: '#607d8b', fontSize: 9}}>{'📡'} Ping</Text>
+            <Text style={{color: pingColor, fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.ping_ms ? `${item.ping_ms} ms` : '---'}</Text>
+          </View>
+          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+            <Text style={{color: '#607d8b', fontSize: 9}}>{'🌐'} Velocidad</Text>
+            <Text style={{color: '#00d4ff', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.download_mbps ? `${item.download_mbps} Mbps` : '---'}</Text>
+          </View>
+          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, alignItems: 'center'}}>
+            <Text style={{color: '#607d8b', fontSize: 9}}>{'🖥'} CPU</Text>
+            <Text style={{color: item.cpu_usage != null ? cpuColor : '#555', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.cpu_usage != null ? `${item.cpu_usage}%` : '---'}</Text>
           </View>
         </View>
-      )}
-      {item.disks && Array.isArray(item.disks) && item.disks.length > 0 ? (
-        item.disks.filter((disk: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(disk.drive)).map((disk: any, idx: number) => {
-          const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
-          return (
-            <View key={idx} style={{marginTop: 6}}>
-              <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
-                <Text style={{color: '#888', fontSize: 12}}>Disco {disk.drive}</Text>
-                <Text style={{color: '#aaa', fontSize: 12, fontWeight: '600'}}>{disk.used}/{disk.total} GB ({Math.round(disk.free)} GB libre)</Text>
+
+        {/* RAM + Disks bars */}
+        <View style={{marginHorizontal: 16, marginBottom: 10}}>
+          {(item.ram_usage != null) && (
+            <View style={{marginBottom: 6}}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3}}>
+                <Text style={{color: '#607d8b', fontSize: 11}}>{'💾'} RAM</Text>
+                <Text style={{color: '#aaa', fontSize: 11, fontWeight: '700'}}>{item.ram_usage} / {item.ram_total} GB</Text>
               </View>
-              <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
-                <View style={{width: `${Math.min(pct * 100, 100)}%`, height: '100%', backgroundColor: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', borderRadius: 3}} />
+              <View style={{height: 7, backgroundColor: '#1a2a3a', borderRadius: 4, overflow: 'hidden'}}>
+                <View style={{width: `${Math.min((item.ram_usage / item.ram_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.ram_usage / item.ram_total) > 0.9 ? '#ff5252' : (item.ram_usage / item.ram_total) > 0.7 ? '#ff9800' : '#00e676', borderRadius: 4}} />
               </View>
             </View>
-          );
-        })
-      ) : (item.disk_usage !== null && item.disk_usage !== undefined) ? (
-        <View style={{marginTop: 6}}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3}}>
-            <Text style={{color: '#888', fontSize: 12}}>Disco C:</Text>
-            <Text style={{color: '#aaa', fontSize: 12, fontWeight: '600'}}>{item.disk_usage}/{item.disk_total} GB</Text>
-          </View>
-          <View style={{height: 6, backgroundColor: '#2a2a4a', borderRadius: 3, overflow: 'hidden'}}>
-            <View style={{width: `${Math.min((item.disk_usage / item.disk_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.disk_usage / item.disk_total) > 0.95 ? '#ff5252' : (item.disk_usage / item.disk_total) > 0.85 ? '#ff9800' : '#00e676', borderRadius: 3}} />
-          </View>
+          )}
+          {filteredDisks.length > 0 ? filteredDisks.map((disk: any, idx: number) => {
+            const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
+            return (
+              <View key={idx} style={{marginBottom: 4}}>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3}}>
+                  <Text style={{color: '#607d8b', fontSize: 11}}>{'💿'} Disco {disk.drive}</Text>
+                  <Text style={{color: '#aaa', fontSize: 11, fontWeight: '700'}}>{disk.used} / {disk.total} GB ({Math.round(disk.free)} GB libre)</Text>
+                </View>
+                <View style={{height: 7, backgroundColor: '#1a2a3a', borderRadius: 4, overflow: 'hidden'}}>
+                  <View style={{width: `${Math.min(pct * 100, 100)}%`, height: '100%', backgroundColor: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', borderRadius: 4}} />
+                </View>
+              </View>
+            );
+          }) : null}
         </View>
-      ) : null}
-      {item.os_info && <Text style={{color: '#555', fontSize: 11, marginTop: 6}}>{item.os_info}</Text>}
-      <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8}}>
-        <View style={{flexDirection: 'row'}}>
-          <TouchableOpacity onPress={() => openUptime(item)} style={{padding: 6, marginRight: 10}}>
-            <Text style={{color: '#00d4ff', fontSize: 12}}>📊 Uptime</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => openMetrics(item)} style={{padding: 6, marginRight: 10}}>
-            <Text style={{color: '#00d4ff', fontSize: 12}}>📈 Metricas</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => openIpHistory(item)} style={{padding: 6, marginRight: 10}}>
-            <Text style={{color: '#aaa', fontSize: 12}}>🌐 IPs</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }} style={{padding: 6, marginRight: 10}}>
-            <Text style={{color: '#aaa', fontSize: 12}}>💾 Discos</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={async () => {
-            const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token);
-            if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || 'Sin logs', [{text: 'OK'}]);
-          }} style={{padding: 6, marginRight: 10}}>
-            <Text style={{color: '#aaa', fontSize: 12}}>📋 Logs</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => {
-            Alert.prompt ? Alert.prompt('Comando remoto', `Ejecutar en ${item.machine_name}:`, async (cmd: string) => {
-              if (!cmd) return;
-              const res = await apiRequest(`/api/machines/${item.id}/command`, { method: 'POST', body: JSON.stringify({ command: cmd }) }, token);
-              if (res.ok) Alert.alert('Enviado', 'Se ejecuta en el proximo heartbeat (~30s)');
-            }) : Alert.alert('Comando remoto', 'Usa el dashboard web para enviar comandos');
-          }} style={{padding: 6, marginRight: 10}}>
-            <Text style={{color: '#aaa', fontSize: 12}}>💻 CMD</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={async () => {
-            const res = await apiRequest(`/api/machines/${item.id}/speedtest`, { method: 'POST' }, token);
-            if (res.ok) Alert.alert('Speed Test', 'Solicitado. El resultado aparece en ~30 segundos.');
-          }} style={{padding: 6}}>
-            <Text style={{color: '#ff9800', fontSize: 12}}>⚡ Speed</Text>
-          </TouchableOpacity>
+
+        {/* OS info */}
+        {item.os_info && <Text style={{color: '#3a5068', fontSize: 10, marginHorizontal: 16, marginBottom: 8}}>{item.os_info}</Text>}
+
+        {/* Action buttons */}
+        <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a', paddingVertical: 8, paddingHorizontal: 12, flexWrap: 'wrap'}}>
+          {[
+            {icon: '⏱', label: 'Uptime', action: () => openUptime(item)},
+            {icon: '📈', label: 'Metricas', action: () => openMetrics(item)},
+            {icon: '🌐', label: 'IPs', action: () => openIpHistory(item)},
+            {icon: '💿', label: 'Discos', action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
+            {icon: '📋', label: 'Logs', action: async () => { const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token); if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || 'Sin logs'); }},
+          ].map((btn, i) => (
+            <TouchableOpacity key={i} onPress={btn.action} style={{paddingVertical: 6, paddingHorizontal: 10}}>
+              <Text style={{color: '#607d8b', fontSize: 12}}>{btn.icon} {btn.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-        <View style={{flexDirection: 'row'}}>
-          <TouchableOpacity onPress={() => moveMachineUp(item)} style={{padding: 6}}>
-            <Text style={{color: '#555', fontSize: 16}}>▲</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => moveMachineDown(item)} style={{padding: 6, marginLeft: 8}}>
-            <Text style={{color: '#555', fontSize: 16}}>▼</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   // Vista por grupos
   const renderGroupView = () => {
@@ -1549,136 +1517,104 @@ export default function App() {
   }
 
   // HOME
+  const onlineCount = machines.filter(m => m.is_online).length;
+  const offlineCount = machines.length - onlineCount;
+
   return (
-    <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
-      <StatusBar barStyle="light-content" backgroundColor="#16213e" />
-      <View style={s.header}>
-        <View>
-          <Text style={s.headerTitle}>👁 ServerEyes</Text>
-          <Text style={{color: '#888', fontSize: 13}}>{machines.length} maquinas</Text>
-        </View>
-        <View style={{flexDirection: 'row', alignItems: 'center'}}>
-          <TouchableOpacity
-            onPress={() => setViewMode(viewMode === 'all' ? 'groups' : 'all')}
-            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
-            <Text style={{color: '#00d4ff', fontSize: 13}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={async () => {
-              try {
-                const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } });
-                const csv = await res.text();
-                const now = new Date();
-                const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-                const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`;
-                await RNFS.writeFile(filePath, csv, 'utf8');
-                await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Exportar maquinas' });
-              } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export error: ${e.message}`); }
-            }}
-            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
-            <Text style={{color: '#888', fontSize: 13}}>&#128196;</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}
-            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
-            <Text style={{color: '#888', fontSize: 13}}>📋</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={async () => {
-              const res = await apiRequest('/api/organization', {}, token);
-              if (res.ok) {
-                setOrgData(res.data);
-                if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); }
-              }
-              setShowTeam(true);
-            }}
-            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
-            <Text style={{color: '#888', fontSize: 13}}>&#128101;</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={async () => {
-              const res = await apiRequest('/api/agent/version', {}, token);
-              if (res.ok) { setAgentVersion(res.data.version || ''); setAgentUrl(res.data.url || ''); }
-              setShowAgentUpdate(true);
-            }}
-            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
-            <Text style={{color: '#888', fontSize: 13}}>&#128228;</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setShowChangePass(true)}
-            style={{backgroundColor: '#2a2a4a', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8}}>
-            <Text style={{color: '#888', fontSize: 13}}>🔒</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.logoutBtn} onPress={() => { log.info('Logout'); setAndSaveToken(null); }}>
-            <Text style={{color: '#ff5252', fontWeight: '600'}}>Salir</Text>
-          </TouchableOpacity>
+    <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+      <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+      {/* Header */}
+      <View style={{backgroundColor: '#0d1b2a', paddingTop: 46, paddingHorizontal: 20, paddingBottom: 14}}>
+        <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <Text style={{fontSize: 28, marginRight: 10}}>{'👁'}</Text>
+            <View>
+              <Text style={{fontSize: 22, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
+              <Text style={{color: '#607d8b', fontSize: 12}}>{machines.length} maquinas</Text>
+            </View>
+          </View>
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <TouchableOpacity onPress={() => loadMachines()} style={{padding: 8}}><Text style={{color: '#607d8b', fontSize: 18}}>{'🔄'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { log.info('Logout'); setAndSaveToken(null); }} style={{padding: 8}}><Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>Salir</Text></TouchableOpacity>
+          </View>
         </View>
       </View>
 
+      {/* Tabs */}
+      <View style={{backgroundColor: '#0d1b2a', flexDirection: 'row', paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#1a2a3a'}}>
+        {[
+          {icon: '🖥', label: 'Servidores', mode: 'all'},
+          {icon: '📁', label: '', mode: 'groups'},
+          {icon: '👥', label: '', action: async () => { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
+          {icon: '📋', label: '', action: () => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
+          {icon: '⚙', label: '', action: () => setShowChangePass(true)},
+        ].map((tab, i) => (
+          <TouchableOpacity key={i} onPress={tab.action || (() => setViewMode(tab.mode as any))}
+            style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: !tab.action && viewMode === tab.mode ? '#00d4ff' : 'transparent'}}>
+            <Text style={{color: !tab.action && viewMode === tab.mode ? '#00d4ff' : '#607d8b', fontSize: 14}}>{tab.icon} {tab.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* IP Alert */}
       {ipAlert && (
-        <TouchableOpacity
-          style={{backgroundColor: '#ff9800', padding: 14, flexDirection: 'row', alignItems: 'center'}}
-          onPress={() => setIpAlert(null)}>
-          <Text style={{fontSize: 20, marginRight: 10}}>🔔</Text>
+        <TouchableOpacity style={{backgroundColor: '#ff9800', padding: 12, flexDirection: 'row', alignItems: 'center'}} onPress={() => setIpAlert(null)}>
+          <Text style={{fontSize: 18, marginRight: 8}}>{'🔔'}</Text>
           <View style={{flex: 1}}>
-            <Text style={{color: '#1a1a2e', fontWeight: '700', fontSize: 14}}>IP cambio en {ipAlert.name}</Text>
-            <Text style={{color: '#1a1a2e', fontSize: 12}}>{ipAlert.oldIp} → {ipAlert.newIp}</Text>
+            <Text style={{color: '#1a1a2e', fontWeight: '700', fontSize: 13}}>IP cambio en {ipAlert.name}</Text>
+            <Text style={{color: '#1a1a2e', fontSize: 11}}>{ipAlert.oldIp} → {ipAlert.newIp}</Text>
           </View>
-          <Text style={{color: '#1a1a2e', fontSize: 18}}>✕</Text>
+          <Text style={{color: '#1a1a2e', fontSize: 16}}>✕</Text>
         </TouchableOpacity>
       )}
 
+      {/* Machine list */}
       {viewMode === 'groups' ? (
-        <FlatList
-          data={[1]}
-          keyExtractor={() => 'groups'}
-          renderItem={() => renderGroupView()}
-          onRefresh={() => loadMachines()}
-          refreshing={false}
-        />
+        <FlatList data={[1]} keyExtractor={() => 'groups'} renderItem={() => renderGroupView()} onRefresh={() => loadMachines()} refreshing={false} />
       ) : (
         <FlatList
           data={machines}
           keyExtractor={i => i.id.toString()}
-          contentContainerStyle={{padding: 16, paddingBottom: 80}}
+          contentContainerStyle={{padding: 12, paddingBottom: 90}}
           onRefresh={() => loadMachines()}
           refreshing={false}
           ListEmptyComponent={
             <View style={{alignItems: 'center', marginTop: 100}}>
-              <Text style={{fontSize: 60}}>🖥</Text>
-              <Text style={{color: '#888', fontSize: 18, marginTop: 16}}>No hay maquinas</Text>
-              <Text style={{color: '#555', fontSize: 14, marginTop: 4}}>Toca + para agregar</Text>
+              <Text style={{fontSize: 60}}>{'🖥'}</Text>
+              <Text style={{color: '#607d8b', fontSize: 18, marginTop: 16}}>No hay maquinas</Text>
+              <Text style={{color: '#3a5068', fontSize: 14, marginTop: 4}}>Toca + para agregar</Text>
             </View>
           }
           renderItem={({item}) => renderMachineCard(item)}
         />
       )}
 
-      <TouchableOpacity style={[s.fab, {bottom: 90, backgroundColor: '#2a2a4a'}]} onPress={() => setShowAdd(true)}>
-        <Text style={[s.fabTxt, {fontSize: 22, color: '#00d4ff'}]}>+</Text>
+      {/* FABs */}
+      <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}} onPress={() => setShowAdd(true)}>
+        <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={s.fab} onPress={() => setShowPairing(true)}>
-        <Text style={[s.fabTxt, {fontSize: 20}]}>🔗</Text>
+      <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 90, width: 56, height: 56, borderRadius: 28, backgroundColor: '#1a2a3a', alignItems: 'center', justifyContent: 'center', elevation: 8}} onPress={() => setShowPairing(true)}>
+        <Text style={{fontSize: 22}}>{'🔗'}</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', padding: 24 },
+  container: { flex: 1, backgroundColor: '#0a1628', justifyContent: 'center', padding: 24 },
   icon: { fontSize: 60, textAlign: 'center', marginBottom: 10 },
   title: { fontSize: 28, fontWeight: 'bold', color: '#00d4ff', textAlign: 'center' },
-  sub: { fontSize: 14, color: '#888', textAlign: 'center', marginTop: 4, marginBottom: 20 },
-  input: { backgroundColor: '#16213e', borderWidth: 2, borderColor: '#2a2a4a', borderRadius: 12, padding: 14, fontSize: 16, color: '#eee', marginBottom: 12 },
+  sub: { fontSize: 14, color: '#607d8b', textAlign: 'center', marginTop: 4, marginBottom: 20 },
+  input: { backgroundColor: '#0d1b2a', borderWidth: 2, borderColor: '#1a2a3a', borderRadius: 12, padding: 14, fontSize: 16, color: '#eee', marginBottom: 12 },
   btn: { backgroundColor: '#00d4ff', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
-  btnTxt: { fontSize: 16, fontWeight: '700', color: '#1a1a2e' },
+  btnTxt: { fontSize: 16, fontWeight: '700', color: '#0a1628' },
   err: { color: '#ff5252', textAlign: 'center', fontSize: 13, marginBottom: 8 },
   link: { color: '#00d4ff', textAlign: 'center', marginTop: 16, fontSize: 14 },
-  key: { backgroundColor: '#16213e', borderRadius: 8, padding: 14, fontSize: 15, color: '#00d4ff', textAlign: 'center', marginVertical: 16, fontFamily: 'monospace' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#16213e' },
+  key: { backgroundColor: '#0d1b2a', borderRadius: 8, padding: 14, fontSize: 15, color: '#00d4ff', textAlign: 'center', marginVertical: 16, fontFamily: 'monospace' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 50, backgroundColor: '#0d1b2a' },
   headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#00d4ff' },
-  logoutBtn: { backgroundColor: '#2a2a4a', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  logoutBtn: { backgroundColor: '#1a2a3a', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   card: { borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1 },
   fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8 },
-  fabTxt: { fontSize: 30, color: '#1a1a2e', fontWeight: '700', marginTop: -2 },
+  fabTxt: { fontSize: 30, color: '#0a1628', fontWeight: '700', marginTop: -2 },
 });
