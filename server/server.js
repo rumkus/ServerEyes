@@ -126,6 +126,20 @@ async function initDB() {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_metrics_machine_time ON metrics_history (machine_id, timestamp DESC)`).catch(() => {});
+
+  // Comandos remotos
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS remote_commands (
+      id SERIAL PRIMARY KEY,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id),
+      command TEXT NOT NULL,
+      status VARCHAR(20) DEFAULT 'pending',
+      output TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      executed_at TIMESTAMP
+    )
+  `);
   // Umbrales de alerta (null = desactivado)
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
@@ -790,7 +804,17 @@ app.post('/api/heartbeat', async (req, res) => {
       }
     } catch {}
 
-    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo });
+    // Comandos remotos pendientes
+    let pendingCommands = [];
+    try {
+      const cmds = await pool.query(
+        "SELECT id, command FROM remote_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT 5",
+        [updatedMachine.id]
+      );
+      pendingCommands = cmds.rows;
+    } catch {}
+
+    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands });
   } catch (error) {
     console.error('Error en heartbeat:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -1181,6 +1205,58 @@ setInterval(async () => {
     if (result.rowCount > 0) console.log(`[CLEANUP] Eliminadas ${result.rowCount} metricas viejas`);
   } catch {}
 }, 3600000);
+
+// Resultado de comando remoto (desde el agente, sin auth)
+app.post('/api/command-result', async (req, res) => {
+  try {
+    const { machine_key, command_id, output } = req.body;
+    if (!machine_key || !command_id) return res.status(400).json({ error: 'machine_key y command_id requeridos' });
+    const machine = await pool.query('SELECT id FROM machines WHERE machine_key = $1', [machine_key]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    await pool.query(
+      "UPDATE remote_commands SET status = 'completed', output = $1, executed_at = NOW() WHERE id = $2 AND machine_id = $3",
+      [(output || '').substring(0, 10000), command_id, machine.rows[0].id]
+    );
+    res.json({ status: 'ok' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============== COMANDOS REMOTOS ==============
+
+// Enviar comando a una maquina
+app.post('/api/machines/:id/command', authenticateToken, async (req, res) => {
+  try {
+    const { command } = req.body;
+    if (!command) return res.status(400).json({ error: 'command requerido' });
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    const result = await pool.query(
+      'INSERT INTO remote_commands (machine_id, user_id, command) VALUES ($1, $2, $3) RETURNING *',
+      [req.params.id, req.user.id, command]
+    );
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error enviando comando:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Listar comandos de una maquina
+app.get('/api/machines/:id/commands', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT rc.* FROM remote_commands rc JOIN machines m ON rc.machine_id = m.id
+       WHERE m.id = $1 AND (m.user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = m.id AND ms.user_id = $2))
+       ORDER BY rc.created_at DESC LIMIT 20`,
+      [req.params.id, req.user.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // Exportar maquinas como CSV
 app.get('/api/machines/export/csv', authenticateToken, async (req, res) => {

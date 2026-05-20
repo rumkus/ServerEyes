@@ -993,6 +993,15 @@ export default function App() {
           }} style={{padding: 6, marginRight: 10}}>
             <Text style={{color: '#aaa', fontSize: 12}}>📋 Logs</Text>
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => {
+            Alert.prompt ? Alert.prompt('Comando remoto', `Ejecutar en ${item.machine_name}:`, async (cmd: string) => {
+              if (!cmd) return;
+              const res = await apiRequest(`/api/machines/${item.id}/command`, { method: 'POST', body: JSON.stringify({ command: cmd }) }, token);
+              if (res.ok) Alert.alert('Enviado', 'Se ejecuta en el proximo heartbeat (~30s)');
+            }) : Alert.alert('Comando remoto', 'Usa el dashboard web para enviar comandos');
+          }} style={{padding: 6, marginRight: 10}}>
+            <Text style={{color: '#aaa', fontSize: 12}}>💻 CMD</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={async () => {
             const res = await apiRequest(`/api/machines/${item.id}/speedtest`, { method: 'POST' }, token);
             if (res.ok) Alert.alert('Speed Test', 'Solicitado. El resultado aparece en ~30 segundos.');

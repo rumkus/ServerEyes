@@ -273,6 +273,29 @@ async function sendHeartbeat(config) {
           });
         }
       }
+
+      // Ejecutar comandos remotos pendientes
+      if (res.data && res.data.commands && res.data.commands.length > 0) {
+        for (const cmd of res.data.commands) {
+          log(`Comando remoto #${cmd.id}: ${cmd.command}`);
+          try {
+            const { exec } = require('child_process');
+            const output = await new Promise((resolve) => {
+              exec(cmd.command, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
+                resolve((stdout || '') + (stderr ? '\n[STDERR] ' + stderr : '') + (err && err.killed ? '\n[TIMEOUT]' : ''));
+              });
+            });
+            log(`Comando #${cmd.id} resultado: ${(output || '').substring(0, 100)}...`);
+            await httpRequest(`${config.serverUrl}/api/command-result`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ machine_key: config.machineKey, command_id: cmd.id, output })
+            });
+          } catch (e) {
+            log(`Comando #${cmd.id} error: ${e.message}`);
+          }
+        }
+      }
     } else log(`Heartbeat ERROR: ${JSON.stringify(res.data)}`);
   } catch (err) { log(`Heartbeat FAILED: ${err.message}`); }
 }

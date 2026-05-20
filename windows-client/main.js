@@ -299,6 +299,26 @@ async function sendHeartbeat() {
         });
       }
     }
+
+    // Ejecutar comandos remotos
+    if (res.ok && res.data && res.data.commands && res.data.commands.length > 0) {
+      for (const cmd of res.data.commands) {
+        clog(`Comando remoto #${cmd.id}: ${cmd.command}`);
+        try {
+          const { exec } = require('child_process');
+          const output = await new Promise((resolve) => {
+            exec(cmd.command, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
+              resolve((stdout || '') + (stderr ? '\n[STDERR] ' + stderr : '') + (err && err.killed ? '\n[TIMEOUT]' : ''));
+            });
+          });
+          await httpRequest(`${config.serverUrl}/api/command-result`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ machine_key: config.machineKey, command_id: cmd.id, output })
+          });
+        } catch (e) { clog(`Comando #${cmd.id} error: ${e.message}`); }
+      }
+    }
   } catch (error) {
     if (tray) tray.setToolTip('ServerEyes - Sin conexion');
   }

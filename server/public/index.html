@@ -349,6 +349,7 @@ function renderCard(m) {
         <button class="card-btn" onclick="event.stopPropagation();openDiskDetail(${m.id})">&#128190; Discos</button>
         <button class="card-btn" onclick="event.stopPropagation();openMetrics(${m.id})">&#128200; Metricas</button>
         <button class="card-btn" onclick="event.stopPropagation();openAgentLogs(${m.id})">&#128203; Logs</button>
+        <button class="card-btn" onclick="event.stopPropagation();openRemoteCmd(${m.id})">&#128187; CMD</button>
         <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
       </div>
     </div>`;
@@ -478,6 +479,7 @@ function renderActiveModal() {
   if (activeModal.type === 'disks') return renderDiskDetailModal();
   if (activeModal.type === 'logs') return renderLogsModal();
   if (activeModal.type === 'metrics') return renderMetricsModal();
+  if (activeModal.type === 'cmd') return renderCmdModal();
   return '';
 }
 
@@ -603,6 +605,52 @@ async function requestSpeedTest(id) {
   const res = await api('/api/machines/' + id + '/speedtest', { method: 'POST' });
   if (res.ok) alert('Speed test solicitado. Resultado en ~30 segundos.');
   else alert(res.data?.error || 'Error');
+}
+
+// --- REMOTE COMMANDS ---
+async function openRemoteCmd(machineId) {
+  activeModal = { type: 'cmd', machineId, data: null, sending: false };
+  renderDashboard();
+  const res = await api('/api/machines/' + machineId + '/commands');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+
+async function sendRemoteCmd() {
+  const cmd = document.getElementById('cmd-input')?.value?.trim();
+  if (!cmd) return;
+  activeModal.sending = true;
+  renderDashboard();
+  await api('/api/machines/' + activeModal.machineId + '/command', { method: 'POST', body: JSON.stringify({ command: cmd }) });
+  document.getElementById('cmd-input').value = '';
+  activeModal.sending = false;
+  // Recargar lista
+  const res = await api('/api/machines/' + activeModal.machineId + '/commands');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+
+function renderCmdModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const cmds = activeModal.data || [];
+
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:650px">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128187; Comando Remoto — ${m?.machine_name || ''}</h2>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <input id="cmd-input" style="flex:1;background:#0f0f23;border:2px solid #2a2a4a;border-radius:8px;padding:10px;color:#eee;font-size:14px;font-family:monospace;outline:none" placeholder="ej: ipconfig /all, dir C:\\, systeminfo..." onkeydown="if(event.key==='Enter')sendRemoteCmd()">
+      <button class="save-btn" style="margin:0;padding:10px 20px" onclick="sendRemoteCmd()" ${activeModal.sending ? 'disabled' : ''}>${activeModal.sending ? '...' : 'Enviar'}</button>
+    </div>
+    <p style="color:#555;font-size:11px;margin-bottom:12px">El comando se ejecuta en el proximo heartbeat (~30s). Timeout: 30s. Max output: 10KB.</p>
+    ${!activeModal.data ? '<p style="color:#888">Cargando...</p>' : cmds.length === 0 ? '<p style="color:#888;text-align:center">Sin comandos</p>' :
+      cmds.map(c => `<div style="background:#0f0f23;border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid ${c.status === 'completed' ? '#00e676' : '#ff9800'}">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <code style="color:#00d4ff;font-size:13px">${c.command}</code>
+          <span style="color:${c.status === 'completed' ? '#00e676' : '#ff9800'};font-size:11px;font-weight:600">${c.status === 'completed' ? 'Completado' : 'Pendiente'}</span>
+        </div>
+        ${c.output ? '<pre style="color:#aaa;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;background:#1a1a2e;border-radius:4px;padding:8px;margin:0">' + c.output.replace(/</g,'&lt;') + '</pre>' : ''}
+        <div style="color:#555;font-size:10px;margin-top:4px">${new Date(c.created_at).toLocaleString('es')}${c.executed_at ? ' → ' + new Date(c.executed_at).toLocaleString('es') : ''}</div>
+      </div>`).join('')}
+    <button class="day-btn" style="margin-top:8px" onclick="openRemoteCmd(${activeModal.machineId})">&#128260; Refrescar</button>
+  </div></div>`;
 }
 
 // --- METRICS HISTORY ---
