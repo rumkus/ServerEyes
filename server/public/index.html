@@ -178,6 +178,36 @@ body { background: #1a1a2e; color: #eee; font-family: -apple-system, BlinkMacSys
 /* Auto-refresh indicator */
 .refresh-dot { width: 8px; height: 8px; border-radius: 50%; background: #00e676; display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* Light theme */
+body.light { background: #f0f2f5; color: #222; }
+body.light .header { background: #fff; border-bottom: 1px solid #ddd; }
+body.light .header h1 { color: #0088cc; }
+body.light .stat-card { background: #fff; }
+body.light .card.online { background: #e8f5e9; border-color: #a5d6a7; }
+body.light .card.offline { background: #ffebee; border-color: #ef9a9a; }
+body.light .card-name { color: #222; }
+body.light .card-os { color: #999; }
+body.light .card-row .val { color: #333; }
+body.light .card-ips .ip { color: #333; }
+body.light .tag-group { background: #e3f2fd; color: #0088cc; }
+body.light .tag-dns { background: #fff3e0; color: #e65100; }
+body.light .tag-notes { background: #f5f5f5; color: #666; }
+body.light .filter-bar input { background: #fff; border-color: #ddd; color: #222; }
+body.light .filter-btn { background: #e0e0e0; color: #555; }
+body.light .filter-btn.active { background: #0088cc; color: #fff; }
+body.light .btn-sm { background: #e0e0e0; color: #555; }
+body.light .btn-sm:hover { background: #ccc; color: #222; }
+body.light .bar { background: #e0e0e0; }
+body.light .login-box { background: #fff; }
+body.light .login-box input { background: #f5f5f5; border-color: #ddd; color: #222; }
+body.light .detail-panel { background: #fff; }
+body.light .detail-panel input, body.light .detail-panel textarea { background: #f5f5f5; border-color: #ddd; color: #222; }
+body.light .card-btn { background: #e0e0e0; color: #555; }
+body.light .card-btn:hover { background: #ccc; color: #222; }
+body.light .update-banner { background: #fff3e0; border-color: #ff9800; }
+body.light .modal { background: #fff; }
+body.light .modal input { background: #f5f5f5; border-color: #ddd; color: #222; }
 </style>
 </head>
 <body>
@@ -409,6 +439,7 @@ function renderDashboard() {
         <span class="info"><span class="refresh-dot"></span>Auto-refresh 10s</span>
       </div>
       <div class="actions">
+        <button class="btn-sm" onclick="toggleTheme()">&#127763; Tema</button>
         <button class="btn-sm" onclick="exportCSV()">&#128196; CSV</button>
         <button class="btn-sm" onclick="openUpdateModal()">&#128228; Agente</button>
         <button class="btn-sm" onclick="toggleView()">${viewMode === 'groups' ? '&#128203; Lista' : '&#128193; Grupos'}</button>
@@ -455,6 +486,14 @@ async function startDashboard() {
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(loadMachines, 10000);
 }
+
+// Theme toggle
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  localStorage.setItem('se_theme', isLight ? 'light' : 'dark');
+}
+// Restore theme
+if (localStorage.getItem('se_theme') === 'light') document.body.classList.add('light');
 
 // Export CSV
 function exportCSV() {
