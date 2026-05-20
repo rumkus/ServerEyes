@@ -519,9 +519,9 @@ async function openMap() {
   const locations = {};
   for (const ip of ips.slice(0, 20)) {
     try {
-      const res = await fetch('http://ip-api.com/json/' + ip + '?fields=status,lat,lon,city,regionName,country');
+      const res = await fetch('https://ipwho.is/' + ip);
       const data = await res.json();
-      if (data.status === 'success') locations[ip] = data;
+      if (data.success) locations[ip] = { lat: data.latitude, lon: data.longitude, city: data.city, regionName: data.region, country: data.country };
     } catch {}
     await new Promise(r => setTimeout(r, 200)); // rate limit
   }
