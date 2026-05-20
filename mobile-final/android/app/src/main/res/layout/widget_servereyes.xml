@@ -4,97 +4,80 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/widget_bg"
-    android:padding="12dp">
+    android:background="@drawable/widget_background"
+    android:padding="16dp">
 
+    <!-- Header: icon + ServerEyes + refresh icon -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:layout_marginBottom="8dp">
+        android:layout_marginBottom="2dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="👁"
+            android:textSize="18sp"
+            android:layout_marginEnd="8dp" />
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="ServerEyes"
-            android:textColor="@color/widget_cyan"
-            android:textSize="16sp"
+            android:textColor="@color/widget_light"
+            android:textSize="17sp"
             android:textStyle="bold" />
 
         <TextView
-            android:id="@+id/widget_updated"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/widget_gray"
-            android:textSize="10sp" />
+            android:text="🔄"
+            android:textSize="14sp" />
     </LinearLayout>
 
-    <LinearLayout
+    <!-- Subtitle: NOC MODE -->
+    <TextView
+        android:id="@+id/widget_subtitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="8dp">
+        android:text="NOC MODE"
+        android:textColor="@color/widget_cyan"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.15"
+        android:layout_marginStart="26dp"
+        android:layout_marginBottom="10dp" />
 
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@color/widget_green_bg"
-            android:padding="6dp">
-
-            <TextView
-                android:id="@+id/widget_online"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0"
-                android:textColor="@color/widget_green"
-                android:textSize="24sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Online"
-                android:textColor="@color/widget_gray"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@color/widget_red_bg"
-            android:padding="6dp"
-            android:layout_marginStart="8dp">
-
-            <TextView
-                android:id="@+id/widget_offline"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0"
-                android:textColor="@color/widget_red"
-                android:textSize="24sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Offline"
-                android:textColor="@color/widget_gray"
-                android:textSize="11sp" />
-        </LinearLayout>
-    </LinearLayout>
-
+    <!-- Machine list -->
     <LinearLayout
         android:id="@+id/widget_machines_list"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical" />
+
+    <!-- Hidden counters for logic -->
+    <TextView
+        android:id="@+id/widget_online"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+    <TextView
+        android:id="@+id/widget_offline"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <!-- Footer: updated time -->
+    <TextView
+        android:id="@+id/widget_updated"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textColor="@color/widget_dim"
+        android:textSize="10sp"
+        android:layout_marginTop="8dp" />
 
 </LinearLayout>

@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="widget_bg">#E61a1a2e</color>
+    <color name="widget_bg">#F00a1628</color>
+    <color name="widget_card_bg">#F00d1b2a</color>
     <color name="widget_cyan">#FF00d4ff</color>
     <color name="widget_green">#FF00e676</color>
     <color name="widget_red">#FFff5252</color>
-    <color name="widget_gray">#FF888888</color>
-    <color name="widget_light">#FFdddddd</color>
+    <color name="widget_gray">#FF607d8b</color>
+    <color name="widget_light">#FFe0e0e0</color>
+    <color name="widget_dim">#FF3a5068</color>
     <color name="widget_green_bg">#1600e676</color>
     <color name="widget_red_bg">#16ff5252</color>
 </resources>

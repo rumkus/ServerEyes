@@ -105,7 +105,7 @@ class ServerEyesWidget : AppWidgetProvider() {
                         views.setTextViewText(R.id.widget_offline, offline.toString())
 
                         val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                        views.setTextViewText(R.id.widget_updated, timeFormat.format(Date()))
+                        views.setTextViewText(R.id.widget_updated, "Actualizado: ${timeFormat.format(Date())}")
 
                         // Machine list
                         views.removeAllViews(R.id.widget_machines_list)
@@ -115,11 +115,14 @@ class ServerEyesWidget : AppWidgetProvider() {
                             val row = RemoteViews(context.packageName, R.layout.widget_machine_row)
                             val name = m.optString("machine_name", "???")
                             val isOn = m.optBoolean("is_online", false)
+                            val pingMs = m.optInt("ping_ms", 0)
 
                             row.setTextViewText(R.id.row_name, name)
-                            row.setTextViewText(R.id.row_status, if (isOn) "ON" else "OFF")
+                            row.setTextViewText(R.id.row_status, if (isOn) "ONLINE" else "OFFLINE")
                             row.setTextColor(R.id.row_status, if (isOn) 0xFF00E676.toInt() else 0xFFFF5252.toInt())
                             row.setImageViewResource(R.id.row_dot, if (isOn) R.drawable.dot_online else R.drawable.dot_offline)
+                            row.setTextViewText(R.id.row_ping, if (pingMs > 0) "${pingMs}ms" else "--")
+                            row.setTextColor(R.id.row_ping, if (pingMs > 0) (if (pingMs < 50) 0xFF00E676.toInt() else if (pingMs < 150) 0xFFFF9800.toInt() else 0xFFFF5252.toInt()) else 0xFF607d8b.toInt())
 
                             views.addView(R.id.widget_machines_list, row)
                         }
