@@ -349,6 +349,7 @@ function renderCard(m) {
         <button class="card-btn" onclick="event.stopPropagation();openDiskDetail(${m.id})">&#128190; Discos</button>
         <button class="card-btn" onclick="event.stopPropagation();openMetrics(${m.id})">&#128200; Metricas</button>
         <button class="card-btn" onclick="event.stopPropagation();openAgentLogs(${m.id})">&#128203; Logs</button>
+        <button class="card-btn" onclick="event.stopPropagation();downloadRDP(${m.id})">&#128421; RDP</button>
         <button class="card-btn" onclick="event.stopPropagation();openRemoteCmd(${m.id})">&#128187; CMD</button>
         <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
       </div>
@@ -575,6 +576,10 @@ function renderEditModal() {
       <input type="checkbox" id="ed-checkip" ${d.check_ip_change !== false ? 'checked' : ''} style="margin-right:8px;width:18px;height:18px" onclick="event.stopPropagation()">
       <span style="color:#ddd;font-size:13px">Monitorear cambio de IP publica</span>
     </div>
+    <label>RDP - Puerto:</label>
+    <input id="ed-rdp-port" type="number" value="${d.rdp_port || 3389}" />
+    <label>RDP - Usuario:</label>
+    <input id="ed-rdp-user" value="${d.rdp_user || ''}" placeholder="Administrador" />
     <button class="save-btn" onclick="saveEditMachine()">Guardar</button>
     <br><button class="del-btn" onclick="deleteMachine(${d.id})">Eliminar maquina</button>
   </div></div>`;
@@ -587,7 +592,9 @@ async function saveEditMachine() {
     notes: document.getElementById('ed-notes').value,
     dns_host: document.getElementById('ed-dns-host').value.trim() || null,
     dns_update_url: document.getElementById('ed-dns-url').value.trim() || null,
-    check_ip_change: document.getElementById('ed-checkip').checked
+    check_ip_change: document.getElementById('ed-checkip').checked,
+    rdp_port: parseInt(document.getElementById('ed-rdp-port').value) || 3389,
+    rdp_user: document.getElementById('ed-rdp-user').value.trim() || null
   };
   const res = await api('/api/machines/' + activeModal.machineId, { method: 'PUT', body: JSON.stringify(data) });
   if (res.ok) { closeModal(); loadMachines(); }
@@ -605,6 +612,14 @@ async function requestSpeedTest(id) {
   const res = await api('/api/machines/' + id + '/speedtest', { method: 'POST' });
   if (res.ok) alert('Speed test solicitado. Resultado en ~30 segundos.');
   else alert(res.data?.error || 'Error');
+}
+
+// --- RDP ---
+function downloadRDP(machineId) {
+  fetch(API + '/api/machines/' + machineId + '/rdp', { headers: { Authorization: 'Bearer ' + token } })
+    .then(r => r.blob())
+    .then(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'connect.rdp'; a.click(); })
+    .catch(() => alert('Error'));
 }
 
 // --- REMOTE COMMANDS ---

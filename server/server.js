@@ -111,6 +111,8 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_disks JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_logs TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS rdp_port INTEGER DEFAULT 3389`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS rdp_user VARCHAR(100)`).catch(() => {});
 
   // Historial de metricas (1 registro por heartbeat, limpieza automatica)
   await pool.query(`
@@ -894,6 +896,8 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (alert_offline !== undefined) { fields.push(`alert_offline = $${idx++}`); values.push(alert_offline); }
     if (monitored_disks !== undefined) { fields.push(`monitored_disks = $${idx++}`); values.push(JSON.stringify(monitored_disks)); }
     if (req.body.alert_disks !== undefined) { fields.push(`alert_disks = $${idx++}`); values.push(JSON.stringify(req.body.alert_disks)); }
+    if (req.body.rdp_port !== undefined) { fields.push(`rdp_port = $${idx++}`); values.push(req.body.rdp_port); }
+    if (req.body.rdp_user !== undefined) { fields.push(`rdp_user = $${idx++}`); values.push(req.body.rdp_user || null); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
@@ -1205,6 +1209,35 @@ setInterval(async () => {
     if (result.rowCount > 0) console.log(`[CLEANUP] Eliminadas ${result.rowCount} metricas viejas`);
   } catch {}
 }, 3600000);
+
+// Generar archivo RDP para conexion remota
+app.get('/api/machines/:id/rdp', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query('SELECT * FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    const m = machine.rows[0];
+    const ip = m.public_ip || m.local_ip?.split(' ')[0] || '0.0.0.0';
+    const port = m.rdp_port || 3389;
+    const rdpContent = [
+      'full address:s:' + ip + ':' + port,
+      'prompt for credentials:i:1',
+      'administrative session:i:1',
+      m.rdp_user ? 'username:s:' + m.rdp_user : '',
+      'screen mode id:i:2',
+      'desktopwidth:i:1920',
+      'desktopheight:i:1080',
+      'session bpp:i:32',
+      'compression:i:1',
+      'displayconnectionbar:i:1',
+      'disable wallpaper:i:0',
+      'autoreconnection enabled:i:1',
+    ].filter(Boolean).join('\r\n');
+    res.set({ 'Content-Type': 'application/x-rdp', 'Content-Disposition': `attachment; filename="${m.machine_name.replace(/[^a-zA-Z0-9]/g, '_')}.rdp"` });
+    res.send(rdpContent);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // Resultado de comando remoto (desde el agente, sin auth)
 app.post('/api/command-result', async (req, res) => {
