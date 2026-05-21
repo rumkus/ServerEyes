@@ -753,9 +753,10 @@ app.post('/api/heartbeat', async (req, res) => {
     }
 
     // Log del heartbeat
+    const updatedMachine = result.rows[0];
     await pool.query(
       'INSERT INTO heartbeat_log (machine_id, public_ip) VALUES ($1, $2)',
-      [result.rows[0].id, public_ip]
+      [updatedMachine.id, public_ip]
     );
 
     // Geolocalizar IP si no tiene geo o cambio la IP
@@ -792,7 +793,6 @@ app.post('/api/heartbeat', async (req, res) => {
     }
 
     // Registrar cambio a online si estaba offline
-    const updatedMachine = result.rows[0];
     if (updatedMachine) {
       // Chequeamos si es la primera vez o si estaba offline antes
       const lastLog = await pool.query(
