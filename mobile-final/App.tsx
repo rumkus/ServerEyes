@@ -1061,6 +1061,15 @@ export default function App() {
               const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
               if (res.ok) Alert.alert('Config: ' + item.machine_name, res.data.config ? JSON.stringify(res.data.config, null, 2) + '\n\nBackup: ' + (res.data.backed_up_at ? new Date(res.data.backed_up_at).toLocaleString() : '---') : 'Sin backup');
             }},
+            {icon: '🛡', label: 'Backup', action: async () => {
+              const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
+              if (res.ok) {
+                const d = res.data;
+                const status = d.status === 'ok' || d.status === 'found' ? '✅ Backup OK' : d.status === 'error' ? '❌ Error' : '⚠ Sin datos';
+                const info = [status, d.last_backup ? 'Ultimo: ' + d.last_backup : null, d.last_folder ? 'Carpeta: ' + d.last_folder : null, d.level ? 'Nivel: ' + d.level : null, d.message || null].filter(Boolean).join('\n');
+                Alert.alert('Backup: ' + item.machine_name, info);
+              }
+            }},
           ].map((btn, i) => (
             <TouchableOpacity key={i} onPress={btn.action} style={{paddingVertical: 6, paddingHorizontal: 10}}>
               <Text style={{color: '#607d8b', fontSize: 12}}>{btn.icon} {btn.label}</Text>

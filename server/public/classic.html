@@ -385,6 +385,7 @@ function renderCard(m) {
         <button class="card-btn" onclick="event.stopPropagation();openServices(${m.id})">&#9881; Servicios</button>
         <button class="card-btn" onclick="event.stopPropagation();openPorts(${m.id})">&#128268; Puertos</button>
         <button class="card-btn" onclick="event.stopPropagation();openConfigBackup(${m.id})">&#128190; Config</button>
+        <button class="card-btn" onclick="event.stopPropagation();openBackup(${m.id})">&#128737; Backup</button>
         <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
       </div>
     </div>`;
@@ -613,6 +614,7 @@ function renderActiveModal() {
   if (activeModal.type === 'ports') return renderPortsModal();
   if (activeModal.type === 'configbackup') return renderConfigBackupModal();
   if (activeModal.type === 'smtp') return renderSmtpModal();
+  if (activeModal.type === 'backup') return renderBackupModal();
   return '';
 }
 
@@ -1088,6 +1090,33 @@ function renderConfigBackupModal() {
     ${!d ? '<p style="color:#888">Cargando...</p>' : !d.config ? '<p style="color:#888;text-align:center;padding:20px">Sin backup. Actualiza el agente.</p>' : `
       <p style="color:#888;font-size:12px;margin-bottom:12px">Ultimo backup: ${d.backed_up_at ? new Date(d.backed_up_at).toLocaleString('es') : '---'}</p>
       <pre style="background:#16213e;border-radius:8px;padding:14px;color:#aaa;font-size:13px;white-space:pre-wrap;font-family:monospace">${JSON.stringify(d.config, null, 2)}</pre>`}
+  </div></div>`;
+}
+
+// --- BACKUP ---
+async function openBackup(id) {
+  activeModal = { type: 'backup', machineId: id, data: null }; renderDashboard();
+  const res = await api('/api/machines/' + id + '/backup');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+function renderBackupModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const d = activeModal.data;
+  const color = !d ? '#888' : d.status === 'ok' || d.status === 'found' ? '#00e676' : d.status === 'error' ? '#ff5252' : '#ff9800';
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:500px">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128737; Backup — ${m?.machine_name || ''}</h2>
+    <div style="text-align:center;padding:16px 0">
+      <div style="font-size:40px;margin-bottom:8px">${!d ? '⏳' : d.status === 'ok' || d.status === 'found' ? '🛡' : d.status === 'error' ? '🚨' : '⚠'}</div>
+      <div style="font-size:16px;font-weight:700;color:${color}">${!d ? 'Cargando...' : d.status === 'ok' || d.status === 'found' ? 'Backup encontrado' : d.status === 'error' ? 'Error en backup' : 'Sin datos de backup'}</div>
+    </div>
+    ${d ? `<div style="background:#16213e;border-radius:8px;padding:14px;font-size:13px;color:#aaa">
+      ${d.type ? '<div style="margin-bottom:4px">Fuente: <strong style="color:#ddd">' + (d.type==='wbadmin'?'wbadmin':d.type==='eventlog'?'Event Log':d.type==='folder'?'Carpeta':'?') + '</strong></div>' : ''}
+      ${d.last_backup ? '<div style="margin-bottom:4px">Ultimo: <strong style="color:#ddd">' + d.last_backup + '</strong></div>' : ''}
+      ${d.last_folder ? '<div style="margin-bottom:4px">Carpeta: <strong style="color:#ddd">' + d.last_folder + '</strong></div>' : ''}
+      ${d.level ? '<div style="margin-bottom:4px">Nivel: <strong style="color:' + (d.level.includes('Error')?'#ff5252':'#00e676') + '">' + d.level + '</strong></div>' : ''}
+      ${d.message ? '<div>Mensaje: ' + d.message + '</div>' : ''}
+    </div>` : ''}
   </div></div>`;
 }
 
