@@ -195,6 +195,7 @@ export default function App() {
         if (saved) {
           log.info('Token encontrado en storage');
           setToken(saved);
+          try { WidgetBridge?.setToken(saved); } catch {}
         } else {
           log.info('No hay token guardado');
         }
@@ -258,6 +259,7 @@ export default function App() {
       const res = await apiRequest('/api/machines', {}, t || tokenRef.current);
       if (res.ok) {
         setMachines(res.data);
+        try { WidgetBridge?.refreshWidget(); } catch {}
       } else if (res.status === 401) {
         log.warn('Token expirado, redirigiendo a login');
         setAndSaveToken(null);
