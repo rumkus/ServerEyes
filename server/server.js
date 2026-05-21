@@ -192,6 +192,8 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_config JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS config_backup_at TIMESTAMP`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS backup_status JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS backup_alert_sent BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_backup_pending BOOLEAN DEFAULT false`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS rdp_port INTEGER DEFAULT 3389`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS rdp_user VARCHAR(100)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_city VARCHAR(100)`).catch(() => {});
@@ -953,7 +955,23 @@ app.post('/api/heartbeat', async (req, res) => {
       pendingCommands = cmds.rows;
     } catch {}
 
-    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands });
+    // Check backup pendiente
+    const checkBackup = updatedMachine.check_backup_pending || false;
+    if (checkBackup) {
+      pool.query('UPDATE machines SET check_backup_pending = false WHERE id = $1', [updatedMachine.id]).catch(() => {});
+    }
+
+    // Alerta de backup fallido (1 sola vez)
+    if (backup_status && backup_status.status === 'error' && !updatedMachine.backup_alert_sent && updatedMachine.user_id) {
+      sendPush(updatedMachine.user_id, '🚨 Backup FALLO', `${updatedMachine.machine_name}: ${backup_status.message || 'Error en el backup'}`, { type: 'backup_error', machineId: String(updatedMachine.id) });
+      pool.query('UPDATE machines SET backup_alert_sent = true WHERE id = $1', [updatedMachine.id]).catch(() => {});
+    }
+    // Resetear alerta cuando el backup vuelve a estar ok
+    if (backup_status && (backup_status.status === 'ok' || backup_status.status === 'found') && updatedMachine.backup_alert_sent) {
+      pool.query('UPDATE machines SET backup_alert_sent = false WHERE id = $1', [updatedMachine.id]).catch(() => {});
+    }
+
+    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands, check_backup: checkBackup });
   } catch (error) {
     console.error('Error en heartbeat:', error.message, error.stack);
     res.status(500).json({ error: 'Error interno', detail: error.message });
@@ -1493,6 +1511,18 @@ app.get('/api/machines/:id/commands', authenticateToken, async (req, res) => {
       [req.params.id, req.user.id]
     );
     res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Solicitar chequeo de backup a una maquina
+app.post('/api/machines/:id/check-backup', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    await pool.query('UPDATE machines SET check_backup_pending = true WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Chequeo de backup solicitado. Resultado en el proximo heartbeat.' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }

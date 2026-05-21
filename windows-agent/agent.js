@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.0.6';
+const AGENT_VERSION = '1.0.7';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -131,50 +131,47 @@ function getSystemMetrics() {
 }
 
 // Servicios Windows importantes
-// Windows Backup status
-function getBackupStatus() {
+// Windows Backup status (solo Event Log y carpeta, sin wbadmin que abre ventanas)
+// Cache: se chequea 1 vez al dia o a pedido del server
+let _backupCache = null;
+let _backupLastCheck = 0;
+const BACKUP_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 horas
+
+function getBackupStatus(forceCheck) {
+  // Devolver cache si no pasaron 24h y no es forzado
+  if (!forceCheck && _backupCache && (Date.now() - _backupLastCheck) < BACKUP_CHECK_INTERVAL) {
+    return Promise.resolve(_backupCache);
+  }
   return new Promise((resolve) => {
     const { exec } = require('child_process');
-    // Chequear Windows Server Backup (wbadmin)
-    exec('wbadmin get versions -backuptarget:* 2>&1', { timeout: 15000, windowsHide: true }, (err, stdout) => {
-      if (!err && stdout && !stdout.includes('ERROR') && !stdout.includes('error')) {
-        // Parsear ultima version de backup
-        const lines = stdout.trim().split('\n');
-        let lastBackup = null;
-        let backupTime = null;
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const timeLine = lines[i].match(/(?:Backup time|Hora de la copia).*?:\s*(.+)/i);
-          if (timeLine) { backupTime = timeLine[1].trim(); break; }
-        }
-        if (backupTime) {
-          resolve({ type: 'wbadmin', last_backup: backupTime, status: 'found' });
-          return;
-        }
+    // Chequear Event Log de Windows Backup (no abre ventanas)
+    exec('wevtutil qe Microsoft-Windows-Backup /c:1 /rd:true /f:text 2>nul', { timeout: 15000, windowsHide: true }, (err2, stdout2) => {
+      if (!err2 && stdout2 && stdout2.includes('Event')) {
+        const dateMatch = stdout2.match(/Date:\s*(.+)/i) || stdout2.match(/Fecha:\s*(.+)/i);
+        const levelMatch = stdout2.match(/Level:\s*(.+)/i) || stdout2.match(/Nivel:\s*(.+)/i);
+        const msgMatch = stdout2.match(/Message:\s*([\s\S]*?)(?:\n\n|\n$)/i) || stdout2.match(/Mensaje:\s*([\s\S]*?)(?:\n\n|\n$)/i);
+        _backupCache = {
+          type: 'eventlog',
+          last_backup: dateMatch ? dateMatch[1].trim() : null,
+          level: levelMatch ? levelMatch[1].trim() : null,
+          message: msgMatch ? msgMatch[1].trim().substring(0, 200) : null,
+          status: levelMatch && (levelMatch[1].includes('Error') || levelMatch[1].includes('error')) ? 'error' : 'ok',
+          checked_at: new Date().toLocaleString()
+        };
+        _backupLastCheck = Date.now();
+        resolve(_backupCache);
+        return;
       }
-      // Fallback: chequear Event Log de Windows Backup
-      exec('wevtutil qe Microsoft-Windows-Backup /c:1 /rd:true /f:text 2>&1', { timeout: 15000, windowsHide: true }, (err2, stdout2) => {
-        if (!err2 && stdout2 && stdout2.includes('Event')) {
-          const dateMatch = stdout2.match(/Date:\s*(.+)/i) || stdout2.match(/Fecha:\s*(.+)/i);
-          const levelMatch = stdout2.match(/Level:\s*(.+)/i) || stdout2.match(/Nivel:\s*(.+)/i);
-          const msgMatch = stdout2.match(/Message:\s*([\s\S]*?)(?:\n\n|\n$)/i) || stdout2.match(/Mensaje:\s*([\s\S]*?)(?:\n\n|\n$)/i);
-          resolve({
-            type: 'eventlog',
-            last_backup: dateMatch ? dateMatch[1].trim() : null,
-            level: levelMatch ? levelMatch[1].trim() : null,
-            message: msgMatch ? msgMatch[1].trim().substring(0, 200) : null,
-            status: levelMatch && (levelMatch[1].includes('Error') || levelMatch[1].includes('error')) ? 'error' : 'ok'
-          });
-          return;
+      // Fallback: chequear carpeta de Windows Backup
+      exec('dir /b /od "C:\\WindowsImageBackup" 2>nul', { timeout: 5000, windowsHide: true }, (err3, stdout3) => {
+        if (!err3 && stdout3 && stdout3.trim()) {
+          const folders = stdout3.trim().split('\n').filter(l => l.trim());
+          _backupCache = { type: 'folder', last_folder: folders[folders.length - 1]?.trim(), status: 'found', checked_at: new Date().toLocaleString() };
+        } else {
+          _backupCache = null; // No hay backup configurado - no enviar nada
         }
-        // Fallback: chequear carpeta de Windows Backup
-        exec('dir /b /od "C:\\WindowsImageBackup" 2>&1', { timeout: 5000, windowsHide: true }, (err3, stdout3) => {
-          if (!err3 && stdout3 && !stdout3.includes('not found') && !stdout3.includes('no se encuentra')) {
-            const folders = stdout3.trim().split('\n').filter(l => l.trim());
-            resolve({ type: 'folder', last_folder: folders[folders.length - 1]?.trim(), status: 'found' });
-          } else {
-            resolve(null);
-          }
-        });
+        _backupLastCheck = Date.now();
+        resolve(_backupCache);
       });
     });
   });
@@ -351,7 +348,7 @@ async function sendHeartbeat(config) {
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), backup_status: await getBackupStatus(), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), backup_status: await getBackupStatus(false), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, ...metrics
       })
     });
     if (res.ok) {
@@ -376,6 +373,19 @@ async function sendHeartbeat(config) {
               machine_key: config.machineKey, download_mbps: speed.download
             })
           });
+        }
+      }
+
+      // Chequeo de backup a pedido
+      if (res.data && res.data.check_backup) {
+        log('Backup check solicitado');
+        const bk = await getBackupStatus(true);
+        if (bk) {
+          await httpRequest(`${config.serverUrl}/api/heartbeat`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ machine_key: config.machineKey, backup_status: bk })
+          });
+          log(`Backup check: ${bk.status} - ${bk.last_backup || bk.last_folder || 'sin datos'}`);
         }
       }
 
