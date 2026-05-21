@@ -740,7 +740,6 @@ app.post('/api/heartbeat', async (req, res) => {
         services = COALESCE($14, services),
         open_ports = COALESCE($15, open_ports),
         agent_config = COALESCE($16, agent_config),
-        config_backup_at = CASE WHEN $16 IS NOT NULL THEN NOW() ELSE config_backup_at END,
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
@@ -777,6 +776,11 @@ app.post('/api/heartbeat', async (req, res) => {
           });
         }).on('error', () => {});
       } catch {}
+    }
+
+    // Actualizar config_backup_at si se recibio config
+    if (agent_config && updatedMachine) {
+      pool.query('UPDATE machines SET config_backup_at = NOW() WHERE id = $1', [updatedMachine.id]).catch(() => {});
     }
 
     // Guardar metricas historicas (si hay datos)
