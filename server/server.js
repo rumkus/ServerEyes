@@ -8,6 +8,54 @@ const path = require('path');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'servereyes-secret-key-change-in-production';
 
+// Email (Nodemailer)
+let emailTransporter = null;
+try {
+  const nodemailer = require('nodemailer');
+  if (process.env.SMTP_HOST) {
+    emailTransporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    });
+    console.log('Email configurado:', process.env.SMTP_USER);
+  } else if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    // Gmail shortcut
+    emailTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    });
+    console.log('Email Gmail configurado:', process.env.SMTP_USER);
+  } else {
+    console.log('Email no configurado (faltan SMTP_HOST o SMTP_USER/SMTP_PASS)');
+  }
+} catch (err) {
+  console.error('Error configurando email:', err.message);
+}
+
+async function sendEmail(to, subject, body) {
+  if (!emailTransporter) return;
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER || 'servereyes@noreply.com',
+      to,
+      subject: '[ServerEyes] ' + subject,
+      html: `<div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
+        <div style="max-width:500px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+          <h2 style="color:#2196F3;margin:0 0 16px">👁 ServerEyes</h2>
+          ${body}
+          <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
+          <p style="color:#999;font-size:11px;margin:0">Notificacion automatica de ServerEyes</p>
+        </div>
+      </div>`
+    });
+    console.log(`[EMAIL] Enviado a ${to}: ${subject}`);
+  } catch (err) {
+    console.error(`[EMAIL] Error enviando a ${to}:`, err.message);
+  }
+}
+
 // Firebase Admin
 let firebaseAdmin = null;
 try {
@@ -167,6 +215,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_version VARCHAR(20)`).catch(() => {});
   // Admin flag
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications BOOLEAN DEFAULT true`).catch(() => {});
   // Hacer admin al primer usuario
   await pool.query(`UPDATE users SET is_admin = true WHERE id = 1 AND is_admin = false`).catch(() => {});
   // Tabla para almacenar archivo del agente
@@ -516,25 +565,35 @@ app.post('/api/fcm-token', authenticateToken, async (req, res) => {
 
 // Funcion para enviar push a un usuario
 async function sendPush(userId, title, body, data = {}) {
-  if (!firebaseAdmin) return;
   try {
-    const user = await pool.query('SELECT fcm_token FROM users WHERE id = $1', [userId]);
-    const fcmToken = user.rows[0]?.fcm_token;
-    if (!fcmToken) return;
+    const user = await pool.query('SELECT fcm_token, email, email_notifications FROM users WHERE id = $1', [userId]);
+    const u = user.rows[0];
+    if (!u) return;
 
-    await firebaseAdmin.messaging().send({
-      token: fcmToken,
-      notification: { title, body },
-      data: { ...data, click_action: 'FLUTTER_NOTIFICATION_CLICK' },
-      android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
-    });
-    console.log(`[PUSH] Enviado a user ${userId}: ${title}`);
-  } catch (err) {
-    console.error(`[PUSH] Error enviando a user ${userId}:`, err.message);
-    // Si el token es invalido, limpiarlo
-    if (err.code === 'messaging/registration-token-not-registered') {
-      await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
+    // Push notification
+    if (firebaseAdmin && u.fcm_token) {
+      try {
+        await firebaseAdmin.messaging().send({
+          token: u.fcm_token,
+          notification: { title, body },
+          data: { ...data, click_action: 'FLUTTER_NOTIFICATION_CLICK' },
+          android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
+        });
+        console.log(`[PUSH] Enviado a user ${userId}: ${title}`);
+      } catch (err) {
+        console.error(`[PUSH] Error enviando a user ${userId}:`, err.message);
+        if (err.code === 'messaging/registration-token-not-registered') {
+          await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
+        }
+      }
     }
+
+    // Email notification
+    if (u.email_notifications !== false && u.email) {
+      sendEmail(u.email, title, `<p style="font-size:15px;color:#333;margin:0 0 12px"><strong>${title}</strong></p><p style="color:#666;margin:0">${body}</p>`);
+    }
+  } catch (err) {
+    console.error(`[NOTIFY] Error para user ${userId}:`, err.message);
   }
 }
 
@@ -1483,6 +1542,29 @@ app.post('/api/agent/version', authenticateToken, async (req, res) => {
 
 // ============== RUTA DE ESTADO ==============
 
+// Toggle email notifications
+app.post('/api/auth/email-notifications', authenticateToken, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    await pool.query('UPDATE users SET email_notifications = $1 WHERE id = $2', [enabled !== false, req.user.id]);
+    res.json({ message: enabled !== false ? 'Email activado' : 'Email desactivado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Test email (admin only)
+app.post('/api/admin/test-email', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    if (!emailTransporter) return res.status(400).json({ error: 'Email no configurado. Agrega SMTP_USER y SMTP_PASS en Railway.' });
+    const user = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
+    await sendEmail(user.rows[0].email, 'Test', '<p style="color:#333">Email de prueba desde ServerEyes. Funciona correctamente!</p>');
+    res.json({ message: 'Email enviado a ' + user.rows[0].email });
+  } catch (error) {
+    res.status(500).json({ error: 'Error: ' + error.message });
+  }
+});
+
 // Test push notification (admin only)
 app.post('/api/admin/test-push', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -1508,6 +1590,7 @@ app.get('/api/status', (req, res) => {
     status: 'ServerEyes running',
     timestamp: new Date().toISOString(),
     firebase: firebaseAdmin ? 'active' : 'disabled',
+    email: emailTransporter ? 'active' : 'disabled',
     version: '1.0.0'
   });
 });
