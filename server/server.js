@@ -915,8 +915,8 @@ app.post('/api/heartbeat', async (req, res) => {
 
     res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands });
   } catch (error) {
-    console.error('Error en heartbeat:', error);
-    res.status(500).json({ error: 'Error interno' });
+    console.error('Error en heartbeat:', error.message, error.stack);
+    res.status(500).json({ error: 'Error interno', detail: error.message });
   }
 });
 
