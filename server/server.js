@@ -56,6 +56,33 @@ async function sendEmail(to, subject, body) {
   }
 }
 
+async function sendEmailWithUserSMTP(user, subject, htmlBody) {
+  try {
+    const nodemailer = require('nodemailer');
+    const transport = nodemailer.createTransport(user.smtp_host ? {
+      host: user.smtp_host, port: user.smtp_port || 587, secure: user.smtp_secure || false,
+      auth: { user: user.smtp_user, pass: user.smtp_pass }
+    } : { service: 'gmail', auth: { user: user.smtp_user, pass: user.smtp_pass } });
+
+    await transport.sendMail({
+      from: user.smtp_from || user.smtp_user,
+      to: user.email,
+      subject: '[ServerEyes] ' + subject,
+      html: `<div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
+        <div style="max-width:500px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+          <h2 style="color:#2196F3;margin:0 0 16px">👁 ServerEyes</h2>
+          ${htmlBody}
+          <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
+          <p style="color:#999;font-size:11px;margin:0">Notificacion automatica de ServerEyes</p>
+        </div>
+      </div>`
+    });
+    console.log(`[EMAIL-USER] Enviado a ${user.email}: ${subject}`);
+  } catch (err) {
+    console.error(`[EMAIL-USER] Error enviando a ${user.email}:`, err.message);
+  }
+}
+
 // Firebase Admin
 let firebaseAdmin = null;
 try {
@@ -220,6 +247,12 @@ async function initDB() {
   // Admin flag
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notifications BOOLEAN DEFAULT true`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_host VARCHAR(255)`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_port INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_user VARCHAR(255)`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_pass VARCHAR(255)`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_from VARCHAR(255)`).catch(() => {});
   // Hacer admin al primer usuario
   await pool.query(`UPDATE users SET is_admin = true WHERE id = 1 AND is_admin = false`).catch(() => {});
   // Tabla para almacenar archivo del agente
@@ -570,7 +603,7 @@ app.post('/api/fcm-token', authenticateToken, async (req, res) => {
 // Funcion para enviar push a un usuario
 async function sendPush(userId, title, body, data = {}) {
   try {
-    const user = await pool.query('SELECT fcm_token, email, email_notifications FROM users WHERE id = $1', [userId]);
+    const user = await pool.query('SELECT fcm_token, email, email_notifications, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [userId]);
     const u = user.rows[0];
     if (!u) return;
 
@@ -592,9 +625,14 @@ async function sendPush(userId, title, body, data = {}) {
       }
     }
 
-    // Email notification
+    // Email notification (usa SMTP del usuario si tiene, sino el global)
     if (u.email_notifications !== false && u.email) {
-      sendEmail(u.email, title, `<p style="font-size:15px;color:#333;margin:0 0 12px"><strong>${title}</strong></p><p style="color:#666;margin:0">${body}</p>`);
+      const htmlBody = `<p style="font-size:15px;color:#333;margin:0 0 12px"><strong>${title}</strong></p><p style="color:#666;margin:0">${body}</p>`;
+      if (u.smtp_user && u.smtp_pass) {
+        sendEmailWithUserSMTP(u, title, htmlBody);
+      } else {
+        sendEmail(u.email, title, htmlBody);
+      }
     }
   } catch (err) {
     console.error(`[NOTIFY] Error para user ${userId}:`, err.message);
@@ -1606,6 +1644,49 @@ app.post('/api/auth/email-notifications', authenticateToken, async (req, res) =>
     res.json({ message: enabled !== false ? 'Email activado' : 'Email desactivado' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Obtener config SMTP del usuario
+app.get('/api/auth/smtp', authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query('SELECT smtp_host, smtp_port, smtp_secure, smtp_user, smtp_from, email_notifications FROM users WHERE id = $1', [req.user.id]);
+    const u = user.rows[0] || {};
+    res.json({ smtp_host: u.smtp_host || '', smtp_port: u.smtp_port || 587, smtp_secure: u.smtp_secure || false, smtp_user: u.smtp_user || '', smtp_from: u.smtp_from || '', email_notifications: u.email_notifications !== false, configured: !!u.smtp_user });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Guardar config SMTP del usuario
+app.post('/api/auth/smtp', authenticateToken, async (req, res) => {
+  try {
+    const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, email_notifications } = req.body;
+    await pool.query(
+      'UPDATE users SET smtp_host = $1, smtp_port = $2, smtp_secure = $3, smtp_user = $4, smtp_from = $6, email_notifications = $7 WHERE id = $8',
+      [smtp_host || null, smtp_port || 587, smtp_secure || false, smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
+    );
+    // Solo actualizar password si se envió (no vacío)
+    if (smtp_pass) {
+      await pool.query('UPDATE users SET smtp_pass = $1 WHERE id = $2', [smtp_pass, req.user.id]);
+    }
+    res.json({ message: 'Configuracion SMTP guardada' });
+  } catch (error) {
+    console.error('Error guardando SMTP:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Testear SMTP del usuario
+app.post('/api/auth/smtp/test', authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query('SELECT email, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [req.user.id]);
+    const u = user.rows[0];
+    if (!u.smtp_user || !u.smtp_pass) return res.status(400).json({ error: 'Configura tu SMTP primero' });
+    await sendEmailWithUserSMTP(u, 'Test', '<p style="color:#333">Email de prueba. Tu configuracion SMTP funciona correctamente!</p>');
+    res.json({ message: 'Email de prueba enviado a ' + u.email });
+  } catch (error) {
+    res.status(500).json({ error: 'Error: ' + error.message });
   }
 });
 

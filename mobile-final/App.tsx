@@ -96,6 +96,13 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [logText, setLogText] = useState('');
   const [showChangePass, setShowChangePass] = useState(false);
+  const [showSmtp, setShowSmtp] = useState(false);
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('587');
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [smtpFrom, setSmtpFrom] = useState('');
+  const [smtpEnabled, setSmtpEnabled] = useState(true);
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [changePassError, setChangePassError] = useState('');
@@ -479,6 +486,68 @@ export default function App() {
     if (d < 86400) return `${Math.floor(d / 3600)}h`;
     return `${Math.floor(d / 86400)}d`;
   };
+
+  // CONFIG EMAIL / SMTP
+  if (showSmtp) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0a1628" />
+        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
+          <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>{'📧'}</Text>
+          <Text style={s.title}>Configurar Email</Text>
+          <Text style={[s.sub, {marginBottom: 16}]}>Recibir notificaciones por email cuando hay alertas</Text>
+
+          <TouchableOpacity onPress={() => setSmtpEnabled(!smtpEnabled)}
+            style={{flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingVertical: 8}}>
+            <View style={{width: 22, height: 22, borderWidth: 2, borderColor: smtpEnabled ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 10, backgroundColor: smtpEnabled ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+              {smtpEnabled && <Text style={{color: '#0a1628', fontSize: 15, fontWeight: '700'}}>✓</Text>}
+            </View>
+            <Text style={{color: '#ddd', fontSize: 14, fontWeight: '600'}}>Recibir notificaciones por email</Text>
+          </TouchableOpacity>
+
+          <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginBottom: 10}}>SMTP (Gmail u otro)</Text>
+          <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 12}}>Para Gmail: deja Host vacio, usa tu email y una contraseña de aplicacion (myaccount.google.com/apppasswords)</Text>
+
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Host SMTP (vacio para Gmail):</Text>
+          <TextInput style={s.input} value={smtpHost} onChangeText={setSmtpHost} placeholder="smtp.gmail.com (opcional)" placeholderTextColor="#555" autoCapitalize="none" />
+
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Puerto:</Text>
+          <TextInput style={s.input} value={smtpPort} onChangeText={setSmtpPort} placeholder="587" placeholderTextColor="#555" keyboardType="number-pad" />
+
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Email SMTP:</Text>
+          <TextInput style={s.input} value={smtpUser} onChangeText={setSmtpUser} placeholder="tu@email.com" placeholderTextColor="#555" keyboardType="email-address" autoCapitalize="none" />
+
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Contraseña SMTP:</Text>
+          <TextInput style={s.input} value={smtpPass} onChangeText={setSmtpPass} placeholder="contraseña de aplicacion" placeholderTextColor="#555" secureTextEntry />
+
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Remitente (opcional):</Text>
+          <TextInput style={s.input} value={smtpFrom} onChangeText={setSmtpFrom} placeholder="noreply@miempresa.com" placeholderTextColor="#555" autoCapitalize="none" />
+
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            const res = await apiRequest('/api/auth/smtp', { method: 'POST', body: JSON.stringify({
+              smtp_host: smtpHost || null, smtp_port: parseInt(smtpPort) || 587,
+              smtp_user: smtpUser || null, smtp_pass: smtpPass || null, smtp_from: smtpFrom || null,
+              email_notifications: smtpEnabled
+            }) }, token);
+            if (res.ok) Alert.alert('Guardado', 'Configuracion SMTP guardada');
+            else Alert.alert('Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Guardar</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[s.btn, {backgroundColor: '#ff9800', marginTop: 8}]} onPress={async () => {
+            const res = await apiRequest('/api/auth/smtp/test', { method: 'POST' }, token);
+            if (res.ok) Alert.alert('Enviado', res.data.message);
+            else Alert.alert('Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Enviar email de prueba</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => setShowSmtp(false)}><Text style={s.link}>Volver</Text></TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
 
   // CAMBIAR CONTRASEÑA
   if (showChangePass) {
@@ -1559,6 +1628,11 @@ export default function App() {
           {icon: '📁', label: '', mode: 'groups'},
           {icon: '👥', label: '', action: async () => { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
           {icon: '📋', label: '', action: () => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
+          {icon: '📧', label: '', action: async () => {
+            const res = await apiRequest('/api/auth/smtp', {}, token);
+            if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); }
+            setShowSmtp(true);
+          }},
           {icon: '⚙', label: '', action: () => setShowChangePass(true)},
         ].map((tab, i) => (
           <TouchableOpacity key={i} onPress={tab.action || (() => setViewMode(tab.mode as any))}
