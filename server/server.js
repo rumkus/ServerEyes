@@ -920,7 +920,19 @@ app.post('/api/heartbeat', async (req, res) => {
     const runSpeedtest = pendingSpeedTests.has(updatedMachine.id);
     if (runSpeedtest) pendingSpeedTests.delete(updatedMachine.id);
 
-    // Chequear si hay update disponible (busca por tipo: agent o client)
+    // Comparar versiones semver (retorna true si b es mayor que a)
+    function isNewerVersion(current, latest) {
+      if (!current || !latest) return false;
+      const a = current.split('.').map(Number);
+      const b = latest.split('.').map(Number);
+      for (let i = 0; i < 3; i++) {
+        if ((b[i] || 0) > (a[i] || 0)) return true;
+        if ((b[i] || 0) < (a[i] || 0)) return false;
+      }
+      return false; // iguales
+    }
+
+    // Chequear si hay update disponible (solo si la version del server es MAYOR)
     let updateInfo = null;
     try {
       const type = agent_type || 'agent';
@@ -931,7 +943,7 @@ app.post('/api/heartbeat', async (req, res) => {
       if (verRow.rows.length > 0 && urlRow.rows.length > 0) {
         const latestVersion = verRow.rows[0].value;
         const updateUrl = urlRow.rows[0].value;
-        if (latestVersion && updateUrl && reportedVersion && reportedVersion !== latestVersion) {
+        if (latestVersion && updateUrl && reportedVersion && isNewerVersion(reportedVersion, latestVersion)) {
           updateInfo = { version: latestVersion, url: updateUrl };
         }
       }
@@ -939,7 +951,7 @@ app.post('/api/heartbeat', async (req, res) => {
       if (!updateInfo && type === 'client') {
         const verRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
         const urlRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
-        if (verRow2.rows.length > 0 && urlRow2.rows.length > 0 && verRow2.rows[0].value && urlRow2.rows[0].value && reportedVersion && reportedVersion !== verRow2.rows[0].value) {
+        if (verRow2.rows.length > 0 && urlRow2.rows.length > 0 && verRow2.rows[0].value && urlRow2.rows[0].value && reportedVersion && isNewerVersion(reportedVersion, verRow2.rows[0].value)) {
           updateInfo = { version: verRow2.rows[0].value, url: urlRow2.rows[0].value };
         }
       }
