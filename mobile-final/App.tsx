@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import RNShare from 'react-native-share';
 import messaging from '@react-native-firebase/messaging';
-import { Platform, PermissionsAndroid, NativeModules } from 'react-native';
+import { Platform, PermissionsAndroid, NativeModules, BackHandler } from 'react-native';
 const { WidgetBridge } = NativeModules;
 
 const API_URL = 'https://servereyes-production.up.railway.app';
@@ -121,6 +121,8 @@ export default function App() {
   const [detailMachine, setDetailMachine] = useState<any>(null);
   const [detailMonitored, setDetailMonitored] = useState<string[]>([]);
   const [detailAlertDisks, setDetailAlertDisks] = useState<{[key: string]: string}>({});
+  const [backupMachine, setBackupMachine] = useState<any>(null);
+  const [backupData, setBackupData] = useState<any>(null);
   const [metricsMachine, setMetricsMachine] = useState<any>(null);
   const [metricsData, setMetricsData] = useState<any[]>([]);
   const [metricsHours, setMetricsHours] = useState(24);
@@ -136,6 +138,45 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [shareUserId, setShareUserId] = useState<number | null>(null);
   const [shareSelected, setShareSelected] = useState<Set<number>>(new Set());
+
+  // Funcion para volver a la pantalla principal
+  const goBack = (): boolean => {
+    if (backupMachine) { setBackupMachine(null); return true; }
+    if (shareUserId) { setShareUserId(null); return true; }
+    if (detailMachine) { setDetailMachine(null); return true; }
+    if (showTeam) { setShowTeam(false); return true; }
+    if (showAgentUpdate) { setShowAgentUpdate(false); return true; }
+    if (showSmtp) { setShowSmtp(false); return true; }
+    if (showChangePass) { setShowChangePass(false); setCurrentPass(''); setNewPass(''); return true; }
+    if (showLogs) { setShowLogs(false); return true; }
+    if (showPairing) { setShowPairing(false); setPairingCode(''); return true; }
+    if (showAdd) { setShowAdd(false); setNewKey(''); return true; }
+    if (editingMachine) { setEditingMachine(null); return true; }
+    if (showGroupPicker) { setShowGroupPicker(null); return true; }
+    if (uptimeMachine) { setUptimeMachine(null); return true; }
+    if (metricsMachine) { setMetricsMachine(null); return true; }
+    if (ipHistoryMachine) { setIpHistoryMachine(null); return true; }
+    return false;
+  };
+
+  // BackHandler de Android (boton atras / gesto deslizar)
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', goBack);
+    return () => handler.remove();
+  });
+
+  // Header con flecha de volver
+  const BackHeader = ({title, subtitle}: {title: string, subtitle?: string}) => (
+    <View style={{backgroundColor: '#0d1b2a', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 14, flexDirection: 'row', alignItems: 'center'}}>
+      <TouchableOpacity onPress={() => goBack()} style={{padding: 8, marginRight: 8}}>
+        <Text style={{color: '#607d8b', fontSize: 24}}>{'←'}</Text>
+      </TouchableOpacity>
+      <View style={{flex: 1}}>
+        <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>{title}</Text>
+        {subtitle ? <Text style={{color: '#607d8b', fontSize: 12}}>{subtitle}</Text> : null}
+      </View>
+    </View>
+  );
 
   // Registrar token FCM para push notifications
   const registerFCM = async () => {
@@ -493,11 +534,9 @@ export default function App() {
   if (showSmtp) {
     return (
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
-        <StatusBar barStyle="light-content" backgroundColor="#0a1628" />
-        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
-          <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>{'📧'}</Text>
-          <Text style={s.title}>Configurar Email</Text>
-          <Text style={[s.sub, {marginBottom: 16}]}>Recibir notificaciones por email cuando hay alertas</Text>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Configurar Email" subtitle="Notificaciones por email" />
+        <ScrollView contentContainerStyle={{padding: 24}}>
 
           <TouchableOpacity onPress={() => setSmtpEnabled(!smtpEnabled)}
             style={{flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingVertical: 8}}>
@@ -545,7 +584,7 @@ export default function App() {
             <Text style={s.btnTxt}>Enviar email de prueba</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => setShowSmtp(false)}><Text style={s.link}>Volver</Text></TouchableOpacity>
+          <View style={{height: 30}} />
         </ScrollView>
       </View>
     );
@@ -554,31 +593,28 @@ export default function App() {
   // CAMBIAR CONTRASEÑA
   if (showChangePass) {
     return (
-      <View style={s.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
-        <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>🔒</Text>
-        <Text style={s.title}>Cambiar contraseña</Text>
-        <Text style={[s.sub, {marginBottom: 16}]}></Text>
-        <TextInput style={s.input} placeholder="Contraseña actual" placeholderTextColor="#666" value={currentPass} onChangeText={setCurrentPass} secureTextEntry />
-        <TextInput style={s.input} placeholder="Nueva contraseña (min 6 caracteres)" placeholderTextColor="#666" value={newPass} onChangeText={setNewPass} secureTextEntry />
-        {changePassError ? <Text style={s.err}>{changePassError}</Text> : null}
-        <TouchableOpacity style={s.btn} onPress={async () => {
-          setChangePassError('');
-          const res = await apiRequest('/api/auth/change-password', {
-            method: 'POST', body: JSON.stringify({ current_password: currentPass, new_password: newPass })
-          }, token);
-          if (res.ok) {
-            Alert.alert('Listo', 'Contraseña actualizada');
-            setShowChangePass(false); setCurrentPass(''); setNewPass('');
-          } else {
-            setChangePassError(res.data.error || 'Error');
-          }
-        }}>
-          <Text style={s.btnTxt}>Guardar</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => { setShowChangePass(false); setCurrentPass(''); setNewPass(''); setChangePassError(''); }}>
-          <Text style={s.link}>Cancelar</Text>
-        </TouchableOpacity>
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Cambiar contraseña" />
+        <View style={{padding: 24}}>
+          <TextInput style={s.input} placeholder="Contraseña actual" placeholderTextColor="#555" value={currentPass} onChangeText={setCurrentPass} secureTextEntry />
+          <TextInput style={s.input} placeholder="Nueva contraseña (min 6 caracteres)" placeholderTextColor="#555" value={newPass} onChangeText={setNewPass} secureTextEntry />
+          {changePassError ? <Text style={s.err}>{changePassError}</Text> : null}
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            setChangePassError('');
+            const res = await apiRequest('/api/auth/change-password', {
+              method: 'POST', body: JSON.stringify({ current_password: currentPass, new_password: newPass })
+            }, token);
+            if (res.ok) {
+              Alert.alert('Listo', 'Contraseña actualizada');
+              setShowChangePass(false); setCurrentPass(''); setNewPass('');
+            } else {
+              setChangePassError(res.data.error || 'Error');
+            }
+          }}>
+            <Text style={s.btnTxt}>Guardar</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -590,19 +626,10 @@ export default function App() {
       : 0;
 
     return (
-      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
-        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
-        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-            <View>
-              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>📊 Uptime</Text>
-              <Text style={{color: '#888', fontSize: 13}}>{uptimeMachine.machine_name}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setUptimeMachine(null)}
-              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
-              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Uptime" subtitle={uptimeMachine.machine_name} />
+        <View style={{paddingHorizontal: 16, paddingTop: 8}}>
           <View style={{flexDirection: 'row', marginTop: 12}}>
             {[7, 14, 30].map(d => (
               <TouchableOpacity key={d}
@@ -660,21 +687,10 @@ export default function App() {
   // IP HISTORY
   if (ipHistoryMachine) {
     return (
-      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
-        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
-        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-            <View>
-              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>🌐 Historial de IPs</Text>
-              <Text style={{color: '#888', fontSize: 13}}>{ipHistoryMachine.machine_name}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setIpHistoryMachine(null)}
-              style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
-              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={{color: '#aaa', fontSize: 12, marginTop: 8}}>IP actual: <Text style={{color: '#00e676', fontWeight: '700'}}>{ipHistoryMachine.public_ip || '---'}</Text></Text>
-        </View>
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Historial de IPs" subtitle={ipHistoryMachine.machine_name} />
+        <Text style={{color: '#aaa', fontSize: 12, paddingHorizontal: 16, marginBottom: 8}}>IP actual: <Text style={{color: '#00e676', fontWeight: '700'}}>{ipHistoryMachine.public_ip || '---'}</Text></Text>
 
         {ipHistoryLoading ? (
           <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
@@ -741,26 +757,16 @@ export default function App() {
     };
 
     return (
-      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
-        <StatusBar barStyle="light-content" backgroundColor="#16213e" />
-        <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-            <View>
-              <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>📈 Metricas</Text>
-              <Text style={{color: '#888', fontSize: 13}}>{metricsMachine.machine_name}</Text>
-            </View>
-            <TouchableOpacity onPress={() => setMetricsMachine(null)} style={{backgroundColor: '#2a2a4a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8}}>
-              <Text style={{color: '#888', fontWeight: '600'}}>Cerrar</Text>
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Metricas" subtitle={metricsMachine.machine_name} />
+        <View style={{flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8}}>
+          {[6, 24, 48, 72, 168].map(h => (
+            <TouchableOpacity key={h} onPress={() => { setMetricsHours(h); loadMetrics(metricsMachine.id, h); }}
+              style={{backgroundColor: metricsHours === h ? '#00d4ff' : '#1a2a3a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8}}>
+              <Text style={{color: metricsHours === h ? '#0a1628' : '#607d8b', fontWeight: '600', fontSize: 13}}>{h < 24 ? `${h}h` : `${h/24}d`}</Text>
             </TouchableOpacity>
-          </View>
-          <View style={{flexDirection: 'row', marginTop: 12}}>
-            {[6, 24, 48, 72, 168].map(h => (
-              <TouchableOpacity key={h} onPress={() => { setMetricsHours(h); loadMetrics(metricsMachine.id, h); }}
-                style={{backgroundColor: metricsHours === h ? '#00d4ff' : '#2a2a4a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8}}>
-                <Text style={{color: metricsHours === h ? '#1a1a2e' : '#888', fontWeight: '600', fontSize: 13}}>{h < 24 ? `${h}h` : `${h/24}d`}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          ))}
         </View>
         {metricsLoading ? (
           <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}><ActivityIndicator size="large" color="#00d4ff" /></View>
@@ -1064,23 +1070,9 @@ export default function App() {
               if (res.ok) Alert.alert('Config: ' + item.machine_name, res.data.config ? JSON.stringify(res.data.config, null, 2) + '\n\nBackup: ' + (res.data.backed_up_at ? new Date(res.data.backed_up_at).toLocaleString() : '---') : 'Sin backup');
             }},
             {icon: '🛡', label: 'Backup', action: async () => {
+              setBackupMachine(item); setBackupData(null);
               const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
-              if (res.ok) {
-                const d = res.data;
-                const info = [
-                  d.status_text || d.status,
-                  d.last_backup ? '\nUltima fecha del backup:\n' + d.last_backup : null,
-                  d.message ? '\n' + d.message : null,
-                  d.checked_at ? '\nChequeado: ' + d.checked_at : null
-                ].filter(Boolean).join('');
-                Alert.alert('Backup: ' + item.machine_name, info, [
-                  { text: 'Cerrar' },
-                  { text: 'Forzar chequeo', onPress: async () => {
-                    const r = await apiRequest(`/api/machines/${item.id}/check-backup`, { method: 'POST' }, token);
-                    if (r.ok) Alert.alert('Solicitado', 'El resultado aparece en el proximo heartbeat (~30s)');
-                  }}
-                ]);
-              }
+              if (res.ok) setBackupData(res.data);
             }},
           ].map((btn, i) => (
             <TouchableOpacity key={i} onPress={btn.action} style={{paddingVertical: 6, paddingHorizontal: 10}}>
@@ -1225,6 +1217,48 @@ export default function App() {
     );
   }
 
+  // BACKUP SCREEN
+  if (backupMachine) {
+    const d = backupData;
+    const icons: {[k:string]:string} = { ok: '🛡', error: '🚨', warning: '⚠', never: '📋', not_configured: '❌', unknown: '❓' };
+    const colors: {[k:string]:string} = { ok: '#00e676', error: '#ff5252', warning: '#ff9800', never: '#ff9800', not_configured: '#607d8b', unknown: '#607d8b' };
+    const st = d?.status || 'unknown';
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Backup" subtitle={backupMachine.machine_name} />
+        <ScrollView contentContainerStyle={{padding: 24}}>
+          <View style={{alignItems: 'center', paddingVertical: 30}}>
+            <Text style={{fontSize: 60, marginBottom: 12}}>{!d ? '⏳' : icons[st] || '❓'}</Text>
+            <Text style={{fontSize: 20, fontWeight: '800', color: colors[st] || '#607d8b'}}>{!d ? 'Cargando...' : d.status_text || st}</Text>
+          </View>
+          {d && (
+            <View style={{backgroundColor: '#0d1b2a', borderRadius: 14, padding: 18}}>
+              {d.last_backup && (
+                <View style={{marginBottom: 14}}>
+                  <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Ultima fecha del backup:</Text>
+                  <Text style={{color: '#eee', fontSize: 18, fontWeight: '700'}}>{d.last_backup}</Text>
+                </View>
+              )}
+              {d.message && (
+                <View style={{backgroundColor: st === 'error' ? '#1a0a0a' : st === 'warning' ? '#1a1500' : '#111d2e', borderRadius: 10, padding: 12, marginBottom: 14, borderLeftWidth: 3, borderLeftColor: colors[st] || '#607d8b'}}>
+                  <Text style={{color: '#ccc', fontSize: 13}}>{d.message}</Text>
+                </View>
+              )}
+              {d.checked_at && <Text style={{color: '#3a5068', fontSize: 11}}>Chequeado: {d.checked_at}</Text>}
+            </View>
+          )}
+          <TouchableOpacity style={[s.btn, {marginTop: 20, backgroundColor: '#1a2a3a'}]} onPress={async () => {
+            const r = await apiRequest(`/api/machines/${backupMachine.id}/check-backup`, { method: 'POST' }, token);
+            if (r.ok) Alert.alert('Solicitado', 'El resultado aparece en ~30 segundos');
+          }}>
+            <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700'}}>🔄 Forzar chequeo</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
   // SHARE PICKER - elegir maquinas para compartir con un tecnico
   if (shareUserId) {
     const myMachines = machines.filter(m => !m.is_shared);
@@ -1274,11 +1308,10 @@ export default function App() {
     const isOwner = !org || team.find((t: any) => t.id === parseInt(String(token?.split('.')[1] ? JSON.parse(atob(token!.split('.')[1])).id : '0')))?.role === 'owner' || !org;
 
     return (
-      <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
-        <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
-        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
-          <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>&#128101;</Text>
-          <Text style={s.title}>Empresa y Equipo</Text>
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Empresa y Equipo" />
+        <ScrollView contentContainerStyle={{padding: 24}}>
 
           {!org ? (
             <>
@@ -1394,7 +1427,7 @@ export default function App() {
             </>
           )}
 
-          <TouchableOpacity onPress={() => setShowTeam(false)} style={{marginTop: 20}}><Text style={s.link}>Volver</Text></TouchableOpacity>
+          <View style={{height: 30}} />
         </ScrollView>
       </View>
     );
