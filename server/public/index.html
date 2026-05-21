@@ -322,11 +322,11 @@ function renderLogin(err) {
   <div class="login-screen">
     <div class="login-card">
       <div class="login-logo"><span class="eye-icon">👁️</span><h1>ServerEyes</h1></div>
-      <p class="login-sub">NOC Dashboard · Monitoreo en tiempo real</p>
-      <input type="email" id="le" placeholder="Email" autocomplete="username"/>
-      <input type="password" id="lp" placeholder="Contraseña" autocomplete="current-password"/>
+      <p class="login-sub">NOC Dashboard</p>
+      <input type="email" id="le" placeholder="${t('login_email')}" autocomplete="username"/>
+      <input type="password" id="lp" placeholder="${t('login_password')}" autocomplete="current-password"/>
       ${err?`<p class="login-err">${err}</p>`:''}
-      <button class="login-btn" onclick="doLogin()">Iniciar sesión</button>
+      <button class="login-btn" onclick="doLogin()">${t('login_btn')}</button>
     </div>
   </div>`;
   const le = document.getElementById('le');
@@ -451,22 +451,22 @@ function buildStatsRow(online, offline, alertCount) {
   return `<div class="stats-row">
     <div class="stat-card">
       <div class="stat-icon blue">🖥️</div>
-      <div class="stat-info"><div class="stat-num blue">${machines.length}</div><div class="stat-label">Total Servidores</div></div>
+      <div class="stat-info"><div class="stat-num blue">${machines.length}</div><div class="stat-label">${t('total_servers')}</div></div>
       ${sparkSVG(machines.map((_,i)=>i+1).slice(-8),'#2196F3')}
     </div>
     <div class="stat-card">
       <div class="stat-icon green">✅</div>
-      <div class="stat-info"><div class="stat-num green">${online}</div><div class="stat-label">Online</div></div>
+      <div class="stat-info"><div class="stat-num green">${online}</div><div class="stat-label">${t('online')}</div></div>
       ${sparkSVG(cpuHist.slice(-8),'#4CAF50')}
     </div>
     <div class="stat-card">
       <div class="stat-icon red">❌</div>
-      <div class="stat-info"><div class="stat-num red">${offline}</div><div class="stat-label">Offline</div></div>
+      <div class="stat-info"><div class="stat-num red">${offline}</div><div class="stat-label">${t('offline')}</div></div>
       ${sparkSVG([0,0,offline,offline,offline].slice(-8),'#F44336')}
     </div>
     <div class="stat-card">
       <div class="stat-icon orange">⚠️</div>
-      <div class="stat-info"><div class="stat-num orange">${alertCount}</div><div class="stat-label">Alertas</div></div>
+      <div class="stat-info"><div class="stat-num orange">${alertCount}</div><div class="stat-label">${t('alerts')}</div></div>
       ${sparkSVG([0,alertCount],'#FF9800')}
     </div>
   </div>`;
@@ -762,11 +762,11 @@ async function testSmtp() {
 
 function buildBottomNav(alertBadge) {
   const tabs = [
-    {id:'noc',   icon:'📡', label:'NOC'},
-    {id:'servidores', icon:'🖥️', label:'Servidores'},
-    {id:'alertas', icon:'🔔', label:'Alertas', badge: alertBadge},
-    {id:'reportes', icon:'📋', label:'Reportes'},
-    {id:'ajustes', icon:'⚙️', label:'Ajustes'},
+    {id:'noc',   icon:'📡', label:t('nav_noc')},
+    {id:'servidores', icon:'🖥️', label:t('nav_servers')},
+    {id:'alertas', icon:'🔔', label:t('nav_alerts'), badge: alertBadge},
+    {id:'reportes', icon:'📋', label:t('nav_reports')},
+    {id:'ajustes', icon:'⚙️', label:t('nav_settings')},
   ];
   return `<nav class="bottom-nav">
     ${tabs.map(t=>`<button class="nav-item ${activeNav===t.id?'active':''}" onclick="activeNav='${t.id}';render()">

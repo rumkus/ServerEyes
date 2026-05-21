@@ -888,21 +888,21 @@ export default function App() {
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <Text style={s.icon}>👁</Text>
         <Text style={s.title}>ServerEyes</Text>
-        <Text style={s.sub}>Monitoreo de maquinas</Text>
-        <TextInput style={s.input} placeholder="Email" placeholderTextColor="#666" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
-        <TextInput style={s.input} placeholder="Contraseña" placeholderTextColor="#666" value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
+        <Text style={s.sub}>Server Monitoring</Text>
+        <TextInput style={s.input} placeholder={t('login_email') || 'Email'} placeholderTextColor="#555" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
+        <TextInput style={s.input} placeholder={t('current_pass') || 'Password'} placeholderTextColor="#555" value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
         <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12}}>
           <View style={{width: 20, height: 20, borderWidth: 2, borderColor: showPassword ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 8, backgroundColor: showPassword ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
-            {showPassword && <Text style={{color: '#1a1a2e', fontSize: 14, fontWeight: '700'}}>✓</Text>}
+            {showPassword && <Text style={{color: '#0a1628', fontSize: 14, fontWeight: '700'}}>✓</Text>}
           </View>
-          <Text style={{color: '#888', fontSize: 13}}>Ver contraseña</Text>
+          <Text style={{color: '#607d8b', fontSize: 13}}>{t('show_password')}</Text>
         </TouchableOpacity>
         {error ? <Text style={s.err}>{error}</Text> : null}
         <TouchableOpacity style={s.btn} onPress={handleAuth} disabled={loading}>
-          {loading ? <ActivityIndicator color="#1a1a2e" /> : <Text style={s.btnTxt}>{isSignUp ? 'Crear cuenta' : 'Iniciar sesion'}</Text>}
+          {loading ? <ActivityIndicator color="#0a1628" /> : <Text style={s.btnTxt}>{isSignUp ? t('create_account') : t('login_btn')}</Text>}
         </TouchableOpacity>
         <TouchableOpacity onPress={() => { setIsSignUp(!isSignUp); setError(''); }}>
-          <Text style={s.link}>{isSignUp ? 'Ya tengo cuenta' : 'Crear cuenta nueva'}</Text>
+          <Text style={s.link}>{isSignUp ? t('have_account') : t('new_account')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -1063,12 +1063,12 @@ export default function App() {
         {/* Action buttons */}
         <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a', paddingVertical: 8, paddingHorizontal: 12, flexWrap: 'wrap'}}>
           {[
-            {icon: '⏱', label: 'Uptime', action: () => openUptime(item)},
-            {icon: '📈', label: 'Metricas', action: () => openMetrics(item)},
-            {icon: '🌐', label: 'IPs', action: () => openIpHistory(item)},
-            {icon: '💿', label: 'Discos', action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
-            {icon: '📋', label: 'Logs', action: async () => { const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token); if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || 'Sin logs'); }},
-            {icon: '⚙', label: 'Servicios', action: async () => {
+            {icon: '⏱', label: t('uptime'), action: () => openUptime(item)},
+            {icon: '📈', label: t('metrics'), action: () => openMetrics(item)},
+            {icon: '🌐', label: t('ips'), action: () => openIpHistory(item)},
+            {icon: '💿', label: t('disks'), action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
+            {icon: '📋', label: t('logs'), action: async () => { const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token); if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || t('no_data')); }},
+            {icon: '⚙', label: t('services'), action: async () => {
               const res = await apiRequest(`/api/machines/${item.id}/services`, {}, token);
               if (res.ok) {
                 const svcs = (res.data.services || []).map((s: any) => `${s.state === 'RUNNING' ? '🟢' : '🔴'} ${s.display} (${s.state})`).join('\n');
@@ -1076,11 +1076,11 @@ export default function App() {
                 Alert.alert(item.machine_name, (svcs || 'Sin servicios') + '\n\nPuertos: ' + (ports || 'Sin datos'));
               }
             }},
-            {icon: '💾', label: 'Config', action: async () => {
+            {icon: '💾', label: t('config'), action: async () => {
               const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
               if (res.ok) Alert.alert('Config: ' + item.machine_name, res.data.config ? JSON.stringify(res.data.config, null, 2) + '\n\nBackup: ' + (res.data.backed_up_at ? new Date(res.data.backed_up_at).toLocaleString() : '---') : 'Sin backup');
             }},
-            {icon: '🛡', label: 'Backup', action: async () => {
+            {icon: '🛡', label: t('backup'), action: async () => {
               setBackupMachine(item); setBackupData(null);
               const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
               if (res.ok) setBackupData(res.data);
@@ -1676,41 +1676,40 @@ export default function App() {
             <Text style={{fontSize: 28, marginRight: 10}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 22, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: '#607d8b', fontSize: 12}}>{machines.length} maquinas</Text>
+              <Text style={{color: '#607d8b', fontSize: 12}}>{machines.length} {t('machines_count')}</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
             <TouchableOpacity onPress={() => loadMachines()} style={{padding: 8}}><Text style={{color: '#607d8b', fontSize: 18}}>{'🔄'}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => { log.info('Logout'); setAndSaveToken(null); }} style={{padding: 8}}><Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>Salir</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { log.info('Logout'); setAndSaveToken(null); }} style={{padding: 8}}><Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text></TouchableOpacity>
           </View>
         </View>
       </View>
 
       {/* Tabs */}
-      <View style={{backgroundColor: '#0d1b2a', flexDirection: 'row', paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#1a2a3a'}}>
-        {[
-          {icon: '🖥', label: 'Servidores', mode: 'all'},
-          {icon: '📁', label: '', mode: 'groups'},
-          {icon: '👥', label: '', action: async () => { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
-          {icon: '📋', label: '', action: () => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
-          {icon: '📧', label: '', action: async () => {
-            const res = await apiRequest('/api/auth/smtp', {}, token);
-            if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); }
-            setShowSmtp(true);
-          }},
-          {icon: '⚙', label: '', action: () => setShowChangePass(true)},
-          {icon: LANGS[lang]?.flag || '🌐', label: '', action: () => {
-            const langs = Object.keys(LANGS);
-            const idx = langs.indexOf(lang);
-            changeLang(langs[(idx + 1) % langs.length]);
-          }},
-        ].map((tab, i) => (
-          <TouchableOpacity key={i} onPress={tab.action || (() => setViewMode(tab.mode as any))}
-            style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: !tab.action && viewMode === tab.mode ? '#00d4ff' : 'transparent'}}>
-            <Text style={{color: !tab.action && viewMode === tab.mode ? '#00d4ff' : '#607d8b', fontSize: 14}}>{tab.icon} {tab.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{backgroundColor: '#0d1b2a', borderBottomWidth: 1, borderBottomColor: '#1a2a3a', maxHeight: 48}}>
+        <TouchableOpacity onPress={() => setViewMode('all')} style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: viewMode === 'all' ? '#00d4ff' : 'transparent'}}>
+          <Text style={{color: viewMode === 'all' ? '#00d4ff' : '#607d8b', fontSize: 14}}>{'🖥'} {t('uptime') === 'Uptime' ? 'Servers' : 'Servidores'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setViewMode('groups')} style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: viewMode === 'groups' ? '#00d4ff' : 'transparent'}}>
+          <Text style={{color: viewMode === 'groups' ? '#00d4ff' : '#607d8b', fontSize: 14}}>{'📁'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={async () => { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
+          <Text style={{color: '#607d8b', fontSize: 14}}>{'👥'} {t('team')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
+          <Text style={{color: '#607d8b', fontSize: 14}}>{'📋'} {t('logs')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={async () => { const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
+          <Text style={{color: '#607d8b', fontSize: 14}}>{'📧'} Email</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowChangePass(true)} style={{paddingVertical: 12, paddingHorizontal: 14}}>
+          <Text style={{color: '#607d8b', fontSize: 14}}>{'🔒'} {t('change_pass')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => { const langs = Object.keys(LANGS); const idx = langs.indexOf(lang); changeLang(langs[(idx + 1) % langs.length]); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
+          <Text style={{color: '#00d4ff', fontSize: 14}}>{LANGS[lang]?.flag || '🌐'} {LANGS[lang]?.name || lang}</Text>
+        </TouchableOpacity>
+      </ScrollView>
 
       {/* IP Alert */}
       {ipAlert && (
