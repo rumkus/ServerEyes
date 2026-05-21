@@ -1067,8 +1067,12 @@ export default function App() {
               const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
               if (res.ok) {
                 const d = res.data;
-                const status = d.status === 'ok' || d.status === 'found' ? '✅ Backup OK' : d.status === 'error' ? '❌ Error' : '⚠ Sin datos';
-                const info = [status, d.last_backup ? 'Ultimo: ' + d.last_backup : null, d.last_folder ? 'Carpeta: ' + d.last_folder : null, d.level ? 'Nivel: ' + d.level : null, d.message || null, d.checked_at ? 'Chequeado: ' + d.checked_at : null].filter(Boolean).join('\n');
+                const info = [
+                  d.status_text || d.status,
+                  d.last_backup ? '\nUltima fecha del backup:\n' + d.last_backup : null,
+                  d.message ? '\n' + d.message : null,
+                  d.checked_at ? '\nChequeado: ' + d.checked_at : null
+                ].filter(Boolean).join('');
                 Alert.alert('Backup: ' + item.machine_name, info, [
                   { text: 'Cerrar' },
                   { text: 'Forzar chequeo', onPress: async () => {

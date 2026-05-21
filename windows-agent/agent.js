@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.0.7';
+const AGENT_VERSION = '1.0.8';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -131,44 +131,73 @@ function getSystemMetrics() {
 }
 
 // Servicios Windows importantes
-// Windows Backup status (solo Event Log y carpeta, sin wbadmin que abre ventanas)
-// Cache: se chequea 1 vez al dia o a pedido del server
+// Windows Backup status
 let _backupCache = null;
 let _backupLastCheck = 0;
-const BACKUP_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 horas
+const BACKUP_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
+
+function formatBackupDate(raw) {
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString('es', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  } catch { return raw; }
+}
 
 function getBackupStatus(forceCheck) {
-  // Devolver cache si no pasaron 24h y no es forzado
   if (!forceCheck && _backupCache && (Date.now() - _backupLastCheck) < BACKUP_CHECK_INTERVAL) {
     return Promise.resolve(_backupCache);
   }
   return new Promise((resolve) => {
     const { exec } = require('child_process');
-    // Chequear Event Log de Windows Backup (no abre ventanas)
-    exec('wevtutil qe Microsoft-Windows-Backup /c:1 /rd:true /f:text 2>nul', { timeout: 15000, windowsHide: true }, (err2, stdout2) => {
-      if (!err2 && stdout2 && stdout2.includes('Event')) {
-        const dateMatch = stdout2.match(/Date:\s*(.+)/i) || stdout2.match(/Fecha:\s*(.+)/i);
-        const levelMatch = stdout2.match(/Level:\s*(.+)/i) || stdout2.match(/Nivel:\s*(.+)/i);
-        const msgMatch = stdout2.match(/Message:\s*([\s\S]*?)(?:\n\n|\n$)/i) || stdout2.match(/Mensaje:\s*([\s\S]*?)(?:\n\n|\n$)/i);
+    // Leer ultimos 3 eventos de Windows Backup para tener mas contexto
+    exec('wevtutil qe Microsoft-Windows-Backup /c:3 /rd:true /f:text 2>nul', { timeout: 15000, windowsHide: true }, (err, stdout) => {
+      if (!err && stdout && stdout.includes('Event')) {
+        // Parsear el primer evento (mas reciente)
+        const dateMatch = stdout.match(/Date:\s*(.+)/i) || stdout.match(/Fecha:\s*(.+)/i);
+        const levelMatch = stdout.match(/Level:\s*(.+)/i) || stdout.match(/Nivel:\s*(.+)/i);
+        const msgMatch = stdout.match(/Message:\s*([\s\S]*?)(?:\n\n|\nEvent|\n$)/i) || stdout.match(/Mensaje:\s*([\s\S]*?)(?:\n\n|\nEvent|\n$)/i);
+        const level = levelMatch ? levelMatch[1].trim().toLowerCase() : '';
+        const message = msgMatch ? msgMatch[1].trim().substring(0, 300) : '';
+
+        let status = 'ok';
+        let statusText = 'Backup realizado con exito';
+        if (level.includes('error') || level.includes('critical')) {
+          status = 'error';
+          statusText = 'El backup fallo';
+        } else if (level.includes('warning') || level.includes('advertencia')) {
+          status = 'warning';
+          statusText = 'Backup con advertencias';
+        }
+
         _backupCache = {
-          type: 'eventlog',
-          last_backup: dateMatch ? dateMatch[1].trim() : null,
-          level: levelMatch ? levelMatch[1].trim() : null,
-          message: msgMatch ? msgMatch[1].trim().substring(0, 200) : null,
-          status: levelMatch && (levelMatch[1].includes('Error') || levelMatch[1].includes('error')) ? 'error' : 'ok',
+          status,
+          status_text: statusText,
+          last_backup: dateMatch ? formatBackupDate(dateMatch[1].trim()) : null,
+          message: message || null,
           checked_at: new Date().toLocaleString()
         };
         _backupLastCheck = Date.now();
         resolve(_backupCache);
         return;
       }
-      // Fallback: chequear carpeta de Windows Backup
-      exec('dir /b /od "C:\\WindowsImageBackup" 2>nul', { timeout: 5000, windowsHide: true }, (err3, stdout3) => {
-        if (!err3 && stdout3 && stdout3.trim()) {
-          const folders = stdout3.trim().split('\n').filter(l => l.trim());
-          _backupCache = { type: 'folder', last_folder: folders[folders.length - 1]?.trim(), status: 'found', checked_at: new Date().toLocaleString() };
+      // No hay eventos de backup - chequear si el servicio existe
+      exec('sc query wbengine 2>nul', { timeout: 5000, windowsHide: true }, (err2, stdout2) => {
+        if (!err2 && stdout2 && stdout2.includes('wbengine')) {
+          // Servicio existe pero no hay eventos - nunca se ejecuto
+          _backupCache = { status: 'never', status_text: 'Backup configurado pero nunca ejecutado', checked_at: new Date().toLocaleString() };
         } else {
-          _backupCache = null; // No hay backup configurado - no enviar nada
+          // Chequear carpeta
+          exec('dir /b /od "C:\\WindowsImageBackup" 2>nul', { timeout: 5000, windowsHide: true }, (err3, stdout3) => {
+            if (!err3 && stdout3 && stdout3.trim()) {
+              _backupCache = { status: 'ok', status_text: 'Backup realizado con exito', last_backup: stdout3.trim().split('\n').pop()?.trim(), checked_at: new Date().toLocaleString() };
+            } else {
+              _backupCache = { status: 'not_configured', status_text: 'Windows Backup no esta configurado', checked_at: new Date().toLocaleString() };
+            }
+            _backupLastCheck = Date.now();
+            resolve(_backupCache);
+          });
+          return;
         }
         _backupLastCheck = Date.now();
         resolve(_backupCache);

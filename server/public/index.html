@@ -1431,6 +1431,11 @@ function renderCmdHistoryModal() {
 }
 
 // ── BACKUP MODAL ──
+async function requestBackupCheck(id) {
+  const res = await api('/api/machines/' + id + '/check-backup', { method: 'POST' });
+  if (res.ok) alert('Chequeo solicitado. Resultado en ~30 segundos.');
+  else alert(res.data?.error || 'Error');
+}
 async function openBackup(id) {
   activeModal = { type: 'backup', machineId: id, data: null }; render();
   const res = await api('/api/machines/' + id + '/backup');
@@ -1439,22 +1444,21 @@ async function openBackup(id) {
 function renderBackupModal() {
   const m = machines.find(x => x.id === activeModal.machineId);
   const d = activeModal.data;
-  const statusColor = !d ? '#999' : d.status === 'ok' || d.status === 'found' ? '#4CAF50' : d.status === 'error' ? '#F44336' : '#FF9800';
-  const statusText = !d ? 'Cargando...' : d.status === 'ok' || d.status === 'found' ? '✅ Backup encontrado' : d.status === 'error' ? '❌ Error en backup' : '⚠ Sin datos de backup';
+  const icons = { ok: '🛡', error: '🚨', warning: '⚠️', never: '📋', not_configured: '❌', unknown: '❓' };
+  const colors = { ok: '#4CAF50', error: '#F44336', warning: '#FF9800', never: '#FF9800', not_configured: '#999', unknown: '#999' };
+  const st = d?.status || 'unknown';
   return `<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal-panel" style="max-width:500px">
     <div class="modal-header"><h2>🛡 Backup — ${m?.machine_name||''}</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
     <div style="text-align:center;padding:20px 0">
-      <div style="font-size:48px;margin-bottom:8px">${!d ? '⏳' : d.status === 'ok' || d.status === 'found' ? '🛡' : d.status === 'error' ? '🚨' : '⚠'}</div>
-      <div style="font-size:18px;font-weight:700;color:${statusColor};margin-bottom:4px">${statusText}</div>
+      <div style="font-size:48px;margin-bottom:8px">${!d ? '⏳' : icons[st] || '❓'}</div>
+      <div style="font-size:18px;font-weight:700;color:${colors[st] || '#999'};margin-bottom:4px">${!d ? 'Cargando...' : d.status_text || st}</div>
     </div>
     ${d ? `<div style="background:#f8f9fa;border-radius:8px;padding:14px;font-size:13px">
-      ${d.type ? '<div style="margin-bottom:4px"><span style="color:#999">Fuente:</span> <strong>' + (d.type==='wbadmin'?'Windows Server Backup (wbadmin)':d.type==='eventlog'?'Event Log de Windows Backup':d.type==='folder'?'Carpeta WindowsImageBackup':'Desconocido') + '</strong></div>' : ''}
-      ${d.last_backup ? '<div style="margin-bottom:4px"><span style="color:#999">Ultimo backup:</span> <strong>' + d.last_backup + '</strong></div>' : ''}
-      ${d.last_folder ? '<div style="margin-bottom:4px"><span style="color:#999">Ultima carpeta:</span> <strong>' + d.last_folder + '</strong></div>' : ''}
-      ${d.level ? '<div style="margin-bottom:4px"><span style="color:#999">Nivel:</span> <strong style="color:' + (d.level.includes('Error')?'#F44336':'#4CAF50') + '">' + d.level + '</strong></div>' : ''}
-      ${d.message ? '<div style="margin-bottom:4px"><span style="color:#999">Mensaje:</span> ' + d.message + '</div>' : ''}
-    </div>` : ''}
-    <p style="color:#999;font-size:11px;margin-top:12px;text-align:center">El agente chequea Windows Backup (wbadmin), Event Log y carpeta WindowsImageBackup.</p>
+      ${d.last_backup ? '<div style="margin-bottom:8px"><span style="color:#999">Ultima fecha del backup:</span><br><strong style="font-size:15px">' + d.last_backup + '</strong></div>' : ''}
+      ${d.message ? '<div style="margin-bottom:8px;padding:10px;background:' + (st === 'error' ? '#FFF3F3' : st === 'warning' ? '#FFF8E1' : '#F5F5F5') + ';border-radius:6px;border-left:3px solid ' + (colors[st] || '#999') + '"><span style="color:#666;font-size:12px">' + d.message + '</span></div>' : ''}
+      ${d.checked_at ? '<div style="color:#999;font-size:11px">Chequeado: ' + d.checked_at + '</div>' : ''}
+    </div>
+    <div style="text-align:center;margin-top:12px"><button class="modal-btn sm" onclick="requestBackupCheck(${m?.id})">🔄 Forzar chequeo</button></div>` : ''}
   </div></div>`;
 }
 

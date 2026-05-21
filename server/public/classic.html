@@ -1099,24 +1099,29 @@ async function openBackup(id) {
   const res = await api('/api/machines/' + id + '/backup');
   if (res.ok) { activeModal.data = res.data; renderDashboard(); }
 }
+async function requestBackupCheck(id) {
+  const res = await api('/api/machines/' + id + '/check-backup', { method: 'POST' });
+  if (res.ok) alert('Chequeo solicitado. Resultado en ~30 segundos.');
+}
 function renderBackupModal() {
   const m = machines.find(x => x.id === activeModal.machineId);
   const d = activeModal.data;
-  const color = !d ? '#888' : d.status === 'ok' || d.status === 'found' ? '#00e676' : d.status === 'error' ? '#ff5252' : '#ff9800';
+  const icons = { ok: '🛡', error: '🚨', warning: '⚠', never: '📋', not_configured: '❌', unknown: '❓' };
+  const colors = { ok: '#00e676', error: '#ff5252', warning: '#ff9800', never: '#ff9800', not_configured: '#888', unknown: '#888' };
+  const st = d?.status || 'unknown';
   return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:500px">
     <button class="close-btn" onclick="closeModal()">Cerrar</button>
     <h2>&#128737; Backup — ${m?.machine_name || ''}</h2>
     <div style="text-align:center;padding:16px 0">
-      <div style="font-size:40px;margin-bottom:8px">${!d ? '⏳' : d.status === 'ok' || d.status === 'found' ? '🛡' : d.status === 'error' ? '🚨' : '⚠'}</div>
-      <div style="font-size:16px;font-weight:700;color:${color}">${!d ? 'Cargando...' : d.status === 'ok' || d.status === 'found' ? 'Backup encontrado' : d.status === 'error' ? 'Error en backup' : 'Sin datos de backup'}</div>
+      <div style="font-size:40px;margin-bottom:8px">${!d ? '⏳' : icons[st] || '❓'}</div>
+      <div style="font-size:16px;font-weight:700;color:${colors[st] || '#888'}">${!d ? 'Cargando...' : d.status_text || st}</div>
     </div>
     ${d ? `<div style="background:#16213e;border-radius:8px;padding:14px;font-size:13px;color:#aaa">
-      ${d.type ? '<div style="margin-bottom:4px">Fuente: <strong style="color:#ddd">' + (d.type==='wbadmin'?'wbadmin':d.type==='eventlog'?'Event Log':d.type==='folder'?'Carpeta':'?') + '</strong></div>' : ''}
-      ${d.last_backup ? '<div style="margin-bottom:4px">Ultimo: <strong style="color:#ddd">' + d.last_backup + '</strong></div>' : ''}
-      ${d.last_folder ? '<div style="margin-bottom:4px">Carpeta: <strong style="color:#ddd">' + d.last_folder + '</strong></div>' : ''}
-      ${d.level ? '<div style="margin-bottom:4px">Nivel: <strong style="color:' + (d.level.includes('Error')?'#ff5252':'#00e676') + '">' + d.level + '</strong></div>' : ''}
-      ${d.message ? '<div>Mensaje: ' + d.message + '</div>' : ''}
-    </div>` : ''}
+      ${d.last_backup ? '<div style="margin-bottom:8px">Ultima fecha del backup:<br><strong style="color:#ddd;font-size:15px">' + d.last_backup + '</strong></div>' : ''}
+      ${d.message ? '<div style="margin-bottom:8px;padding:10px;background:' + (st === 'error' ? '#2d1117' : st === 'warning' ? '#2d2200' : '#16213e') + ';border-radius:6px;border-left:3px solid ' + (colors[st] || '#888') + '"><span style="color:#ccc;font-size:12px">' + d.message + '</span></div>' : ''}
+      ${d.checked_at ? '<div style="color:#666;font-size:11px">Chequeado: ' + d.checked_at + '</div>' : ''}
+    </div>
+    <div style="text-align:center;margin-top:12px"><button onclick="requestBackupCheck(${m?.id})" style="background:#2a2a4a;color:#00d4ff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600">🔄 Forzar chequeo</button></div>` : ''}
   </div></div>`;
 }
 
