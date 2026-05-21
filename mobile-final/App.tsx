@@ -1066,8 +1066,14 @@ export default function App() {
               if (res.ok) {
                 const d = res.data;
                 const status = d.status === 'ok' || d.status === 'found' ? '✅ Backup OK' : d.status === 'error' ? '❌ Error' : '⚠ Sin datos';
-                const info = [status, d.last_backup ? 'Ultimo: ' + d.last_backup : null, d.last_folder ? 'Carpeta: ' + d.last_folder : null, d.level ? 'Nivel: ' + d.level : null, d.message || null].filter(Boolean).join('\n');
-                Alert.alert('Backup: ' + item.machine_name, info);
+                const info = [status, d.last_backup ? 'Ultimo: ' + d.last_backup : null, d.last_folder ? 'Carpeta: ' + d.last_folder : null, d.level ? 'Nivel: ' + d.level : null, d.message || null, d.checked_at ? 'Chequeado: ' + d.checked_at : null].filter(Boolean).join('\n');
+                Alert.alert('Backup: ' + item.machine_name, info, [
+                  { text: 'Cerrar' },
+                  { text: 'Forzar chequeo', onPress: async () => {
+                    const r = await apiRequest(`/api/machines/${item.id}/check-backup`, { method: 'POST' }, token);
+                    if (r.ok) Alert.alert('Solicitado', 'El resultado aparece en el proximo heartbeat (~30s)');
+                  }}
+                ]);
               }
             }},
           ].map((btn, i) => (
