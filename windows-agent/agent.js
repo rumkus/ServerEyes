@@ -130,6 +130,62 @@ function getSystemMetrics() {
   });
 }
 
+// Servicios Windows importantes
+function getServices() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    // Listar servicios conocidos: IIS, SQL Server, MySQL, PostgreSQL, Apache, DHCP, DNS, Print Spooler, RDP, etc.
+    const knownServices = 'W3SVC,MSSQLSERVER,MSSQL$*,MySQL*,postgresql*,Apache*,DHCPServer,DNS,Spooler,TermService,WinRM,MSDTC,SQLBrowser,W32Time,EventLog,LanmanServer,Netlogon';
+    exec('sc query type= service state= all', { timeout: 15000, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      const services = [];
+      if (!err && stdout) {
+        const blocks = stdout.split('SERVICE_NAME:').filter(Boolean);
+        for (const block of blocks) {
+          const nameLine = block.trim().split('\n')[0].trim();
+          const stateMatch = block.match(/STATE\s+:\s+\d+\s+(\w+)/);
+          const displayMatch = block.match(/DISPLAY_NAME\s*:\s*(.+)/);
+          if (nameLine && stateMatch) {
+            const svcName = nameLine;
+            const state = stateMatch[1];
+            const display = displayMatch ? displayMatch[1].trim() : svcName;
+            // Filtrar solo servicios interesantes
+            const isKnown = knownServices.split(',').some(k => {
+              if (k.endsWith('*')) return svcName.toUpperCase().startsWith(k.slice(0, -1).toUpperCase());
+              return svcName.toUpperCase() === k.toUpperCase();
+            });
+            if (isKnown) {
+              services.push({ name: svcName, display, state });
+            }
+          }
+        }
+      }
+      resolve(services.length > 0 ? services : null);
+    });
+  });
+}
+
+// Puertos abiertos (TCP LISTENING)
+function getOpenPorts() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec('netstat -an -p TCP | findstr LISTENING', { timeout: 10000, windowsHide: true }, (err, stdout) => {
+      const ports = [];
+      if (!err && stdout) {
+        const lines = stdout.trim().split('\n');
+        for (const line of lines) {
+          const match = line.match(/:(\d+)\s/);
+          if (match) {
+            const port = parseInt(match[1]);
+            if (port > 0 && !ports.includes(port)) ports.push(port);
+          }
+        }
+        ports.sort((a, b) => a - b);
+      }
+      resolve(ports.length > 0 ? ports : null);
+    });
+  });
+}
+
 // Ping a google.com
 function measurePing() {
   return new Promise((resolve) => {
@@ -246,7 +302,7 @@ async function sendHeartbeat(config) {
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, ...metrics
       })
     });
     if (res.ok) {
