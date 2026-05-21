@@ -449,6 +449,7 @@ function renderDashboard() {
         <button class="btn-sm" onclick="openUpdateModal()">&#128228; Agente</button>
         <button class="btn-sm" onclick="openMap()">&#127758; Mapa</button>
         <button class="btn-sm" onclick="toggleView()">${viewMode === 'groups' ? '&#128203; Lista' : '&#128193; Grupos'}</button>
+        <button class="btn-sm" onclick="openSmtpConfig()">&#128231; Email</button>
         <button class="btn-sm btn-logout" onclick="logout()">Salir</button>
       </div>
     </div>
@@ -611,6 +612,7 @@ function renderActiveModal() {
   if (activeModal.type === 'services') return renderServicesModal();
   if (activeModal.type === 'ports') return renderPortsModal();
   if (activeModal.type === 'configbackup') return renderConfigBackupModal();
+  if (activeModal.type === 'smtp') return renderSmtpModal();
   return '';
 }
 
@@ -1087,6 +1089,55 @@ function renderConfigBackupModal() {
       <p style="color:#888;font-size:12px;margin-bottom:12px">Ultimo backup: ${d.backed_up_at ? new Date(d.backed_up_at).toLocaleString('es') : '---'}</p>
       <pre style="background:#16213e;border-radius:8px;padding:14px;color:#aaa;font-size:13px;white-space:pre-wrap;font-family:monospace">${JSON.stringify(d.config, null, 2)}</pre>`}
   </div></div>`;
+}
+
+// --- SMTP CONFIG ---
+async function openSmtpConfig() {
+  activeModal = { type: 'smtp', data: null }; renderDashboard();
+  const res = await api('/api/auth/smtp');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+function renderSmtpModal() {
+  const d = activeModal.data || {};
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:500px">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128231; Configurar Email</h2>
+    <p style="color:#888;font-size:12px;margin-bottom:12px">Para Gmail: deja Host vacio y usa una contraseña de aplicacion.</p>
+    <label style="color:#888;font-size:11px">Host SMTP (vacio=Gmail):</label>
+    <input id="cs-host" style="width:100%;background:#16213e;border:2px solid #2a2a4a;border-radius:8px;padding:8px;color:#eee;margin-bottom:8px;outline:none" value="${d.smtp_host||''}" placeholder="smtp.gmail.com">
+    <label style="color:#888;font-size:11px">Puerto:</label>
+    <input id="cs-port" style="width:100%;background:#16213e;border:2px solid #2a2a4a;border-radius:8px;padding:8px;color:#eee;margin-bottom:8px;outline:none" value="${d.smtp_port||587}">
+    <label style="color:#888;font-size:11px">Email SMTP:</label>
+    <input id="cs-user" style="width:100%;background:#16213e;border:2px solid #2a2a4a;border-radius:8px;padding:8px;color:#eee;margin-bottom:8px;outline:none" value="${d.smtp_user||''}" placeholder="tu@email.com">
+    <label style="color:#888;font-size:11px">Contraseña:</label>
+    <input id="cs-pass" type="password" style="width:100%;background:#16213e;border:2px solid #2a2a4a;border-radius:8px;padding:8px;color:#eee;margin-bottom:8px;outline:none" placeholder="contraseña de app">
+    <label style="color:#888;font-size:11px">Remitente (opcional):</label>
+    <input id="cs-from" style="width:100%;background:#16213e;border:2px solid #2a2a4a;border-radius:8px;padding:8px;color:#eee;margin-bottom:8px;outline:none" value="${d.smtp_from||''}">
+    <div style="display:flex;align-items:center;margin-bottom:12px;cursor:pointer" onclick="var cb=document.getElementById('cs-enabled');cb.checked=!cb.checked">
+      <input type="checkbox" id="cs-enabled" ${d.email_notifications!==false?'checked':''} style="margin-right:8px;width:16px;height:16px" onclick="event.stopPropagation()">
+      <span style="color:#ddd;font-size:13px">Recibir notificaciones por email</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="saveClassicSmtp()" style="background:#00d4ff;color:#1a1a2e;border:none;border-radius:8px;padding:10px 20px;font-weight:700;cursor:pointer">Guardar</button>
+      <button onclick="testClassicSmtp()" style="background:#ff9800;color:#1a1a2e;border:none;border-radius:8px;padding:10px 20px;font-weight:700;cursor:pointer">Enviar prueba</button>
+    </div>
+    <div id="cs-status" style="margin-top:8px;font-size:12px"></div>
+  </div></div>`;
+}
+async function saveClassicSmtp() {
+  const st = document.getElementById('cs-status');
+  const res = await api('/api/auth/smtp', { method:'POST', body: JSON.stringify({
+    smtp_host: document.getElementById('cs-host')?.value||null, smtp_port: parseInt(document.getElementById('cs-port')?.value)||587,
+    smtp_user: document.getElementById('cs-user')?.value||null, smtp_pass: document.getElementById('cs-pass')?.value||null,
+    smtp_from: document.getElementById('cs-from')?.value||null, email_notifications: document.getElementById('cs-enabled')?.checked
+  })});
+  if(st) st.innerHTML = res.ok ? '<span style="color:#00e676">Guardado</span>' : '<span style="color:#ff5252">'+(res.data?.error||'Error')+'</span>';
+}
+async function testClassicSmtp() {
+  const st = document.getElementById('cs-status');
+  if(st) st.innerHTML='<span style="color:#888">Enviando...</span>';
+  const res = await api('/api/auth/smtp/test',{method:'POST'});
+  if(st) st.innerHTML = res.ok ? '<span style="color:#00e676">'+res.data.message+'</span>' : '<span style="color:#ff5252">'+(res.data?.error||'Error')+'</span>';
 }
 
 // Init

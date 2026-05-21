@@ -411,6 +411,7 @@ function buildLayout() {
     ${buildBottomNav(offlineBadge)}
     ${activeModal ? buildModal() : ''}
   </div>`;
+  if (activeNav === 'ajustes') setTimeout(loadSmtpConfig, 100);
 }
 
 function buildHeader() {
@@ -684,6 +685,30 @@ function buildReportesView() {
 function buildAjustesView() {
   return `<div style="display:flex;flex-direction:column;gap:16px">
     <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:#2196F3"></span>Notificaciones por Email</div>
+      <p style="font-size:12px;color:#666;margin-bottom:12px">Configura tu servidor SMTP para recibir alertas por email. Para Gmail: deja Host vacío y usa una contraseña de aplicación.</p>
+      <div id="smtp-form">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div style="flex:2"><label style="font-size:11px;color:#999">Host SMTP (vacío=Gmail)</label><input class="modal-input" id="smtp-host" placeholder="smtp.gmail.com" style="font-size:13px;padding:8px"></div>
+          <div style="flex:1"><label style="font-size:11px;color:#999">Puerto</label><input class="modal-input" id="smtp-port" value="587" style="font-size:13px;padding:8px"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div style="flex:1"><label style="font-size:11px;color:#999">Email SMTP</label><input class="modal-input" id="smtp-user" placeholder="tu@email.com" style="font-size:13px;padding:8px"></div>
+          <div style="flex:1"><label style="font-size:11px;color:#999">Contraseña</label><input class="modal-input" id="smtp-pass" type="password" placeholder="contraseña de app" style="font-size:13px;padding:8px"></div>
+        </div>
+        <div style="margin-bottom:8px"><label style="font-size:11px;color:#999">Remitente (opcional)</label><input class="modal-input" id="smtp-from" placeholder="noreply@empresa.com" style="font-size:13px;padding:8px"></div>
+        <div style="display:flex;align-items:center;margin-bottom:12px;cursor:pointer" onclick="document.getElementById('smtp-enabled').checked=!document.getElementById('smtp-enabled').checked">
+          <input type="checkbox" id="smtp-enabled" checked style="margin-right:8px;width:16px;height:16px" onclick="event.stopPropagation()">
+          <span style="font-size:13px;color:#333">Recibir notificaciones por email</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="modal-btn sm" onclick="saveSmtp()">Guardar</button>
+          <button class="modal-btn sm" style="background:#FF9800;color:#fff" onclick="testSmtp()">Enviar prueba</button>
+        </div>
+        <div id="smtp-status" style="margin-top:8px;font-size:12px"></div>
+      </div>
+    </div>
+    <div class="panel">
       <div class="panel-title"><span class="dot" style="background:#FF9800"></span>Gestión de Agente</div>
       <p style="font-size:13px;color:#666;margin-bottom:14px">Versión configurada: <strong>${agentInfo.version||'No configurada'}</strong>${agentInfo.url?` · <a href="${agentInfo.url}" target="_blank" style="color:#2196F3;font-size:12px">URL</a>`:''}</p>
       <button class="modal-btn sm" onclick="openAgentModal()">⚙️ Configurar versión de agente</button>
@@ -693,6 +718,39 @@ function buildAjustesView() {
       <button class="modal-btn danger sm" onclick="logout()">Cerrar sesión</button>
     </div>
   </div>`;
+}
+
+async function loadSmtpConfig() {
+  const res = await api('/api/auth/smtp');
+  if (res.ok) {
+    const d = res.data;
+    const h = document.getElementById('smtp-host'); if(h) h.value = d.smtp_host || '';
+    const p = document.getElementById('smtp-port'); if(p) p.value = d.smtp_port || 587;
+    const u = document.getElementById('smtp-user'); if(u) u.value = d.smtp_user || '';
+    const f = document.getElementById('smtp-from'); if(f) f.value = d.smtp_from || '';
+    const e = document.getElementById('smtp-enabled'); if(e) e.checked = d.email_notifications !== false;
+  }
+}
+
+async function saveSmtp() {
+  const st = document.getElementById('smtp-status');
+  const data = {
+    smtp_host: document.getElementById('smtp-host')?.value || null,
+    smtp_port: parseInt(document.getElementById('smtp-port')?.value) || 587,
+    smtp_user: document.getElementById('smtp-user')?.value || null,
+    smtp_pass: document.getElementById('smtp-pass')?.value || null,
+    smtp_from: document.getElementById('smtp-from')?.value || null,
+    email_notifications: document.getElementById('smtp-enabled')?.checked
+  };
+  const res = await api('/api/auth/smtp', { method: 'POST', body: JSON.stringify(data) });
+  if (st) st.innerHTML = res.ok ? '<span style="color:#4CAF50">✅ Guardado</span>' : '<span style="color:#F44336">❌ ' + (res.data?.error||'Error') + '</span>';
+}
+
+async function testSmtp() {
+  const st = document.getElementById('smtp-status');
+  if (st) st.innerHTML = '<span style="color:#999">Enviando...</span>';
+  const res = await api('/api/auth/smtp/test', { method: 'POST' });
+  if (st) st.innerHTML = res.ok ? '<span style="color:#4CAF50">✅ ' + res.data.message + '</span>' : '<span style="color:#F44336">❌ ' + (res.data?.error||'Error') + '</span>';
 }
 
 function buildBottomNav(alertBadge) {
