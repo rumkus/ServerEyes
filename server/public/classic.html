@@ -382,6 +382,9 @@ function renderCard(m) {
         <button class="card-btn" onclick="event.stopPropagation();openAgentLogs(${m.id})">&#128203; Logs</button>
         <button class="card-btn" onclick="event.stopPropagation();downloadRDP(${m.id})">&#128421; RDP</button>
         <button class="card-btn" onclick="event.stopPropagation();openRemoteCmd(${m.id})">&#128187; CMD</button>
+        <button class="card-btn" onclick="event.stopPropagation();openServices(${m.id})">&#9881; Servicios</button>
+        <button class="card-btn" onclick="event.stopPropagation();openPorts(${m.id})">&#128268; Puertos</button>
+        <button class="card-btn" onclick="event.stopPropagation();openConfigBackup(${m.id})">&#128190; Config</button>
         <button class="card-btn btn-edit" onclick="event.stopPropagation();openEditMachine(${m.id})">&#9998; Editar</button>
       </div>
     </div>`;
@@ -605,6 +608,9 @@ function renderActiveModal() {
   if (activeModal.type === 'metrics') return renderMetricsModal();
   if (activeModal.type === 'cmd') return renderCmdModal();
   if (activeModal.type === 'map') return renderMapModal();
+  if (activeModal.type === 'services') return renderServicesModal();
+  if (activeModal.type === 'ports') return renderPortsModal();
+  if (activeModal.type === 'configbackup') return renderConfigBackupModal();
   return '';
 }
 
@@ -1024,6 +1030,63 @@ async function saveAgentVersion() {
 async function loadAgentInfo() {
   const res = await api('/api/agent/version');
   if (res.ok) agentInfo = res.data;
+}
+
+// --- SERVICES ---
+async function openServices(id) {
+  activeModal = { type: 'services', machineId: id, data: null }; renderDashboard();
+  const res = await api('/api/machines/' + id + '/services');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+function renderServicesModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const services = activeModal.data?.services || [];
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:600px">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#9881; Servicios — ${m?.machine_name || ''}</h2>
+    ${!activeModal.data ? '<p style="color:#888">Cargando...</p>' : services.length === 0 ? '<p style="color:#888;text-align:center;padding:20px">Sin servicios. Actualiza el agente.</p>' : `
+      <table style="width:100%;font-size:13px"><tr><th style="text-align:left;color:#888;padding:6px">Servicio</th><th style="text-align:left;color:#888;padding:6px">Nombre</th><th style="color:#888;padding:6px">Estado</th></tr>
+      ${services.map(s => `<tr><td style="padding:4px 6px;font-weight:600;color:#ddd">${s.name}</td><td style="padding:4px 6px;color:#aaa">${s.display}</td>
+        <td style="padding:4px 6px;text-align:center"><span style="color:${s.state==='RUNNING'?'#00e676':'#ff5252'};font-weight:700;font-size:11px">${s.state}</span></td></tr>`).join('')}
+      </table>`}
+  </div></div>`;
+}
+
+// --- PORTS ---
+async function openPorts(id) {
+  activeModal = { type: 'ports', machineId: id, data: null }; renderDashboard();
+  const res = await api('/api/machines/' + id + '/services');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+function renderPortsModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const ports = activeModal.data?.open_ports || [];
+  const known = {21:'FTP',22:'SSH',25:'SMTP',53:'DNS',80:'HTTP',135:'RPC',139:'NetBIOS',443:'HTTPS',445:'SMB',1433:'SQL Server',3306:'MySQL',3389:'RDP',5432:'PostgreSQL',5900:'VNC',8080:'HTTP Alt'};
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:500px">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128268; Puertos — ${m?.machine_name || ''}</h2>
+    ${!activeModal.data ? '<p style="color:#888">Cargando...</p>' : ports.length === 0 ? '<p style="color:#888;text-align:center;padding:20px">Sin datos. Actualiza el agente.</p>' : `
+      <p style="color:#888;font-size:12px;margin-bottom:12px">${ports.length} puertos TCP LISTENING</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${ports.map(p => `<span style="background:${known[p]?'#0a3d62':'#2a2a4a'};color:${known[p]?'#00d4ff':'#ddd'};border-radius:6px;padding:4px 10px;font-size:13px"><strong>${p}</strong>${known[p]?' <span style="color:#888;font-size:10px">'+known[p]+'</span>':''}</span>`).join('')}</div>`}
+  </div></div>`;
+}
+
+// --- CONFIG BACKUP ---
+async function openConfigBackup(id) {
+  activeModal = { type: 'configbackup', machineId: id, data: null }; renderDashboard();
+  const res = await api('/api/machines/' + id + '/config');
+  if (res.ok) { activeModal.data = res.data; renderDashboard(); }
+}
+function renderConfigBackupModal() {
+  const m = machines.find(x => x.id === activeModal.machineId);
+  const d = activeModal.data;
+  return `<div class="detail-overlay" onclick="if(event.target===this)closeModal()"><div class="detail-panel" style="max-width:500px">
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+    <h2>&#128190; Config Backup — ${m?.machine_name || ''}</h2>
+    ${!d ? '<p style="color:#888">Cargando...</p>' : !d.config ? '<p style="color:#888;text-align:center;padding:20px">Sin backup. Actualiza el agente.</p>' : `
+      <p style="color:#888;font-size:12px;margin-bottom:12px">Ultimo backup: ${d.backed_up_at ? new Date(d.backed_up_at).toLocaleString('es') : '---'}</p>
+      <pre style="background:#16213e;border-radius:8px;padding:14px;color:#aaa;font-size:13px;white-space:pre-wrap;font-family:monospace">${JSON.stringify(d.config, null, 2)}</pre>`}
+  </div></div>`;
 }
 
 // Init

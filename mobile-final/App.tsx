@@ -980,6 +980,18 @@ export default function App() {
             {icon: '🌐', label: 'IPs', action: () => openIpHistory(item)},
             {icon: '💿', label: 'Discos', action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
             {icon: '📋', label: 'Logs', action: async () => { const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token); if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || 'Sin logs'); }},
+            {icon: '⚙', label: 'Servicios', action: async () => {
+              const res = await apiRequest(`/api/machines/${item.id}/services`, {}, token);
+              if (res.ok) {
+                const svcs = (res.data.services || []).map((s: any) => `${s.state === 'RUNNING' ? '🟢' : '🔴'} ${s.display} (${s.state})`).join('\n');
+                const ports = (res.data.open_ports || []).join(', ');
+                Alert.alert(item.machine_name, (svcs || 'Sin servicios') + '\n\nPuertos: ' + (ports || 'Sin datos'));
+              }
+            }},
+            {icon: '💾', label: 'Config', action: async () => {
+              const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
+              if (res.ok) Alert.alert('Config: ' + item.machine_name, res.data.config ? JSON.stringify(res.data.config, null, 2) + '\n\nBackup: ' + (res.data.backed_up_at ? new Date(res.data.backed_up_at).toLocaleString() : '---') : 'Sin backup');
+            }},
           ].map((btn, i) => (
             <TouchableOpacity key={i} onPress={btn.action} style={{paddingVertical: 6, paddingHorizontal: 10}}>
               <Text style={{color: '#607d8b', fontSize: 12}}>{btn.icon} {btn.label}</Text>
