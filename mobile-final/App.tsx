@@ -8,6 +8,14 @@ import { Platform, PermissionsAndroid, NativeModules, BackHandler } from 'react-
 const { WidgetBridge } = NativeModules;
 
 const API_URL = 'https://servereyes-production.up.railway.app';
+
+// i18n
+const LANGS: {[k:string]: {name:string, flag:string, [k:string]:string}} = {
+  es: { name: 'Español', flag: '🇪🇸', login_title: 'Iniciar sesion', login_btn: 'Iniciar sesion', create_account: 'Crear cuenta', have_account: 'Ya tengo cuenta', new_account: 'Crear cuenta nueva', show_password: 'Ver contraseña', fill_fields: 'Completa todos los campos', logout: 'Salir', machines_count: 'maquinas', search: 'Buscar...', save: 'Guardar', cancel: 'Cancelar', close: 'Cerrar', back: 'Volver', language: 'Idioma', uptime: 'Uptime', metrics: 'Metricas', ips: 'IPs', disks: 'Discos', logs: 'Logs', services: 'Servicios', config: 'Config', backup: 'Backup', edit: 'Editar', change_pass: 'Cambiar contraseña', current_pass: 'Contraseña actual', new_pass: 'Nueva contraseña (min 6 caracteres)', pass_updated: 'Contraseña actualizada', email_config: 'Configurar Email', email_notif: 'Recibir notificaciones por email', smtp_host: 'Host SMTP (vacio para Gmail)', smtp_port: 'Puerto', smtp_user: 'Email SMTP', smtp_pass: 'Contraseña SMTP', smtp_from: 'Remitente (opcional)', smtp_test: 'Enviar email de prueba', smtp_hint: 'Para Gmail: deja Host vacio, usa tu email y una contraseña de aplicacion', team: 'Empresa y Equipo', force_check: 'Forzar chequeo', check_requested: 'Resultado en ~30 segundos', backup_date: 'Ultima fecha del backup', checked_at: 'Chequeado', share_machines: 'Compartir maquinas', select_machines: 'Selecciona las maquinas que este tecnico podra ver', invite_tech: 'Invitar tecnico', join_team: 'Te invitaron a un equipo?', join_btn: 'Unirme', create_company: 'Crear empresa', company_name: 'Nombre de la empresa', ip_history: 'Historial de IPs', current_ip: 'IP actual', no_changes: 'Sin cambios de IP registrados' },
+  en: { name: 'English', flag: '🇺🇸', login_title: 'Sign in', login_btn: 'Sign in', create_account: 'Create account', have_account: 'Already have an account', new_account: 'Create new account', show_password: 'Show password', fill_fields: 'Fill all fields', logout: 'Logout', machines_count: 'machines', search: 'Search...', save: 'Save', cancel: 'Cancel', close: 'Close', back: 'Back', language: 'Language', uptime: 'Uptime', metrics: 'Metrics', ips: 'IPs', disks: 'Disks', logs: 'Logs', services: 'Services', config: 'Config', backup: 'Backup', edit: 'Edit', change_pass: 'Change password', current_pass: 'Current password', new_pass: 'New password (min 6 characters)', pass_updated: 'Password updated', email_config: 'Configure Email', email_notif: 'Receive email notifications', smtp_host: 'SMTP Host (empty for Gmail)', smtp_port: 'Port', smtp_user: 'SMTP Email', smtp_pass: 'SMTP Password', smtp_from: 'Sender (optional)', smtp_test: 'Send test email', smtp_hint: 'For Gmail: leave Host empty, use your email and an app password', team: 'Company & Team', force_check: 'Force check', check_requested: 'Result in ~30 seconds', backup_date: 'Last backup date', checked_at: 'Checked', share_machines: 'Share machines', select_machines: 'Select machines this technician can see', invite_tech: 'Invite technician', join_team: 'Were you invited to a team?', join_btn: 'Join', create_company: 'Create company', company_name: 'Company name', ip_history: 'IP History', current_ip: 'Current IP', no_changes: 'No IP changes recorded' },
+};
+let _currentLang = 'es';
+const t = (key: string) => (LANGS[_currentLang] && LANGS[_currentLang][key]) || LANGS.es[key] || key;
 const MAX_LOGS = 500;
 
 // Sistema de logs
@@ -66,6 +74,8 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [appReady, setAppReady] = useState(false);
+  const [lang, setLang] = useState('es');
+  const changeLang = async (l: string) => { _currentLang = l; setLang(l); await AsyncStorage.setItem('se_lang', l); };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -230,6 +240,7 @@ export default function App() {
   // Cargar token guardado al iniciar
   useEffect(() => {
     log.info('App iniciando...');
+    AsyncStorage.getItem('se_lang').then(saved => { if (saved && LANGS[saved]) { _currentLang = saved; setLang(saved); } });
     loadLogs().then(() => {
       log.info('Logs cargados');
       AsyncStorage.getItem('servereyes_token').then(saved => {
@@ -1688,6 +1699,11 @@ export default function App() {
             setShowSmtp(true);
           }},
           {icon: '⚙', label: '', action: () => setShowChangePass(true)},
+          {icon: LANGS[lang]?.flag || '🌐', label: '', action: () => {
+            const langs = Object.keys(LANGS);
+            const idx = langs.indexOf(lang);
+            changeLang(langs[(idx + 1) % langs.length]);
+          }},
         ].map((tab, i) => (
           <TouchableOpacity key={i} onPress={tab.action || (() => setViewMode(tab.mode as any))}
             style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: !tab.action && viewMode === tab.mode ? '#00d4ff' : 'transparent'}}>
