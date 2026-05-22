@@ -76,6 +76,7 @@ export default function App() {
   const [appReady, setAppReady] = useState(false);
   const [lang, setLang] = useState('es');
   const changeLang = async (l: string) => { _currentLang = l; setLang(l); await AsyncStorage.setItem('se_lang', l); };
+  const [menuOpen, setMenuOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -151,6 +152,7 @@ export default function App() {
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
+    if (menuOpen) { setMenuOpen(false); return true; }
     if (backupMachine) { setBackupMachine(null); return true; }
     if (shareUserId) { setShareUserId(null); return true; }
     if (detailMachine) { setDetailMachine(null); return true; }
@@ -1670,46 +1672,57 @@ export default function App() {
     <View style={{flex: 1, backgroundColor: '#0a1628'}}>
       <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
       {/* Header */}
-      <View style={{backgroundColor: '#0d1b2a', paddingTop: 46, paddingHorizontal: 20, paddingBottom: 14}}>
+      <View style={{backgroundColor: '#0d1b2a', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 12}}>
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
-            <Text style={{fontSize: 28, marginRight: 10}}>{'👁'}</Text>
+            <TouchableOpacity onPress={() => setMenuOpen(!menuOpen)} style={{padding: 8, marginRight: 8}}>
+              <Text style={{color: '#607d8b', fontSize: 22}}>{'☰'}</Text>
+            </TouchableOpacity>
+            <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
-              <Text style={{fontSize: 22, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: '#607d8b', fontSize: 12}}>{machines.length} {t('machines_count')}</Text>
+              <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
+              <Text style={{color: '#607d8b', fontSize: 11}}>{machines.length} {t('machines_count')}</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
-            <TouchableOpacity onPress={() => loadMachines()} style={{padding: 8}}><Text style={{color: '#607d8b', fontSize: 18}}>{'🔄'}</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => { log.info('Logout'); setAndSaveToken(null); }} style={{padding: 8}}><Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => loadMachines()} style={{padding: 8}}><Text style={{color: '#607d8b', fontSize: 16}}>{'🔄'}</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => { setViewMode(viewMode === 'all' ? 'groups' : 'all'); }} style={{padding: 8}}>
+              <Text style={{color: viewMode === 'groups' ? '#00d4ff' : '#607d8b', fontSize: 16}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
 
-      {/* Tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{backgroundColor: '#0d1b2a', borderBottomWidth: 1, borderBottomColor: '#1a2a3a', maxHeight: 48}}>
-        <TouchableOpacity onPress={() => setViewMode('all')} style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: viewMode === 'all' ? '#00d4ff' : 'transparent'}}>
-          <Text style={{color: viewMode === 'all' ? '#00d4ff' : '#607d8b', fontSize: 14}}>{'🖥'} {t('uptime') === 'Uptime' ? 'Servers' : 'Servidores'}</Text>
+      {/* Menu hamburguesa */}
+      {menuOpen && (
+        <TouchableOpacity activeOpacity={1} onPress={() => setMenuOpen(false)} style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 100}}>
+          <View style={{backgroundColor: '#0d1b2a', width: 280, height: '100%', paddingTop: 50, borderRightWidth: 1, borderRightColor: '#1a2a3a'}}>
+            <View style={{paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#1a2a3a'}}>
+              <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
+              <Text style={{color: '#607d8b', fontSize: 12, marginTop: 2}}>{machines.length} {t('machines_count')}</Text>
+            </View>
+            {[
+              {icon: '🖥', label: lang === 'en' ? 'Servers' : 'Servidores', action: () => { setViewMode('all'); setMenuOpen(false); }},
+              {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
+              {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
+              {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
+              {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
+              {icon: '🔒', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
+              {icon: '📄', label: 'CSV', action: async () => { setMenuOpen(false); try { const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } }); const csv = await res.text(); const now = new Date(); const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`; await RNFS.writeFile(filePath, csv, 'utf8'); await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Export' }); } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export: ${e.message}`); } }},
+              {icon: LANGS[lang]?.flag || '🌐', label: `${t('language')}: ${LANGS[lang]?.name}`, action: () => { const langs = Object.keys(LANGS); const idx = langs.indexOf(lang); changeLang(langs[(idx + 1) % langs.length]); }},
+            ].map((item, i) => (
+              <TouchableOpacity key={i} onPress={item.action} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#111d2e'}}>
+                <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{item.icon}</Text>
+                <Text style={{color: '#ccc', fontSize: 15}}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => { setMenuOpen(false); log.info('Logout'); setAndSaveToken(null); }} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, marginTop: 'auto', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
+              <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
+              <Text style={{color: '#ff5252', fontSize: 15, fontWeight: '600'}}>{t('logout')}</Text>
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setViewMode('groups')} style={{paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 2, borderBottomColor: viewMode === 'groups' ? '#00d4ff' : 'transparent'}}>
-          <Text style={{color: viewMode === 'groups' ? '#00d4ff' : '#607d8b', fontSize: 14}}>{'📁'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={async () => { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
-          <Text style={{color: '#607d8b', fontSize: 14}}>{'👥'} {t('team')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => { setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
-          <Text style={{color: '#607d8b', fontSize: 14}}>{'📋'} {t('logs')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={async () => { const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
-          <Text style={{color: '#607d8b', fontSize: 14}}>{'📧'} Email</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setShowChangePass(true)} style={{paddingVertical: 12, paddingHorizontal: 14}}>
-          <Text style={{color: '#607d8b', fontSize: 14}}>{'🔒'} {t('change_pass')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => { const langs = Object.keys(LANGS); const idx = langs.indexOf(lang); changeLang(langs[(idx + 1) % langs.length]); }} style={{paddingVertical: 12, paddingHorizontal: 14}}>
-          <Text style={{color: '#00d4ff', fontSize: 14}}>{LANGS[lang]?.flag || '🌐'} {LANGS[lang]?.name || lang}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+      )}
 
       {/* IP Alert */}
       {ipAlert && (
