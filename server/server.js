@@ -8,6 +8,14 @@ const path = require('path');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'servereyes-secret-key-change-in-production';
 
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception (no crash):', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection (no crash):', reason);
+});
+
 // Email (Nodemailer)
 let emailTransporter = null;
 try {
@@ -760,6 +768,10 @@ app.post('/api/heartbeat', async (req, res) => {
       return res.json({ status: 'speed_test_saved' });
     }
 
+    // Obtener IP actual antes del update para detectar cambio real
+    const beforeUpdate = await pool.query('SELECT public_ip FROM machines WHERE machine_key = $1', [machine_key]);
+    const oldPublicIp = beforeUpdate.rows[0]?.public_ip;
+
     // Actualizar maquina (solo detectar cambio de IP si check_ip_change = true)
     const result = await pool.query(
       `UPDATE machines SET
@@ -884,24 +896,24 @@ app.post('/api/heartbeat', async (req, res) => {
       }
     }
 
-    // Registrar cambio de IP en historial (siempre, independiente de check_ip_change)
-    if (updatedMachine && updatedMachine.previous_public_ip &&
-        updatedMachine.previous_public_ip !== public_ip) {
+    // Detectar si la IP realmente cambio en ESTE heartbeat
+    const ipActuallyChanged = oldPublicIp && public_ip && oldPublicIp !== public_ip;
+
+    // Registrar cambio de IP en historial (solo cuando realmente cambio)
+    if (updatedMachine && ipActuallyChanged) {
       await pool.query(
         'INSERT INTO ip_history (machine_id, public_ip, previous_ip) VALUES ($1, $2, $3)',
-        [updatedMachine.id, public_ip, updatedMachine.previous_public_ip]
+        [updatedMachine.id, public_ip, oldPublicIp]
       );
     }
 
     // Push notification si cambio la IP (solo si check_ip_change esta activo)
-    if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.previous_public_ip &&
-        updatedMachine.previous_public_ip !== public_ip && updatedMachine.user_id) {
-      sendPush(updatedMachine.user_id, '🌐 IP cambio', `${updatedMachine.machine_name}: ${updatedMachine.previous_public_ip} → ${public_ip}`, { type: 'ip_change', machineId: String(updatedMachine.id) });
+    if (updatedMachine && updatedMachine.check_ip_change && ipActuallyChanged && updatedMachine.user_id) {
+      sendPush(updatedMachine.user_id, '🌐 IP cambio', `${updatedMachine.machine_name}: ${oldPublicIp} → ${public_ip}`, { type: 'ip_change', machineId: String(updatedMachine.id) });
     }
 
     // Auto-update DNS si cambio la IP y tiene URL configurada (solo si check_ip_change esta activo)
-    if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.dns_update_url && updatedMachine.previous_public_ip &&
-        updatedMachine.previous_public_ip !== public_ip) {
+    if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.dns_update_url && ipActuallyChanged) {
       try {
         const dnsUrl = `${updatedMachine.dns_update_url}&address=${public_ip}`;
         const dnsClient = dnsUrl.startsWith('https') ? require('https') : require('http');
@@ -912,7 +924,7 @@ app.post('/api/heartbeat', async (req, res) => {
             console.log(`[DNS] Auto-update ${updatedMachine.dns_host || 'host'}: ${d.trim()}`);
             pool.query('UPDATE machines SET dns_last_update = NOW() WHERE id = $1', [updatedMachine.id]);
           });
-        });
+        }).on('error', (e) => { console.error('[DNS] Auto-update error:', e.message); });
       } catch (e) { console.error('[DNS] Auto-update error:', e.message); }
     }
 
