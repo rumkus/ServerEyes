@@ -607,6 +607,24 @@ async function setup() {
   startHeartbeatLoop(loadConfig());
 }
 
+// Single instance lock via lock file
+const LOCK_FILE = path.join(EXE_DIR, 'servereyes.lock');
+
+function isAlreadyRunning() {
+  try {
+    if (!fs.existsSync(LOCK_FILE)) return false;
+    const pid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim());
+    if (isNaN(pid)) return false;
+    // Check if process with that PID is still alive
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  } catch { return false; }
+}
+
+function acquireLock() {
+  fs.writeFileSync(LOCK_FILE, String(process.pid));
+  process.on('exit', () => { try { fs.unlinkSync(LOCK_FILE); } catch {} });
+}
+
 // Main
 async function main() {
   const args = process.argv.slice(2);
@@ -618,6 +636,12 @@ async function main() {
 
   if (args.includes('--install')) { install(); return; }
   if (args.includes('--uninstall')) { uninstall(); return; }
+
+  if (isAlreadyRunning()) {
+    console.log('ServerEyes Agent ya esta corriendo. Saliendo.');
+    process.exit(0);
+  }
+  acquireLock();
 
   const config = loadConfig();
 
