@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ServerEyes — Status</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#f8f9fa;color:#333;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;}
+.container{max-width:720px;margin:0 auto;padding:32px 16px;}
+.header{text-align:center;margin-bottom:32px;}
+.header h1{font-size:24px;font-weight:800;color:#1a1a2e;display:flex;align-items:center;justify-content:center;gap:8px;}
+.header .eye{font-size:28px;}
+.overall{text-align:center;padding:24px;border-radius:16px;margin-bottom:24px;font-size:18px;font-weight:700;}
+.overall.operational{background:#E8F5E9;color:#2e7d32;}
+.overall.partial_outage{background:#FFF3E0;color:#E65100;}
+.overall.major_outage{background:#FFEBEE;color:#c62828;}
+.section-title{font-size:14px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.5px;margin:24px 0 12px;display:flex;align-items:center;gap:6px;}
+.item{background:#fff;border-radius:12px;padding:14px 18px;margin-bottom:8px;display:flex;align-items:center;gap:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
+.dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+.dot.up{background:#4CAF50;box-shadow:0 0 6px rgba(76,175,80,.4);}
+.dot.down{background:#F44336;box-shadow:0 0 6px rgba(244,67,54,.4);}
+.item-info{flex:1;}
+.item-name{font-size:15px;font-weight:700;}
+.item-meta{font-size:12px;color:#999;margin-top:2px;}
+.item-status{font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;}
+.item-status.up{background:#E8F5E9;color:#4CAF50;}
+.item-status.down{background:#FFEBEE;color:#F44336;}
+.footer{text-align:center;color:#ccc;font-size:12px;margin-top:40px;}
+.loading{text-align:center;padding:60px 0;color:#999;}
+@media(prefers-color-scheme:dark){
+  body{background:#0d1117;color:#e6edf3;}
+  .header h1{color:#e6edf3;}
+  .item{background:#161b22;box-shadow:0 1px 4px rgba(0,0,0,0.2);}
+  .item-name{color:#e6edf3;}
+  .footer{color:#30363d;}
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1><span class="eye">👁</span> ServerEyes Status</h1>
+  </div>
+  <div id="content"><div class="loading">Cargando estado...</div></div>
+  <div class="footer" id="footer"></div>
+</div>
+<script>
+function timeSince(ts) {
+  if (!ts) return '';
+  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return 'hace ' + s + 's';
+  if (s < 3600) return 'hace ' + Math.floor(s/60) + 'min';
+  if (s < 86400) return 'hace ' + Math.floor(s/3600) + 'h';
+  return 'hace ' + Math.floor(s/86400) + 'd';
+}
+async function load() {
+  try {
+    const r = await fetch('/api/public/status');
+    const d = await r.json();
+    const labels = { operational: 'Todos los sistemas operativos', partial_outage: 'Interrupcion parcial', major_outage: 'Interrupcion mayor' };
+    let html = `<div class="overall ${d.overall}">${d.overall === 'operational' ? '✅' : '⚠️'} ${labels[d.overall] || d.overall}</div>`;
+    if (d.machines.length > 0) {
+      html += '<div class="section-title">🖥 Servidores</div>';
+      d.machines.forEach(m => {
+        html += `<div class="item">
+          <div class="dot ${m.status === 'operational' ? 'up' : 'down'}"></div>
+          <div class="item-info">
+            <div class="item-name">${m.name}</div>
+            <div class="item-meta">${m.location || ''} ${m.ping ? '· ' + m.ping + 'ms' : ''} ${m.last_seen ? '· ' + timeSince(m.last_seen) : ''}</div>
+          </div>
+          <span class="item-status ${m.status === 'operational' ? 'up' : 'down'}">${m.status === 'operational' ? 'Operativo' : 'Caido'}</span>
+        </div>`;
+      });
+    }
+    if (d.urls.length > 0) {
+      html += '<div class="section-title">🌐 Servicios Web</div>';
+      d.urls.forEach(u => {
+        html += `<div class="item">
+          <div class="dot ${u.status === 'operational' ? 'up' : 'down'}"></div>
+          <div class="item-info">
+            <div class="item-name">${u.name}</div>
+            <div class="item-meta">${u.response_ms ? u.response_ms + 'ms' : ''} ${u.last_check ? '· ' + timeSince(u.last_check) : ''} ${u.error ? '· ' + u.error : ''}</div>
+          </div>
+          <span class="item-status ${u.status === 'operational' ? 'up' : 'down'}">${u.status === 'operational' ? 'Operativo' : 'Caido'}</span>
+        </div>`;
+      });
+    }
+    document.getElementById('content').innerHTML = html;
+    document.getElementById('footer').textContent = 'Actualizado: ' + new Date(d.updated_at).toLocaleString('es') + ' · ServerEyes';
+  } catch (e) {
+    document.getElementById('content').innerHTML = '<div class="loading">Error al cargar el estado</div>';
+  }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

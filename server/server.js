@@ -332,7 +332,74 @@ async function initDB() {
     )
   `);
 
+  // Audit log
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      action VARCHAR(100) NOT NULL,
+      target_type VARCHAR(50),
+      target_id INTEGER,
+      details TEXT,
+      ip VARCHAR(45),
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_log (user_id, created_at DESC)`).catch(() => {});
+
+  // Maintenance windows
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_windows (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      title VARCHAR(255) DEFAULT 'Mantenimiento',
+      start_time TIMESTAMP NOT NULL,
+      end_time TIMESTAMP NOT NULL,
+      repeat VARCHAR(20) DEFAULT 'none',
+      suppress_alerts BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  // URL/HTTP monitoring
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS url_monitors (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      url VARCHAR(500) NOT NULL,
+      name VARCHAR(255),
+      method VARCHAR(10) DEFAULT 'GET',
+      expected_status INTEGER DEFAULT 200,
+      timeout_ms INTEGER DEFAULT 10000,
+      interval_seconds INTEGER DEFAULT 300,
+      is_active BOOLEAN DEFAULT true,
+      last_status INTEGER,
+      last_response_ms INTEGER,
+      last_check TIMESTAMP,
+      last_error TEXT,
+      is_up BOOLEAN DEFAULT true,
+      down_since TIMESTAMP,
+      notify_down BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  // Wake-on-LAN
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
+
   console.log('Base de datos inicializada');
+}
+
+// Audit helper
+async function logAudit(userId, action, targetType, targetId, details, ip) {
+  try {
+    await pool.query(
+      'INSERT INTO audit_log (user_id, action, target_type, target_id, details, ip) VALUES ($1, $2, $3, $4, $5, $6)',
+      [userId, action, targetType || null, targetId || null, details || null, ip || null]
+    );
+  } catch {}
 }
 
 // ============== AUTH: REGISTRO Y LOGIN ==============
@@ -353,6 +420,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     const user = result.rows[0];
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    logAudit(user.id, 'register', 'user', user.id, null, req.ip);
     res.status(201).json({ user, token });
   } catch (error) {
     console.error('Error en registro:', error);
@@ -373,6 +441,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    logAudit(user.id, 'login', 'user', user.id, null, req.ip);
     res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner' }, token });
   } catch (error) {
     console.error('Error en login:', error);
@@ -1090,6 +1159,8 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (req.body.alert_disks !== undefined) { fields.push(`alert_disks = $${idx++}`); values.push(JSON.stringify(req.body.alert_disks)); }
     if (req.body.rdp_port !== undefined) { fields.push(`rdp_port = $${idx++}`); values.push(req.body.rdp_port); }
     if (req.body.rdp_user !== undefined) { fields.push(`rdp_user = $${idx++}`); values.push(req.body.rdp_user || null); }
+    if (req.body.mac_address !== undefined) { fields.push(`mac_address = $${idx++}`); values.push(req.body.mac_address || null); }
+    if (req.body.wol_broadcast !== undefined) { fields.push(`wol_broadcast = $${idx++}`); values.push(req.body.wol_broadcast || '255.255.255.255'); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
@@ -1100,6 +1171,7 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    logAudit(req.user.id, 'edit_machine', 'machine', parseInt(req.params.id), JSON.stringify(req.body), req.ip);
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error al actualizar maquina:', error);
@@ -1182,10 +1254,11 @@ app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
       'DELETE FROM heartbeat_log WHERE machine_id = $1',
       [req.params.id]
     );
-    await pool.query(
-      'DELETE FROM machines WHERE id = $1 AND user_id = $2',
+    const delResult = await pool.query(
+      'DELETE FROM machines WHERE id = $1 AND user_id = $2 RETURNING machine_name',
       [req.params.id, req.user.id]
     );
+    if (delResult.rows.length > 0) logAudit(req.user.id, 'delete_machine', 'machine', parseInt(req.params.id), delResult.rows[0].machine_name, req.ip);
     res.json({ message: 'Maquina eliminada' });
   } catch (error) {
     console.error('Error al eliminar maquina:', error);
@@ -1248,9 +1321,13 @@ setInterval(async () => {
           'UPDATE machines SET offline_notified = true WHERE id = $1',
           [machine.id]
         );
-        // Push notification (solo si alert_offline no esta desactivado)
         if (machine.alert_offline !== false) {
-          sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) });
+          const inMaint = await isInMaintenance(machine.id, machine.user_id);
+          if (!inMaint) {
+            sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) });
+          } else {
+            console.log(`[MAINT] Alerta suprimida para ${machine.machine_name} (en ventana de mantenimiento)`);
+          }
         }
       }
     }
@@ -1531,6 +1608,7 @@ app.post('/api/machines/:id/command', authenticateToken, async (req, res) => {
       'INSERT INTO remote_commands (machine_id, user_id, command) VALUES ($1, $2, $3) RETURNING *',
       [req.params.id, req.user.id, command]
     );
+    logAudit(req.user.id, 'remote_command', 'machine', parseInt(req.params.id), command, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error enviando comando:', error);
@@ -1945,7 +2023,358 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
   }
 });
 
+// ============== AUDIT LOG ==============
+
+app.get('/api/audit', authenticateToken, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const result = await pool.query(
+      `SELECT a.*, u.email as user_email FROM audit_log a
+       LEFT JOIN users u ON a.user_id = u.id
+       WHERE a.user_id = $1
+       ORDER BY a.created_at DESC LIMIT $2`,
+      [req.user.id, limit]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============== MAINTENANCE WINDOWS ==============
+
+app.get('/api/maintenance', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT mw.*, m.machine_name FROM maintenance_windows mw
+       LEFT JOIN machines m ON mw.machine_id = m.id
+       WHERE mw.user_id = $1
+       ORDER BY mw.start_time DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/maintenance', authenticateToken, async (req, res) => {
+  try {
+    const { machine_id, title, start_time, end_time, repeat } = req.body;
+    if (!start_time || !end_time) return res.status(400).json({ error: 'start_time y end_time requeridos' });
+    const result = await pool.query(
+      'INSERT INTO maintenance_windows (user_id, machine_id, title, start_time, end_time, repeat) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [req.user.id, machine_id || null, title || 'Mantenimiento', start_time, end_time, repeat || 'none']
+    );
+    logAudit(req.user.id, 'create_maintenance', 'maintenance', result.rows[0].id, title, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.delete('/api/maintenance/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM maintenance_windows WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ message: 'Ventana eliminada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+function isInMaintenance(machineId, userId) {
+  return pool.query(
+    `SELECT id FROM maintenance_windows
+     WHERE user_id = $1 AND suppress_alerts = true
+     AND (machine_id = $2 OR machine_id IS NULL)
+     AND NOW() BETWEEN start_time AND end_time
+     LIMIT 1`,
+    [userId, machineId]
+  ).then(r => r.rows.length > 0).catch(() => false);
+}
+
+// ============== URL/HTTP MONITORING ==============
+
+app.get('/api/url-monitors', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM url_monitors WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/url-monitors', authenticateToken, async (req, res) => {
+  try {
+    const { url, name, method, expected_status, timeout_ms, interval_seconds } = req.body;
+    if (!url) return res.status(400).json({ error: 'url requerido' });
+    const result = await pool.query(
+      'INSERT INTO url_monitors (user_id, url, name, method, expected_status, timeout_ms, interval_seconds) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [req.user.id, url, name || url, method || 'GET', expected_status || 200, timeout_ms || 10000, interval_seconds || 300]
+    );
+    logAudit(req.user.id, 'create_url_monitor', 'url_monitor', result.rows[0].id, url, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
+  try {
+    const { url, name, method, expected_status, timeout_ms, interval_seconds, is_active } = req.body;
+    const result = await pool.query(
+      `UPDATE url_monitors SET url=COALESCE($1,url), name=COALESCE($2,name), method=COALESCE($3,method),
+       expected_status=COALESCE($4,expected_status), timeout_ms=COALESCE($5,timeout_ms),
+       interval_seconds=COALESCE($6,interval_seconds), is_active=COALESCE($7,is_active)
+       WHERE id=$8 AND user_id=$9 RETURNING *`,
+      [url, name, method, expected_status, timeout_ms, interval_seconds, is_active, req.params.id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.delete('/api/url-monitors/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM url_monitors WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ message: 'Monitor eliminado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// URL monitor checker (runs every 60 seconds)
+setInterval(async () => {
+  try {
+    const monitors = await pool.query(
+      `SELECT um.*, u.id as owner_id FROM url_monitors um
+       JOIN users u ON um.user_id = u.id
+       WHERE um.is_active = true
+       AND (um.last_check IS NULL OR um.last_check < NOW() - (um.interval_seconds || ' seconds')::INTERVAL)`
+    );
+    const https = require('https');
+    const http = require('http');
+    for (const mon of monitors.rows) {
+      const startTime = Date.now();
+      try {
+        const urlObj = new URL(mon.url);
+        const client = urlObj.protocol === 'https:' ? https : http;
+        const result = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Timeout')), mon.timeout_ms || 10000);
+          const r = client.request(urlObj, { method: mon.method || 'GET', timeout: mon.timeout_ms || 10000 }, (res) => {
+            clearTimeout(timer);
+            let body = '';
+            res.on('data', c => body += c);
+            res.on('end', () => resolve({ status: res.statusCode, ms: Date.now() - startTime }));
+          });
+          r.on('error', (e) => { clearTimeout(timer); reject(e); });
+          r.end();
+        });
+        const isUp = result.status === (mon.expected_status || 200);
+        const wasDown = !mon.is_up;
+        await pool.query(
+          `UPDATE url_monitors SET last_status=$1, last_response_ms=$2, last_check=NOW(), last_error=NULL,
+           is_up=$3, down_since=CASE WHEN $3=true THEN NULL ELSE COALESCE(down_since, NOW()) END
+           WHERE id=$4`,
+          [result.status, result.ms, isUp, mon.id]
+        );
+        if (wasDown && isUp && mon.notify_down) {
+          sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${result.ms}ms)`, { type: 'url_up' });
+        } else if (!isUp && mon.is_up && mon.notify_down) {
+          sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url} respondio ${result.status} (esperado: ${mon.expected_status})`, { type: 'url_down' });
+        }
+      } catch (err) {
+        const wasUp = mon.is_up;
+        await pool.query(
+          `UPDATE url_monitors SET last_check=NOW(), last_error=$1, last_response_ms=$2,
+           is_up=false, down_since=COALESCE(down_since, NOW()) WHERE id=$3`,
+          [err.message, Date.now() - startTime, mon.id]
+        );
+        if (wasUp && mon.notify_down) {
+          sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url}: ${err.message}`, { type: 'url_down' });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[URL-MONITOR] Error:', err.message);
+  }
+}, 60000);
+
+// ============== WEEKLY REPORT ==============
+
+async function generateWeeklyReport(userId) {
+  try {
+    const user = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    if (!user.rows[0] || user.rows[0].email_notifications === false) return;
+    const u = user.rows[0];
+
+    const machines_result = await pool.query('SELECT * FROM machines WHERE user_id = $1 ORDER BY machine_name', [userId]);
+    const allMachines = machines_result.rows;
+    if (allMachines.length === 0) return;
+
+    const online = allMachines.filter(m => m.is_online).length;
+    const offline = allMachines.length - online;
+
+    const uptimeData = await pool.query(
+      `SELECT machine_id, COUNT(*) FILTER (WHERE status='online') as online_events,
+       COUNT(*) FILTER (WHERE status='offline') as offline_events
+       FROM uptime_log WHERE timestamp > NOW() - INTERVAL '7 days'
+       AND machine_id IN (SELECT id FROM machines WHERE user_id = $1) GROUP BY machine_id`, [userId]
+    );
+
+    const alertCount = await pool.query(
+      `SELECT COUNT(*) FROM audit_log WHERE user_id = $1 AND action LIKE '%alert%' AND created_at > NOW() - INTERVAL '7 days'`, [userId]
+    );
+
+    const urlMonitors = await pool.query('SELECT * FROM url_monitors WHERE user_id = $1', [userId]);
+
+    const machineRows = allMachines.map(m => {
+      const cpu = m.cpu_usage != null ? m.cpu_usage + '%' : '—';
+      const ram = m.ram_usage && m.ram_total ? Math.round(m.ram_usage / m.ram_total * 100) + '%' : '—';
+      return `<tr>
+        <td style="padding:8px;border-bottom:1px solid #eee">${m.machine_name}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;color:${m.is_online ? '#4CAF50' : '#F44336'}">${m.is_online ? 'Online' : 'Offline'}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee">${cpu}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee">${ram}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee">${m.ping_ms ? m.ping_ms + 'ms' : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const urlRows = urlMonitors.rows.map(u => `<tr>
+      <td style="padding:6px;border-bottom:1px solid #eee;font-size:13px">${u.name || u.url}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee;color:${u.is_up ? '#4CAF50' : '#F44336'}">${u.is_up ? 'UP' : 'DOWN'}</td>
+      <td style="padding:6px;border-bottom:1px solid #eee">${u.last_response_ms ? u.last_response_ms + 'ms' : '—'}</td>
+    </tr>`).join('');
+
+    const body = `
+      <h3 style="color:#333;margin:0 0 16px">Reporte Semanal</h3>
+      <div style="display:flex;gap:16px;margin-bottom:16px">
+        <div style="background:#E8F5E9;padding:12px 20px;border-radius:8px;text-align:center;flex:1"><div style="font-size:24px;font-weight:800;color:#4CAF50">${online}</div><div style="font-size:11px;color:#666">Online</div></div>
+        <div style="background:#FFEBEE;padding:12px 20px;border-radius:8px;text-align:center;flex:1"><div style="font-size:24px;font-weight:800;color:#F44336">${offline}</div><div style="font-size:11px;color:#666">Offline</div></div>
+        <div style="background:#E3F2FD;padding:12px 20px;border-radius:8px;text-align:center;flex:1"><div style="font-size:24px;font-weight:800;color:#2196F3">${allMachines.length}</div><div style="font-size:11px;color:#666">Total</div></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
+        <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left">Maquina</th><th style="padding:8px">Estado</th><th style="padding:8px">CPU</th><th style="padding:8px">RAM</th><th style="padding:8px">Ping</th></tr>
+        ${machineRows}
+      </table>
+      ${urlRows ? `<h4 style="color:#333;margin:12px 0 8px">Monitoreo URLs</h4><table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="background:#f5f5f5"><th style="padding:6px;text-align:left">URL</th><th style="padding:6px">Estado</th><th style="padding:6px">Resp</th></tr>${urlRows}</table>` : ''}
+      <p style="color:#999;font-size:12px;margin-top:16px">Periodo: ultimos 7 dias · Alertas registradas: ${alertCount.rows[0]?.count || 0}</p>
+    `;
+
+    if (u.smtp_user && u.smtp_pass) {
+      await sendEmailWithUserSMTP(u, 'Reporte Semanal', body);
+    } else {
+      await sendEmail(u.email, 'Reporte Semanal', body);
+    }
+    console.log(`[REPORT] Reporte semanal enviado a ${u.email}`);
+  } catch (err) {
+    console.error('[REPORT] Error:', err.message);
+  }
+}
+
+// Weekly report every Monday at 8:00 (check every hour)
+setInterval(async () => {
+  const now = new Date();
+  if (now.getUTCDay() === 1 && now.getUTCHours() === 11) {
+    try {
+      const users = await pool.query('SELECT id FROM users WHERE email_notifications = true');
+      for (const u of users.rows) {
+        generateWeeklyReport(u.id);
+      }
+    } catch {}
+  }
+}, 3600000);
+
+// ============== WAKE-ON-LAN ==============
+
+app.post('/api/machines/:id/wol', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query('SELECT * FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    const m = machine.rows[0];
+    if (!m.mac_address) return res.status(400).json({ error: 'MAC address no configurada. Editá la máquina y agregá la MAC.' });
+
+    const mac = m.mac_address.replace(/[:-]/g, '');
+    if (mac.length !== 12) return res.status(400).json({ error: 'MAC address invalida' });
+
+    const dgram = require('dgram');
+    const macBuf = Buffer.from(mac, 'hex');
+    const magicPacket = Buffer.alloc(102);
+    for (let i = 0; i < 6; i++) magicPacket[i] = 0xff;
+    for (let i = 0; i < 16; i++) macBuf.copy(magicPacket, 6 + i * 6);
+
+    const sock = dgram.createSocket('udp4');
+    sock.once('listening', () => {
+      sock.setBroadcast(true);
+      const broadcast = m.wol_broadcast || '255.255.255.255';
+      sock.send(magicPacket, 0, magicPacket.length, 9, broadcast, (err) => {
+        sock.close();
+        if (err) return res.status(500).json({ error: 'Error enviando WOL: ' + err.message });
+        logAudit(req.user.id, 'wake_on_lan', 'machine', m.id, m.mac_address, req.ip);
+        res.json({ message: `Magic packet enviado a ${m.mac_address} (${broadcast})` });
+      });
+    });
+    sock.bind();
+  } catch (error) {
+    console.error('Error WOL:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============== STATUS PAGE PUBLICA ==============
+
+app.get('/status-page', (req, res) => res.sendFile(path.join(__dirname, 'public', 'status.html')));
+
+app.get('/api/public/status', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT m.machine_name, m.is_online, m.last_heartbeat, m.ping_ms, m.geo_city, m.geo_country,
+       u.organization_id FROM machines m
+       JOIN users u ON m.user_id = u.id
+       WHERE u.organization_id IS NOT NULL
+       ORDER BY m.machine_name`
+    );
+
+    const urlMonitors = await pool.query(
+      `SELECT name, url, is_up, last_response_ms, last_check, last_error FROM url_monitors WHERE is_active = true`
+    );
+
+    const machines_list = result.rows.map(m => ({
+      name: m.machine_name,
+      status: m.is_online ? 'operational' : 'down',
+      last_seen: m.last_heartbeat,
+      ping: m.ping_ms,
+      location: [m.geo_city, m.geo_country].filter(Boolean).join(', ')
+    }));
+
+    const urls = urlMonitors.rows.map(u => ({
+      name: u.name || u.url,
+      status: u.is_up ? 'operational' : 'down',
+      response_ms: u.last_response_ms,
+      last_check: u.last_check,
+      error: u.is_up ? null : u.last_error
+    }));
+
+    const allUp = machines_list.every(m => m.status === 'operational') && urls.every(u => u.status === 'operational');
+    const someDown = machines_list.some(m => m.status === 'down') || urls.some(u => u.status === 'down');
+
+    res.json({
+      overall: allUp ? 'operational' : someDown ? 'partial_outage' : 'major_outage',
+      machines: machines_list,
+      urls,
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // ============== INICIAR SERVIDOR ==============
+
+// Integrate maintenance windows into offline detector
+const origOfflineDetector = true;
 
 initDB().then(() => {
   app.listen(PORT, () => {
