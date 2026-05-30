@@ -149,10 +149,37 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [shareUserId, setShareUserId] = useState<number | null>(null);
   const [shareSelected, setShareSelected] = useState<Set<number>>(new Set());
+  const [showUrlMonitors, setShowUrlMonitors] = useState(false);
+  const [urlMonitors, setUrlMonitors] = useState<any[]>([]);
+  const [showAddUrl, setShowAddUrl] = useState(false);
+  const [urlName, setUrlName] = useState('');
+  const [urlUrl, setUrlUrl] = useState('');
+  const [urlMethod, setUrlMethod] = useState('GET');
+  const [urlExpectedStatus, setUrlExpectedStatus] = useState('200');
+  const [urlTimeout, setUrlTimeout] = useState('10000');
+  const [urlInterval, setUrlInterval] = useState('300');
+  const [showMaintenance, setShowMaintenance] = useState(false);
+  const [maintenanceWindows, setMaintenanceWindows] = useState<any[]>([]);
+  const [showAddMaintenance, setShowAddMaintenance] = useState(false);
+  const [mwTitle, setMwTitle] = useState('Mantenimiento');
+  const [mwMachineId, setMwMachineId] = useState('');
+  const [mwStartDate, setMwStartDate] = useState('');
+  const [mwStartTime, setMwStartTime] = useState('');
+  const [mwEndDate, setMwEndDate] = useState('');
+  const [mwEndTime, setMwEndTime] = useState('');
+  const [showAuditLog, setShowAuditLog] = useState(false);
+  const [auditLog, setAuditLog] = useState<any[]>([]);
+  const [editMac, setEditMac] = useState('');
+  const [editWolBroadcast, setEditWolBroadcast] = useState('255.255.255.255');
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
     if (menuOpen) { setMenuOpen(false); return true; }
+    if (showAddUrl) { setShowAddUrl(false); return true; }
+    if (showAddMaintenance) { setShowAddMaintenance(false); return true; }
+    if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
+    if (showMaintenance) { setShowMaintenance(false); return true; }
+    if (showAuditLog) { setShowAuditLog(false); return true; }
     if (backupMachine) { setBackupMachine(null); return true; }
     if (shareUserId) { setShareUserId(null); return true; }
     if (detailMachine) { setDetailMachine(null); return true; }
@@ -402,7 +429,9 @@ export default function App() {
       alert_ram: editAlertRam ? parseInt(editAlertRam) : null,
       alert_disk: editAlertDisk ? parseInt(editAlertDisk) : null,
       alert_ping: editAlertPing ? parseInt(editAlertPing) : null,
-      alert_offline: editAlertOffline
+      alert_offline: editAlertOffline,
+      mac_address: editMac || null,
+      wol_broadcast: editWolBroadcast || '255.255.255.255'
     });
     setEditingMachine(null);
   };
@@ -542,6 +571,319 @@ export default function App() {
     if (d < 86400) return `${Math.floor(d / 3600)}h`;
     return `${Math.floor(d / 86400)}d`;
   };
+
+  // URL MONITORS
+  const loadUrlMonitors = async () => {
+    const res = await apiRequest('/api/url-monitors', {}, token);
+    if (res.ok) setUrlMonitors(res.data);
+  };
+
+  if (showAddUrl) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Agregar Monitor URL" />
+        <ScrollView contentContainerStyle={{padding: 24}}>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>URL:</Text>
+          <TextInput style={s.input} value={urlUrl} onChangeText={setUrlUrl} placeholder="https://ejemplo.com" placeholderTextColor="#555" autoCapitalize="none" keyboardType="url" />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Nombre (opcional):</Text>
+          <TextInput style={s.input} value={urlName} onChangeText={setUrlName} placeholder="Mi sitio web" placeholderTextColor="#555" />
+          <View style={{flexDirection: 'row', marginBottom: 8}}>
+            <View style={{flex: 1, marginRight: 6}}>
+              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Metodo</Text>
+              <View style={{flexDirection: 'row'}}>
+                {['GET', 'HEAD', 'POST'].map(m => (
+                  <TouchableOpacity key={m} onPress={() => setUrlMethod(m)}
+                    style={{backgroundColor: urlMethod === m ? '#00d4ff' : '#1a2a3a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginRight: 6}}>
+                    <Text style={{color: urlMethod === m ? '#0a1628' : '#607d8b', fontWeight: '600', fontSize: 13}}>{m}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Status esperado</Text>
+              <TextInput style={[s.input, {marginBottom: 0}]} value={urlExpectedStatus} onChangeText={setUrlExpectedStatus} keyboardType="number-pad" placeholderTextColor="#555" />
+            </View>
+          </View>
+          <View style={{flexDirection: 'row', marginBottom: 12}}>
+            <View style={{flex: 1, marginRight: 6}}>
+              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Timeout (ms)</Text>
+              <TextInput style={[s.input, {marginBottom: 0}]} value={urlTimeout} onChangeText={setUrlTimeout} keyboardType="number-pad" placeholderTextColor="#555" />
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Intervalo (seg)</Text>
+              <TextInput style={[s.input, {marginBottom: 0}]} value={urlInterval} onChangeText={setUrlInterval} keyboardType="number-pad" placeholderTextColor="#555" />
+            </View>
+          </View>
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            if (!urlUrl.trim()) { Alert.alert('Error', 'URL requerida'); return; }
+            const res = await apiRequest('/api/url-monitors', { method: 'POST', body: JSON.stringify({
+              url: urlUrl.trim(), name: urlName.trim() || null, method: urlMethod,
+              expected_status: parseInt(urlExpectedStatus) || 200,
+              timeout_ms: parseInt(urlTimeout) || 10000,
+              interval_seconds: parseInt(urlInterval) || 300
+            }) }, token);
+            if (res.ok) { setShowAddUrl(false); setUrlUrl(''); setUrlName(''); loadUrlMonitors(); }
+            else Alert.alert('Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Agregar monitor</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowAddUrl(false)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (showUrlMonitors) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Monitoreo de URLs" subtitle={`${urlMonitors.length} monitores`} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 100}}>
+          {urlMonitors.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>🌐</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin monitores configurados</Text>
+              <Text style={{color: '#3a5068', fontSize: 13, marginTop: 4}}>Agrega una URL para empezar</Text>
+            </View>
+          ) : urlMonitors.map((u: any) => (
+            <View key={u.id} style={{backgroundColor: '#0d1b2a', borderRadius: 14, marginBottom: 12, borderLeftWidth: 3, borderLeftColor: u.is_up ? '#00e676' : '#ff5252', overflow: 'hidden'}}>
+              <View style={{padding: 14}}>
+                <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
+                  <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: u.is_up ? '#00e676' : '#ff5252', marginRight: 10}} />
+                  <Text style={{flex: 1, fontSize: 16, fontWeight: '700', color: '#eee'}}>{u.name || u.url}</Text>
+                  <View style={{backgroundColor: u.is_up ? '#0d2818' : '#2d1117', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6}}>
+                    <Text style={{fontSize: 11, fontWeight: '700', color: u.is_up ? '#00e676' : '#ff5252'}}>{u.is_up ? 'UP' : 'DOWN'}</Text>
+                  </View>
+                </View>
+                <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}} numberOfLines={1}>{u.url}</Text>
+                <View style={{flexDirection: 'row', marginTop: 4}}>
+                  <Text style={{color: '#888', fontSize: 12, marginRight: 14}}>{u.method || 'GET'}</Text>
+                  {u.last_response_ms != null && <Text style={{color: u.last_response_ms < 500 ? '#00e676' : u.last_response_ms < 2000 ? '#ff9800' : '#ff5252', fontSize: 12, fontWeight: '600', marginRight: 14}}>{u.last_response_ms}ms</Text>}
+                  {u.last_status && <Text style={{color: u.last_status === (u.expected_status || 200) ? '#00e676' : '#ff5252', fontSize: 12}}>HTTP {u.last_status}</Text>}
+                  <Text style={{color: '#555', fontSize: 12, marginLeft: 'auto'}}>{u.last_check ? timeSince(u.last_check) : 'Nunca'}</Text>
+                </View>
+                {u.last_error && <Text style={{color: '#ff5252', fontSize: 11, marginTop: 4}}>{u.last_error}</Text>}
+              </View>
+              <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
+                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center'}} onPress={async () => {
+                  await apiRequest(`/api/url-monitors/${u.id}`, { method: 'PUT', body: JSON.stringify({ is_active: !u.is_active }) }, token);
+                  loadUrlMonitors();
+                }}>
+                  <Text style={{color: u.is_active ? '#ff9800' : '#00e676', fontSize: 12, fontWeight: '600'}}>{u.is_active ? '⏸ Pausar' : '▶ Activar'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}} onPress={() => {
+                  Alert.alert('Eliminar', `¿Eliminar monitor "${u.name || u.url}"?`, [
+                    { text: 'No' },
+                    { text: 'Si', style: 'destructive', onPress: async () => {
+                      await apiRequest(`/api/url-monitors/${u.id}`, { method: 'DELETE' }, token);
+                      loadUrlMonitors();
+                    }}
+                  ]);
+                }}>
+                  <Text style={{color: '#ff5252', fontSize: 12, fontWeight: '600'}}>🗑 Eliminar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+        <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
+          onPress={() => { setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
+          <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // MAINTENANCE WINDOWS
+  const loadMaintenanceWindows = async () => {
+    const res = await apiRequest('/api/maintenance', {}, token);
+    if (res.ok) setMaintenanceWindows(res.data);
+  };
+
+  if (showAddMaintenance) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Nueva Ventana" subtitle="Mantenimiento programado" />
+        <ScrollView contentContainerStyle={{padding: 24}}>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Titulo:</Text>
+          <TextInput style={s.input} value={mwTitle} onChangeText={setMwTitle} placeholder="Reboot nocturno" placeholderTextColor="#555" />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Maquina (vacio = todas):</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom: 12}}>
+            <TouchableOpacity onPress={() => setMwMachineId('')}
+              style={{backgroundColor: !mwMachineId ? '#00d4ff' : '#1a2a3a', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8}}>
+              <Text style={{color: !mwMachineId ? '#0a1628' : '#607d8b', fontWeight: '600', fontSize: 13}}>Todas</Text>
+            </TouchableOpacity>
+            {machines.map(m => (
+              <TouchableOpacity key={m.id} onPress={() => setMwMachineId(String(m.id))}
+                style={{backgroundColor: mwMachineId === String(m.id) ? '#00d4ff' : '#1a2a3a', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8}}>
+                <Text style={{color: mwMachineId === String(m.id) ? '#0a1628' : '#607d8b', fontWeight: '600', fontSize: 13}}>{m.machine_name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Inicio (fecha YYYY-MM-DD):</Text>
+          <TextInput style={s.input} value={mwStartDate} onChangeText={setMwStartDate} placeholder="2026-05-30" placeholderTextColor="#555" />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Inicio (hora HH:MM):</Text>
+          <TextInput style={s.input} value={mwStartTime} onChangeText={setMwStartTime} placeholder="22:00" placeholderTextColor="#555" />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Fin (fecha YYYY-MM-DD):</Text>
+          <TextInput style={s.input} value={mwEndDate} onChangeText={setMwEndDate} placeholder="2026-05-31" placeholderTextColor="#555" />
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Fin (hora HH:MM):</Text>
+          <TextInput style={s.input} value={mwEndTime} onChangeText={setMwEndTime} placeholder="06:00" placeholderTextColor="#555" />
+          <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 16}}>Las alertas se silencian durante esta ventana.</Text>
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            const startStr = `${mwStartDate}T${mwStartTime}:00`;
+            const endStr = `${mwEndDate}T${mwEndTime}:00`;
+            if (!mwStartDate || !mwStartTime || !mwEndDate || !mwEndTime) { Alert.alert('Error', 'Completa fecha y hora'); return; }
+            const res = await apiRequest('/api/maintenance', { method: 'POST', body: JSON.stringify({
+              machine_id: mwMachineId ? parseInt(mwMachineId) : null,
+              title: mwTitle || 'Mantenimiento',
+              start_time: startStr, end_time: endStr
+            }) }, token);
+            if (res.ok) { setShowAddMaintenance(false); loadMaintenanceWindows(); }
+            else Alert.alert('Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Crear ventana</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowAddMaintenance(false)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (showMaintenance) {
+    const now = new Date();
+    const active = maintenanceWindows.filter((w: any) => new Date(w.start_time) <= now && new Date(w.end_time) >= now);
+    const upcoming = maintenanceWindows.filter((w: any) => new Date(w.start_time) > now);
+    const past = maintenanceWindows.filter((w: any) => new Date(w.end_time) < now).slice(0, 10);
+
+    const fmtDate = (ts: string) => new Date(ts).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Mantenimiento" subtitle={`${maintenanceWindows.length} ventanas`} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 100}}>
+          {active.length > 0 && (
+            <>
+              <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginBottom: 8}}>🔧 Activas ahora</Text>
+              {active.map((w: any) => (
+                <View key={w.id} style={{backgroundColor: '#1a1500', borderLeftWidth: 3, borderLeftColor: '#ff9800', borderRadius: 12, padding: 14, marginBottom: 8}}>
+                  <Text style={{color: '#eee', fontSize: 15, fontWeight: '700'}}>{w.title}</Text>
+                  <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>{w.machine_name || 'Todas'} · {fmtDate(w.start_time)} → {fmtDate(w.end_time)}</Text>
+                  <TouchableOpacity onPress={() => {
+                    Alert.alert('Eliminar', '¿Eliminar esta ventana?', [
+                      { text: 'No' },
+                      { text: 'Si', style: 'destructive', onPress: async () => { await apiRequest(`/api/maintenance/${w.id}`, { method: 'DELETE' }, token); loadMaintenanceWindows(); }}
+                    ]);
+                  }} style={{marginTop: 8}}>
+                    <Text style={{color: '#ff5252', fontSize: 12}}>Eliminar</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </>
+          )}
+          {upcoming.length > 0 && (
+            <>
+              <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 8}}>📅 Proximas</Text>
+              {upcoming.map((w: any) => (
+                <View key={w.id} style={{backgroundColor: '#0a1a2e', borderLeftWidth: 3, borderLeftColor: '#00d4ff', borderRadius: 12, padding: 14, marginBottom: 8}}>
+                  <Text style={{color: '#eee', fontSize: 15, fontWeight: '700'}}>{w.title}</Text>
+                  <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>{w.machine_name || 'Todas'} · {fmtDate(w.start_time)} → {fmtDate(w.end_time)}</Text>
+                  <TouchableOpacity onPress={() => {
+                    Alert.alert('Eliminar', '¿Eliminar esta ventana?', [
+                      { text: 'No' },
+                      { text: 'Si', style: 'destructive', onPress: async () => { await apiRequest(`/api/maintenance/${w.id}`, { method: 'DELETE' }, token); loadMaintenanceWindows(); }}
+                    ]);
+                  }} style={{marginTop: 8}}>
+                    <Text style={{color: '#ff5252', fontSize: 12}}>Eliminar</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </>
+          )}
+          {past.length > 0 && (
+            <>
+              <Text style={{color: '#607d8b', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 8}}>📋 Pasadas</Text>
+              {past.map((w: any) => (
+                <View key={w.id} style={{backgroundColor: '#111d2e', borderRadius: 12, padding: 14, marginBottom: 8}}>
+                  <Text style={{color: '#888', fontSize: 14, fontWeight: '600'}}>{w.title}</Text>
+                  <Text style={{color: '#555', fontSize: 12, marginTop: 4}}>{w.machine_name || 'Todas'} · {fmtDate(w.start_time)} → {fmtDate(w.end_time)}</Text>
+                </View>
+              ))}
+            </>
+          )}
+          {maintenanceWindows.length === 0 && (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>🔧</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin ventanas programadas</Text>
+            </View>
+          )}
+        </ScrollView>
+        <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
+          onPress={() => {
+            const now = new Date();
+            const pad = (n: number) => String(n).padStart(2, '0');
+            setMwStartDate(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`);
+            setMwStartTime(`${pad(now.getHours())}:${pad(now.getMinutes())}`);
+            const end = new Date(now.getTime() + 3600000);
+            setMwEndDate(`${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`);
+            setMwEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`);
+            setMwTitle('Mantenimiento'); setMwMachineId('');
+            setShowAddMaintenance(true);
+          }}>
+          <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // AUDIT LOG
+  const loadAuditLog = async () => {
+    const res = await apiRequest('/api/audit?limit=100', {}, token);
+    if (res.ok) setAuditLog(res.data);
+  };
+
+  if (showAuditLog) {
+    const actionLabels: {[k:string]:string} = {
+      login:'🔑 Inicio de sesion', register:'📝 Registro', edit_machine:'✏️ Editar maquina',
+      delete_machine:'🗑️ Eliminar maquina', remote_command:'💻 Comando remoto',
+      create_maintenance:'🔧 Crear mantenimiento', create_url_monitor:'🌐 Agregar URL',
+      wake_on_lan:'⚡ Wake-on-LAN'
+    };
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Auditoria" subtitle={`${auditLog.length} acciones`} />
+        <TouchableOpacity style={{backgroundColor: '#1a2a3a', borderRadius: 8, padding: 10, marginHorizontal: 16, marginBottom: 8, alignItems: 'center'}} onPress={loadAuditLog}>
+          <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '600'}}>🔄 Actualizar</Text>
+        </TouchableOpacity>
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
+          {auditLog.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>📋</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin acciones registradas</Text>
+            </View>
+          ) : auditLog.map((a: any, i: number) => {
+            const date = new Date(a.created_at);
+            return (
+              <View key={i} style={{backgroundColor: '#111d2e', borderRadius: 10, padding: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center'}}>
+                <Text style={{fontSize: 20, marginRight: 12}}>{(actionLabels[a.action] || a.action).split(' ')[0]}</Text>
+                <View style={{flex: 1}}>
+                  <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{actionLabels[a.action] || a.action}</Text>
+                  {a.details && <Text style={{color: '#607d8b', fontSize: 11, marginTop: 2}}>{a.details}</Text>}
+                </View>
+                <View style={{alignItems: 'flex-end'}}>
+                  <Text style={{color: '#555', fontSize: 11}}>{date.toLocaleDateString('es', {day: '2-digit', month: 'short'})}</Text>
+                  <Text style={{color: '#3a5068', fontSize: 11}}>{date.toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit'})}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }
 
   // CONFIG EMAIL / SMTP
   if (showSmtp) {
@@ -974,7 +1316,7 @@ export default function App() {
     const isOn = item.is_online;
     const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
     const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
-    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); };
+    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); };
 
     const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
 
@@ -1082,6 +1424,11 @@ export default function App() {
               const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
               if (res.ok) Alert.alert('Config: ' + item.machine_name, res.data.config ? JSON.stringify(res.data.config, null, 2) + '\n\nBackup: ' + (res.data.backed_up_at ? new Date(res.data.backed_up_at).toLocaleString() : '---') : 'Sin backup');
             }},
+            ...(!item.is_online && item.mac_address ? [{icon: '⚡', label: 'WOL', action: async () => {
+              const res = await apiRequest(`/api/machines/${item.id}/wol`, { method: 'POST' }, token);
+              if (res.ok) Alert.alert('WOL', res.data.message || 'Magic packet enviado');
+              else Alert.alert('Error', res.data?.error || 'Error al enviar WOL');
+            }}] : []),
             {icon: '🛡', label: t('backup'), action: async () => {
               setBackupMachine(item); setBackupData(null);
               const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
@@ -1622,6 +1969,19 @@ export default function App() {
             <Text style={{color: '#666', fontSize: 11, marginTop: 2}}>Desactiva si la IP es fija para evitar alertas innecesarias</Text>
           </View>
         </TouchableOpacity>
+        <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 10}}>Wake-on-LAN</Text>
+        <View style={{flexDirection: 'row', marginBottom: 8}}>
+          <View style={{flex: 2, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>MAC Address</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editMac} onChangeText={setEditMac} placeholder="AA:BB:CC:DD:EE:FF" placeholderTextColor="#555" autoCapitalize="characters" />
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Broadcast IP</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editWolBroadcast} onChangeText={setEditWolBroadcast} placeholder="255.255.255.255" placeholderTextColor="#555" />
+          </View>
+        </View>
+        <Text style={{color: '#555', fontSize: 10, marginBottom: 12}}>Necesario para encender la maquina remotamente con Wake-on-LAN</Text>
+
         <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 10}}>Alertas (push notification)</Text>
         <View style={{flexDirection: 'row', marginBottom: 8}}>
           <View style={{flex: 1, marginRight: 6}}>
@@ -1704,6 +2064,9 @@ export default function App() {
             {[
               {icon: '🖥', label: lang === 'en' ? 'Servers' : 'Servidores', action: () => { setViewMode('all'); setMenuOpen(false); }},
               {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
+              {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
+              {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
+              {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
               {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
               {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
               {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
