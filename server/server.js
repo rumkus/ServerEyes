@@ -100,17 +100,30 @@ try {
   let serviceAccount = null;
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    // Desde variable de entorno (Railway)
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    try {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch (parseErr) {
+      console.error('FIREBASE_SERVICE_ACCOUNT JSON invalido:', parseErr.message);
+      console.error('Primeros 100 chars:', process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 100));
+    }
   } else if (fs.existsSync(serviceAccountPath)) {
-    // Desde archivo local
     serviceAccount = require(serviceAccountPath);
   }
 
   if (serviceAccount) {
-    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-    firebaseAdmin = admin;
-    console.log('Firebase Admin inicializado');
+    const requiredFields = ['project_id', 'private_key', 'client_email'];
+    const missing = requiredFields.filter(f => !serviceAccount[f]);
+    if (missing.length > 0) {
+      console.error('FIREBASE_SERVICE_ACCOUNT incompleto, faltan:', missing.join(', '));
+    } else {
+      console.log('Firebase SA: project=' + serviceAccount.project_id + ', email=' + serviceAccount.client_email);
+      if (!serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
+        console.error('Firebase private_key no tiene formato PEM valido');
+      }
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+      firebaseAdmin = admin;
+      console.log('Firebase Admin inicializado');
+    }
   } else {
     console.log('Firebase no configurado, push deshabilitado');
   }
