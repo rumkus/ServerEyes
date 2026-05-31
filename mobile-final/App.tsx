@@ -171,6 +171,11 @@ export default function App() {
   const [auditLog, setAuditLog] = useState<any[]>([]);
   const [editMac, setEditMac] = useState('');
   const [editWolBroadcast, setEditWolBroadcast] = useState('255.255.255.255');
+  const [editGeoCity, setEditGeoCity] = useState('');
+  const [editGeoRegion, setEditGeoRegion] = useState('');
+  const [editGeoCountry, setEditGeoCountry] = useState('');
+  const [editGeoLat, setEditGeoLat] = useState('');
+  const [editGeoLon, setEditGeoLon] = useState('');
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
@@ -431,7 +436,12 @@ export default function App() {
       alert_ping: editAlertPing ? parseInt(editAlertPing) : null,
       alert_offline: editAlertOffline,
       mac_address: editMac || null,
-      wol_broadcast: editWolBroadcast || '255.255.255.255'
+      wol_broadcast: editWolBroadcast || '255.255.255.255',
+      geo_city: editGeoCity || null,
+      geo_region: editGeoRegion || null,
+      geo_country: editGeoCountry || null,
+      geo_lat: editGeoLat ? parseFloat(editGeoLat) : null,
+      geo_lon: editGeoLon ? parseFloat(editGeoLon) : null
     });
     setEditingMachine(null);
   };
@@ -1316,7 +1326,7 @@ export default function App() {
     const isOn = item.is_online;
     const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
     const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
-    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); };
+    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); };
 
     const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
 
@@ -1969,6 +1979,33 @@ export default function App() {
             <Text style={{color: '#666', fontSize: 11, marginTop: 2}}>Desactiva si la IP es fija para evitar alertas innecesarias</Text>
           </View>
         </TouchableOpacity>
+        <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 6}}>Ubicacion</Text>
+        <Text style={{color: '#555', fontSize: 10, marginBottom: 8}}>La ubicacion se detecta por IP pero puede ser imprecisa. Edita para corregirla.</Text>
+        <View style={{flexDirection: 'row', marginBottom: 8}}>
+          <View style={{flex: 1, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Ciudad</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editGeoCity} onChangeText={setEditGeoCity} placeholder="Don Torcuato" placeholderTextColor="#555" />
+          </View>
+          <View style={{flex: 1, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Provincia</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editGeoRegion} onChangeText={setEditGeoRegion} placeholder="Buenos Aires" placeholderTextColor="#555" />
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Pais</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editGeoCountry} onChangeText={setEditGeoCountry} placeholder="Argentina" placeholderTextColor="#555" />
+          </View>
+        </View>
+        <View style={{flexDirection: 'row', marginBottom: 12}}>
+          <View style={{flex: 1, marginRight: 6}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Latitud</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editGeoLat} onChangeText={setEditGeoLat} placeholder="-34.4833" placeholderTextColor="#555" keyboardType="numeric" />
+          </View>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Longitud</Text>
+            <TextInput style={[s.input, {marginBottom: 0}]} value={editGeoLon} onChangeText={setEditGeoLon} placeholder="-58.6167" placeholderTextColor="#555" keyboardType="numeric" />
+          </View>
+        </View>
+
         <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 10}}>Wake-on-LAN</Text>
         <View style={{flexDirection: 'row', marginBottom: 8}}>
           <View style={{flex: 2, marginRight: 6}}>

@@ -1169,6 +1169,20 @@ function buildEditModal() {
     </div>
 
     <div style="margin-top:18px;padding-top:16px;border-top:2px solid #f0f2f5">
+      <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#2196F3"></span>Ubicacion Manual</div>
+      <p style="font-size:11px;color:#999;margin-bottom:12px">La ubicacion se detecta por IP pero puede ser imprecisa. Edita para corregirla.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div><label style="font-size:11px;color:#999">Ciudad</label><input class="modal-input" id="ed-geo-city" value="${d.geo_city||''}" placeholder="Don Torcuato" style="font-size:13px;padding:8px"/></div>
+        <div><label style="font-size:11px;color:#999">Provincia/Region</label><input class="modal-input" id="ed-geo-region" value="${d.geo_region||''}" placeholder="Buenos Aires" style="font-size:13px;padding:8px"/></div>
+        <div><label style="font-size:11px;color:#999">Pais</label><input class="modal-input" id="ed-geo-country" value="${d.geo_country||''}" placeholder="Argentina" style="font-size:13px;padding:8px"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+        <div><label style="font-size:11px;color:#999">Latitud</label><input class="modal-input" id="ed-geo-lat" type="number" step="any" value="${d.geo_lat||''}" placeholder="-34.4833" style="font-size:13px;padding:8px"/></div>
+        <div><label style="font-size:11px;color:#999">Longitud</label><input class="modal-input" id="ed-geo-lon" type="number" step="any" value="${d.geo_lon||''}" placeholder="-58.6167" style="font-size:13px;padding:8px"/></div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;padding-top:16px;border-top:2px solid #f0f2f5">
       <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#FF9800"></span>Umbrales de Alerta</div>
       <p style="font-size:11px;color:#999;margin-bottom:12px">Recibiras una notificacion cuando se supere el umbral. Deja vacio para desactivar.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -1205,7 +1219,12 @@ async function saveEdit() {
     alert_ram: parseAlert('ed-alert-ram'),
     alert_disk: parseAlert('ed-alert-disk'),
     alert_ping: parseAlert('ed-alert-ping'),
-    alert_offline: document.getElementById('ed-alert-offline')?.checked
+    alert_offline: document.getElementById('ed-alert-offline')?.checked,
+    geo_city: document.getElementById('ed-geo-city')?.value?.trim()||null,
+    geo_region: document.getElementById('ed-geo-region')?.value?.trim()||null,
+    geo_country: document.getElementById('ed-geo-country')?.value?.trim()||null,
+    geo_lat: document.getElementById('ed-geo-lat')?.value ? parseFloat(document.getElementById('ed-geo-lat').value) : null,
+    geo_lon: document.getElementById('ed-geo-lon')?.value ? parseFloat(document.getElementById('ed-geo-lon').value) : null
   };
   const r=await api('/api/machines/'+activeModal.machineId,{method:'PUT',body:JSON.stringify(data)});
   if(r.ok){closeModal();loadMachines();}

@@ -222,6 +222,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_country VARCHAR(100)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_lat REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_lon REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_manual BOOLEAN DEFAULT false`).catch(() => {});
 
   // Historial de metricas (1 registro por heartbeat, limpieza automatica)
   await pool.query(`
@@ -895,8 +896,8 @@ app.post('/api/heartbeat', async (req, res) => {
       [updatedMachine.id, public_ip]
     );
 
-    // Geolocalizar IP si no tiene geo o cambio la IP
-    if (public_ip && updatedMachine && (!updatedMachine.geo_city || updatedMachine.public_ip !== public_ip)) {
+    // Geolocalizar IP si no tiene geo o cambio la IP (skip si fue editado manualmente)
+    if (public_ip && updatedMachine && !updatedMachine.geo_manual && (!updatedMachine.geo_city || updatedMachine.public_ip !== public_ip)) {
       try {
         const https = require('https');
         https.get('https://ipwho.is/' + public_ip, (geoRes) => {
@@ -1161,6 +1162,11 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (req.body.rdp_user !== undefined) { fields.push(`rdp_user = $${idx++}`); values.push(req.body.rdp_user || null); }
     if (req.body.mac_address !== undefined) { fields.push(`mac_address = $${idx++}`); values.push(req.body.mac_address || null); }
     if (req.body.wol_broadcast !== undefined) { fields.push(`wol_broadcast = $${idx++}`); values.push(req.body.wol_broadcast || '255.255.255.255'); }
+    if (req.body.geo_city !== undefined) { fields.push(`geo_city = $${idx++}`); values.push(req.body.geo_city || null); fields.push(`geo_manual = true`); }
+    if (req.body.geo_region !== undefined) { fields.push(`geo_region = $${idx++}`); values.push(req.body.geo_region || null); }
+    if (req.body.geo_country !== undefined) { fields.push(`geo_country = $${idx++}`); values.push(req.body.geo_country || null); }
+    if (req.body.geo_lat !== undefined) { fields.push(`geo_lat = $${idx++}`); values.push(req.body.geo_lat); }
+    if (req.body.geo_lon !== undefined) { fields.push(`geo_lon = $${idx++}`); values.push(req.body.geo_lon); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
