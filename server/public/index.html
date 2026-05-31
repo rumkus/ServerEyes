@@ -1523,10 +1523,23 @@ function attachEvents() {
 }
 
 // ── DATA LOADING ──
+let _lastMachinesJson = '';
 async function loadMachines() {
   const r=await api('/api/machines');
-  if(r.ok){machines=r.data;render();}
+  if(r.ok){
+    const newJson = JSON.stringify(r.data);
+    const changed = newJson !== _lastMachinesJson;
+    _lastMachinesJson = newJson;
+    machines=r.data;
+    if (activeModal) { if (changed) updateHeaderBadge(); }
+    else if (changed) render();
+  }
   else if(r.status===401){logout();}
+}
+function updateHeaderBadge() {
+  const badge = document.querySelector('.badge-dot');
+  const count = machines.filter(m=>!m.is_online).length + getThresholdAlerts().length;
+  if (badge) badge.textContent = count > 0 ? count : '';
 }
 async function loadAgentInfo() {
   const r=await api('/api/agent/version');
@@ -1668,9 +1681,16 @@ function renderBackupModal() {
 
 // ── URL MONITORS VIEW ──
 let urlMonitors = [];
+let _lastUrlMonitorsJson = '';
 async function loadUrlMonitors(silent) {
   const r = await api('/api/url-monitors');
-  if (r.ok) { urlMonitors = r.data; if(!silent) render(); }
+  if (r.ok) {
+    const newJson = JSON.stringify(r.data);
+    const changed = newJson !== _lastUrlMonitorsJson;
+    _lastUrlMonitorsJson = newJson;
+    urlMonitors = r.data;
+    if (!silent && changed && !activeModal) render();
+  }
 }
 function buildUrlsView() {
   return `<div style="display:flex;flex-direction:column;gap:16px">
