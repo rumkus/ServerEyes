@@ -428,18 +428,38 @@ export default function App() {
   };
 
   const geocodeAddress = async () => {
-    if (!geoSearchAddr.trim()) return;
+    const q = geoSearchAddr.trim();
+    if (!q) return;
     setGeoSearching(true);
     setGeoSearchResult('');
     try {
-      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(geoSearchAddr.trim()) + '&limit=1&addressdetails=1', {headers:{'Accept-Language':'es'}});
-      const data = await r.json();
-      if (data.length === 0) { setGeoSearchResult('No se encontro la direccion'); return; }
+      const coordMatch = q.match(/^[^\d]*(-?\d+[.,]\d+)\s*[,;\s]\s*(-?\d+[.,]\d+)\s*$/);
+      if (coordMatch) {
+        const lat = parseFloat(coordMatch[1].replace(',','.')).toFixed(6);
+        const lon = parseFloat(coordMatch[2].replace(',','.')).toFixed(6);
+        const rr = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+lat+'&lon='+lon+'&addressdetails=1', {headers:{'Accept-Language':'es'}});
+        const p = await rr.json();
+        const ad = p.address || {};
+        setEditGeoCity(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'');
+        setEditGeoRegion(ad.state||ad.province||'');
+        setEditGeoCountry(ad.country||'');
+        setEditGeoLat(lat); setEditGeoLon(lon);
+        setGeoSearchResult(p.display_name||lat+', '+lon);
+        return;
+      }
+      const clean = q.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
+      let r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1&countrycodes=ar', {headers:{'Accept-Language':'es'}});
+      let data = await r.json();
+      if (data.length === 0) {
+        r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1', {headers:{'Accept-Language':'es'}});
+        data = await r.json();
+      }
+      if (data.length === 0) { setGeoSearchResult('No se encontro. Proba simplificando (ej: "Don Torcuato, Buenos Aires")'); return; }
       const p = data[0];
       const ad = p.address || {};
-      setEditGeoCity(ad.city || ad.town || ad.village || ad.municipality || ad.suburb || '');
-      setEditGeoRegion(ad.state || ad.province || '');
-      setEditGeoCountry(ad.country || '');
+      setEditGeoCity(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'');
+      setEditGeoRegion(ad.state||ad.province||'');
+      setEditGeoCountry(ad.country||'');
       setEditGeoLat(parseFloat(p.lat).toFixed(6));
       setEditGeoLon(parseFloat(p.lon).toFixed(6));
       setGeoSearchResult(p.display_name);

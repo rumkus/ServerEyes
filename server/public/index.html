@@ -369,12 +369,17 @@ function logout() {
 }
 
 // ── RENDER MAIN ──
+let _renderPending = false;
 function render() {
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
+  if (activeModal && (activeModal.type === 'edit' || activeModal.type === 'addurl' || activeModal.type === 'addmaintenance')) {
+    _renderPending = true;
+    return;
+  }
+  _renderPending = false;
   el.innerHTML = buildLayout();
   attachEvents();
-  // init map after DOM
   if (activeNav === 'noc') {
     setTimeout(initInlineMap, 120);
     setTimeout(loadNocTrends, 200);
@@ -992,7 +997,7 @@ function buildModal() {
   }
 }
 
-function closeModal() { activeModal=null; render(); }
+function closeModal() { activeModal=null; _renderPending=false; render(); }
 
 // ── DETAIL MODAL ──
 function buildDetailModal() {
@@ -1207,38 +1212,53 @@ function buildEditModal() {
     <button class="modal-btn danger" onclick="deleteMachine(${d.id})" style="margin-top:20px">Eliminar máquina</button>
   </div></div>`;
 }
+function fillGeoFields(city, region, country, lat, lon, display) {
+  document.getElementById('ed-geo-city').value = city;
+  document.getElementById('ed-geo-region').value = region;
+  document.getElementById('ed-geo-country').value = country;
+  document.getElementById('ed-geo-lat').value = lat;
+  document.getElementById('ed-geo-lon').value = lon;
+  activeModal.data.geo_city = city;
+  activeModal.data.geo_region = region;
+  activeModal.data.geo_country = country;
+  activeModal.data.geo_lat = lat;
+  activeModal.data.geo_lon = lon;
+  document.getElementById('geocode-result').innerHTML = '<span style="color:#4CAF50">✅ ' + display + '</span>';
+}
 async function geocodeAddress() {
   const addr = document.getElementById('ed-geo-address')?.value?.trim();
   if (!addr) return;
   const btn = document.getElementById('btn-geocode');
   const result = document.getElementById('geocode-result');
-  btn.disabled = true; btn.textContent = '⏳ Buscando...';
+  btn.disabled = true; btn.textContent = '⏳';
   result.innerHTML = '';
   try {
-    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(addr) + '&limit=1&addressdetails=1', {headers:{'Accept-Language':'es'}});
-    const data = await r.json();
+    const coordMatch = addr.match(/^[^\d]*(-?\d+[.,]\d+)\s*[,;\s]\s*(-?\d+[.,]\d+)\s*$/);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1].replace(',','.')).toFixed(6);
+      const lon = parseFloat(coordMatch[2].replace(',','.')).toFixed(6);
+      const rr = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+lat+'&lon='+lon+'&addressdetails=1', {headers:{'Accept-Language':'es'}});
+      const p = await rr.json();
+      const ad = p.address || {};
+      fillGeoFields(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'', ad.state||ad.province||'', ad.country||'', lat, lon, p.display_name||lat+', '+lon);
+      return;
+    }
+    const clean = addr.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1&countrycodes=ar', {headers:{'Accept-Language':'es'}});
+    let data = await r.json();
     if (data.length === 0) {
-      result.innerHTML = '<span style="color:#F44336">No se encontro la direccion. Intenta con otra busqueda.</span>';
+      const r2 = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1', {headers:{'Accept-Language':'es'}});
+      data = await r2.json();
+    }
+    if (data.length === 0) {
+      result.innerHTML = '<span style="color:#F44336">No se encontro. Proba simplificando la direccion (ej: "Don Torcuato, Buenos Aires")</span>';
       return;
     }
     const p = data[0];
     const ad = p.address || {};
-    const city = ad.city || ad.town || ad.village || ad.municipality || ad.suburb || '';
-    const region = ad.state || ad.province || '';
-    const country = ad.country || '';
-    document.getElementById('ed-geo-city').value = city;
-    document.getElementById('ed-geo-region').value = region;
-    document.getElementById('ed-geo-country').value = country;
-    document.getElementById('ed-geo-lat').value = parseFloat(p.lat).toFixed(6);
-    document.getElementById('ed-geo-lon').value = parseFloat(p.lon).toFixed(6);
-    activeModal.data.geo_city = city;
-    activeModal.data.geo_region = region;
-    activeModal.data.geo_country = country;
-    activeModal.data.geo_lat = p.lat;
-    activeModal.data.geo_lon = p.lon;
-    result.innerHTML = '<span style="color:#4CAF50">✅ ' + p.display_name + '</span>';
+    fillGeoFields(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'', ad.state||ad.province||'', ad.country||'', parseFloat(p.lat).toFixed(6), parseFloat(p.lon).toFixed(6), p.display_name);
   } catch (e) {
-    result.innerHTML = '<span style="color:#F44336">Error al buscar: ' + e.message + '</span>';
+    result.innerHTML = '<span style="color:#F44336">Error: ' + e.message + '</span>';
   } finally {
     btn.disabled = false; btn.textContent = '📍 Buscar';
   }
