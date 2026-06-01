@@ -176,6 +176,9 @@ export default function App() {
   const [editGeoCountry, setEditGeoCountry] = useState('');
   const [editGeoLat, setEditGeoLat] = useState('');
   const [editGeoLon, setEditGeoLon] = useState('');
+  const [geoSearchAddr, setGeoSearchAddr] = useState('');
+  const [geoSearching, setGeoSearching] = useState(false);
+  const [geoSearchResult, setGeoSearchResult] = useState('');
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
@@ -422,6 +425,26 @@ export default function App() {
       await apiRequest(`/api/machines/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token);
       loadMachines();
     } catch {}
+  };
+
+  const geocodeAddress = async () => {
+    if (!geoSearchAddr.trim()) return;
+    setGeoSearching(true);
+    setGeoSearchResult('');
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(geoSearchAddr.trim()) + '&limit=1&addressdetails=1', {headers:{'Accept-Language':'es'}});
+      const data = await r.json();
+      if (data.length === 0) { setGeoSearchResult('No se encontro la direccion'); return; }
+      const p = data[0];
+      const ad = p.address || {};
+      setEditGeoCity(ad.city || ad.town || ad.village || ad.municipality || ad.suburb || '');
+      setEditGeoRegion(ad.state || ad.province || '');
+      setEditGeoCountry(ad.country || '');
+      setEditGeoLat(parseFloat(p.lat).toFixed(6));
+      setEditGeoLon(parseFloat(p.lon).toFixed(6));
+      setGeoSearchResult(p.display_name);
+    } catch (e: any) { setGeoSearchResult('Error: ' + e.message); }
+    finally { setGeoSearching(false); }
   };
 
   const saveEdit = () => {
@@ -1326,7 +1349,7 @@ export default function App() {
     const isOn = item.is_online;
     const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
     const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
-    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); };
+    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); setGeoSearchAddr(''); setGeoSearchResult(''); };
 
     const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
 
@@ -1980,7 +2003,14 @@ export default function App() {
           </View>
         </TouchableOpacity>
         <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700', marginTop: 8, marginBottom: 6}}>Ubicacion</Text>
-        <Text style={{color: '#555', fontSize: 10, marginBottom: 8}}>La ubicacion se detecta por IP pero puede ser imprecisa. Edita para corregirla.</Text>
+        <Text style={{color: '#555', fontSize: 10, marginBottom: 8}}>Busca por direccion o edita manualmente.</Text>
+        <View style={{flexDirection: 'row', marginBottom: 6}}>
+          <TextInput style={[s.input, {flex: 1, marginBottom: 0, marginRight: 6}]} value={geoSearchAddr} onChangeText={setGeoSearchAddr} placeholder="Ej: Don Torcuato, Buenos Aires" placeholderTextColor="#555" returnKeyType="search" onSubmitEditing={geocodeAddress} />
+          <TouchableOpacity onPress={geocodeAddress} disabled={geoSearching} style={{backgroundColor: '#00d4ff', borderRadius: 10, paddingHorizontal: 14, justifyContent: 'center'}}>
+            <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>{geoSearching ? '...' : '📍'}</Text>
+          </TouchableOpacity>
+        </View>
+        {geoSearchResult ? <Text style={{color: geoSearchResult.startsWith('No se') || geoSearchResult.startsWith('Error') ? '#F44336' : '#4CAF50', fontSize: 11, marginBottom: 6}} numberOfLines={2}>{geoSearchResult}</Text> : null}
         <View style={{flexDirection: 'row', marginBottom: 8}}>
           <View style={{flex: 1, marginRight: 6}}>
             <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Ciudad</Text>

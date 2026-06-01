@@ -1143,42 +1143,47 @@ function buildEditModal() {
   <div class="modal-box">
     <div class="modal-header"><h2>✏️ Editar — ${d.machine_name}</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
     <label class="modal-label">Nombre</label>
-    <input class="modal-input" id="ed-name" value="${d.machine_name||''}"/>
+    <input class="modal-input" id="ed-name" value="${d.machine_name||''}" oninput="activeModal.data.machine_name=this.value"/>
     <label class="modal-label">Grupo</label>
-    <input class="modal-input" id="ed-grupo" value="${d.grupo||''}" placeholder="Sin grupo"/>
-    ${groups.length>0?`<div class="chip-row">${groups.map(g=>`<button class="chip" onclick="document.getElementById('ed-grupo').value='${g.replace(/'/g,"\\'")}'">` +g+ `</button>`).join('')}</div>`:''}
+    <input class="modal-input" id="ed-grupo" value="${d.grupo||''}" placeholder="Sin grupo" oninput="activeModal.data.grupo=this.value"/>
+    ${groups.length>0?`<div class="chip-row">${groups.map(g=>`<button class="chip" onclick="document.getElementById('ed-grupo').value='${g.replace(/'/g,"\\'")}';activeModal.data.grupo='${g.replace(/'/g,"\\'")}'">` +g+ `</button>`).join('')}</div>`:''}
     <label class="modal-label">Notas</label>
-    <textarea class="modal-textarea" id="ed-notes">${d.notes||''}</textarea>
+    <textarea class="modal-textarea" id="ed-notes" oninput="activeModal.data.notes=this.value">${d.notes||''}</textarea>
     <label class="modal-label">FreeDNS — Dominio</label>
-    <input class="modal-input" id="ed-dns-host" value="${d.dns_host||''}" placeholder="miserver.example.com"/>
+    <input class="modal-input" id="ed-dns-host" value="${d.dns_host||''}" placeholder="miserver.example.com" oninput="activeModal.data.dns_host=this.value"/>
     <label class="modal-label">FreeDNS — URL de actualización</label>
-    <input class="modal-input" id="ed-dns-url" value="${d.dns_update_url||''}" placeholder="https://freedns.afraid.org/..." style="font-size:12px"/>
-    <div style="margin-top:12px" class="checkbox-row" onclick="var c=document.getElementById('ed-checkip');c.checked=!c.checked">
-      <input type="checkbox" id="ed-checkip" ${d.check_ip_change!==false?'checked':''} onclick="event.stopPropagation()"/>
+    <input class="modal-input" id="ed-dns-url" value="${d.dns_update_url||''}" placeholder="https://freedns.afraid.org/..." style="font-size:12px" oninput="activeModal.data.dns_update_url=this.value"/>
+    <div style="margin-top:12px" class="checkbox-row" onclick="var c=document.getElementById('ed-checkip');c.checked=!c.checked;activeModal.data.check_ip_change=c.checked">
+      <input type="checkbox" id="ed-checkip" ${d.check_ip_change!==false?'checked':''} onclick="event.stopPropagation();activeModal.data.check_ip_change=this.checked"/>
       <span style="font-size:13px;color:#555">Monitorear cambio de IP pública</span>
     </div>
     <label class="modal-label">RDP — Puerto</label>
-    <input class="modal-input" id="ed-rdp-port" type="number" value="${d.rdp_port||3389}"/>
+    <input class="modal-input" id="ed-rdp-port" type="number" value="${d.rdp_port||3389}" oninput="activeModal.data.rdp_port=this.value"/>
     <label class="modal-label">RDP — Usuario</label>
-    <input class="modal-input" id="ed-rdp-user" value="${d.rdp_user||''}" placeholder="Administrador"/>
+    <input class="modal-input" id="ed-rdp-user" value="${d.rdp_user||''}" placeholder="Administrador" oninput="activeModal.data.rdp_user=this.value"/>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
       <div><label class="modal-label">MAC Address (WOL)</label>
-        <input class="modal-input" id="ed-mac" value="${d.mac_address||''}" placeholder="AA:BB:CC:DD:EE:FF" style="font-size:13px;padding:8px"/></div>
+        <input class="modal-input" id="ed-mac" value="${d.mac_address||''}" placeholder="AA:BB:CC:DD:EE:FF" style="font-size:13px;padding:8px" oninput="activeModal.data.mac_address=this.value"/></div>
       <div><label class="modal-label">WOL Broadcast IP</label>
-        <input class="modal-input" id="ed-wol-broadcast" value="${d.wol_broadcast||'255.255.255.255'}" placeholder="255.255.255.255" style="font-size:13px;padding:8px"/></div>
+        <input class="modal-input" id="ed-wol-broadcast" value="${d.wol_broadcast||'255.255.255.255'}" placeholder="255.255.255.255" style="font-size:13px;padding:8px" oninput="activeModal.data.wol_broadcast=this.value"/></div>
     </div>
 
     <div style="margin-top:18px;padding-top:16px;border-top:2px solid #f0f2f5">
       <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#2196F3"></span>Ubicacion Manual</div>
-      <p style="font-size:11px;color:#999;margin-bottom:12px">La ubicacion se detecta por IP pero puede ser imprecisa. Edita para corregirla.</p>
+      <p style="font-size:11px;color:#999;margin-bottom:12px">La ubicacion se detecta por IP pero puede ser imprecisa. Busca por direccion o edita manualmente.</p>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input class="modal-input" id="ed-geo-address" placeholder="Ej: Don Torcuato, Buenos Aires" style="font-size:13px;padding:8px;flex:1" oninput="activeModal.data._geoAddr=this.value" value="${d._geoAddr||''}" onkeydown="if(event.key==='Enter'){event.preventDefault();geocodeAddress()}"/>
+        <button class="modal-btn sm" onclick="geocodeAddress()" id="btn-geocode" style="white-space:nowrap">📍 Buscar</button>
+      </div>
+      <div id="geocode-result" style="font-size:12px;margin-bottom:8px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div><label style="font-size:11px;color:#999">Ciudad</label><input class="modal-input" id="ed-geo-city" value="${d.geo_city||''}" placeholder="Don Torcuato" style="font-size:13px;padding:8px"/></div>
-        <div><label style="font-size:11px;color:#999">Provincia/Region</label><input class="modal-input" id="ed-geo-region" value="${d.geo_region||''}" placeholder="Buenos Aires" style="font-size:13px;padding:8px"/></div>
-        <div><label style="font-size:11px;color:#999">Pais</label><input class="modal-input" id="ed-geo-country" value="${d.geo_country||''}" placeholder="Argentina" style="font-size:13px;padding:8px"/></div>
+        <div><label style="font-size:11px;color:#999">Ciudad</label><input class="modal-input" id="ed-geo-city" value="${d.geo_city||''}" placeholder="Don Torcuato" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_city=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Provincia/Region</label><input class="modal-input" id="ed-geo-region" value="${d.geo_region||''}" placeholder="Buenos Aires" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_region=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Pais</label><input class="modal-input" id="ed-geo-country" value="${d.geo_country||''}" placeholder="Argentina" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_country=this.value"/></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
-        <div><label style="font-size:11px;color:#999">Latitud</label><input class="modal-input" id="ed-geo-lat" type="number" step="any" value="${d.geo_lat||''}" placeholder="-34.4833" style="font-size:13px;padding:8px"/></div>
-        <div><label style="font-size:11px;color:#999">Longitud</label><input class="modal-input" id="ed-geo-lon" type="number" step="any" value="${d.geo_lon||''}" placeholder="-58.6167" style="font-size:13px;padding:8px"/></div>
+        <div><label style="font-size:11px;color:#999">Latitud</label><input class="modal-input" id="ed-geo-lat" type="number" step="any" value="${d.geo_lat||''}" placeholder="-34.4833" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_lat=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Longitud</label><input class="modal-input" id="ed-geo-lon" type="number" step="any" value="${d.geo_lon||''}" placeholder="-58.6167" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_lon=this.value"/></div>
       </div>
     </div>
 
@@ -1186,13 +1191,13 @@ function buildEditModal() {
       <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#FF9800"></span>Umbrales de Alerta</div>
       <p style="font-size:11px;color:#999;margin-bottom:12px">Recibiras una notificacion cuando se supere el umbral. Deja vacio para desactivar.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><label style="font-size:11px;color:#999">CPU (%)</label><input class="modal-input" id="ed-alert-cpu" type="number" min="0" max="100" value="${d.alert_cpu||''}" placeholder="ej: 90" style="font-size:13px;padding:8px"/></div>
-        <div><label style="font-size:11px;color:#999">RAM (%)</label><input class="modal-input" id="ed-alert-ram" type="number" min="0" max="100" value="${d.alert_ram||''}" placeholder="ej: 85" style="font-size:13px;padding:8px"/></div>
-        <div><label style="font-size:11px;color:#999">Disco (%)</label><input class="modal-input" id="ed-alert-disk" type="number" min="0" max="100" value="${d.alert_disk||''}" placeholder="ej: 92" style="font-size:13px;padding:8px"/></div>
-        <div><label style="font-size:11px;color:#999">Ping (ms)</label><input class="modal-input" id="ed-alert-ping" type="number" min="0" value="${d.alert_ping||''}" placeholder="ej: 150" style="font-size:13px;padding:8px"/></div>
+        <div><label style="font-size:11px;color:#999">CPU (%)</label><input class="modal-input" id="ed-alert-cpu" type="number" min="0" max="100" value="${d.alert_cpu||''}" placeholder="ej: 90" style="font-size:13px;padding:8px" oninput="activeModal.data.alert_cpu=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">RAM (%)</label><input class="modal-input" id="ed-alert-ram" type="number" min="0" max="100" value="${d.alert_ram||''}" placeholder="ej: 85" style="font-size:13px;padding:8px" oninput="activeModal.data.alert_ram=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Disco (%)</label><input class="modal-input" id="ed-alert-disk" type="number" min="0" max="100" value="${d.alert_disk||''}" placeholder="ej: 92" style="font-size:13px;padding:8px" oninput="activeModal.data.alert_disk=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Ping (ms)</label><input class="modal-input" id="ed-alert-ping" type="number" min="0" value="${d.alert_ping||''}" placeholder="ej: 150" style="font-size:13px;padding:8px" oninput="activeModal.data.alert_ping=this.value"/></div>
       </div>
-      <div style="margin-top:8px" class="checkbox-row" onclick="var c=document.getElementById('ed-alert-offline');c.checked=!c.checked">
-        <input type="checkbox" id="ed-alert-offline" ${d.alert_offline!==false?'checked':''} onclick="event.stopPropagation()"/>
+      <div style="margin-top:8px" class="checkbox-row" onclick="var c=document.getElementById('ed-alert-offline');c.checked=!c.checked;activeModal.data.alert_offline=c.checked">
+        <input type="checkbox" id="ed-alert-offline" ${d.alert_offline!==false?'checked':''} onclick="event.stopPropagation();activeModal.data.alert_offline=this.checked"/>
         <span style="font-size:13px;color:#555">Notificar cuando este offline</span>
       </div>
     </div>
@@ -1201,6 +1206,42 @@ function buildEditModal() {
     <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
     <button class="modal-btn danger" onclick="deleteMachine(${d.id})" style="margin-top:20px">Eliminar máquina</button>
   </div></div>`;
+}
+async function geocodeAddress() {
+  const addr = document.getElementById('ed-geo-address')?.value?.trim();
+  if (!addr) return;
+  const btn = document.getElementById('btn-geocode');
+  const result = document.getElementById('geocode-result');
+  btn.disabled = true; btn.textContent = '⏳ Buscando...';
+  result.innerHTML = '';
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(addr) + '&limit=1&addressdetails=1', {headers:{'Accept-Language':'es'}});
+    const data = await r.json();
+    if (data.length === 0) {
+      result.innerHTML = '<span style="color:#F44336">No se encontro la direccion. Intenta con otra busqueda.</span>';
+      return;
+    }
+    const p = data[0];
+    const ad = p.address || {};
+    const city = ad.city || ad.town || ad.village || ad.municipality || ad.suburb || '';
+    const region = ad.state || ad.province || '';
+    const country = ad.country || '';
+    document.getElementById('ed-geo-city').value = city;
+    document.getElementById('ed-geo-region').value = region;
+    document.getElementById('ed-geo-country').value = country;
+    document.getElementById('ed-geo-lat').value = parseFloat(p.lat).toFixed(6);
+    document.getElementById('ed-geo-lon').value = parseFloat(p.lon).toFixed(6);
+    activeModal.data.geo_city = city;
+    activeModal.data.geo_region = region;
+    activeModal.data.geo_country = country;
+    activeModal.data.geo_lat = p.lat;
+    activeModal.data.geo_lon = p.lon;
+    result.innerHTML = '<span style="color:#4CAF50">✅ ' + p.display_name + '</span>';
+  } catch (e) {
+    result.innerHTML = '<span style="color:#F44336">Error al buscar: ' + e.message + '</span>';
+  } finally {
+    btn.disabled = false; btn.textContent = '📍 Buscar';
+  }
 }
 async function saveEdit() {
   const parseAlert = (id) => { const v=document.getElementById(id)?.value; return v?parseInt(v):null; };
