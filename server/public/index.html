@@ -1003,7 +1003,10 @@ function buildModal() {
   }
 }
 
-function closeModal() { activeModal=null; resumeRefresh(); render(); }
+function closeModal() {
+  if (editMapInstance) { editMapInstance.remove(); editMapInstance=null; editMapMarker=null; }
+  activeModal=null; resumeRefresh(); render();
+}
 
 // ── DETAIL MODAL ──
 function buildDetailModal() {
@@ -1141,12 +1144,63 @@ function buildIpHistoryModal() {
 }
 
 // ── EDIT MODAL ──
+let editMapInstance = null;
+let editMapMarker = null;
 function openEditModal(id) {
   const m=machines.find(x=>x.id===id);
   if(!m)return;
   pauseRefresh();
   activeModal={type:'edit',machineId:id,data:{...m}};
   render();
+  setTimeout(initEditMap, 150);
+}
+function initEditMap() {
+  const el = document.getElementById('edit-map');
+  if (!el) return;
+  loadLeaflet(() => {
+    if (editMapInstance) { editMapInstance.remove(); editMapInstance = null; }
+    const d = activeModal?.data;
+    const lat = d?.geo_lat ? parseFloat(d.geo_lat) : -34.48;
+    const lon = d?.geo_lon ? parseFloat(d.geo_lon) : -58.62;
+    const hasCoords = d?.geo_lat && d?.geo_lon;
+    editMapInstance = L.map(el, {zoomControl: true}).setView([lat, lon], hasCoords ? 15 : 10);
+    L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {attribution:'© Google Maps', maxZoom:20}).addTo(editMapInstance);
+    if (hasCoords) {
+      editMapMarker = L.marker([lat, lon], {draggable: true}).addTo(editMapInstance);
+      editMapMarker.on('dragend', function() {
+        const p = editMapMarker.getLatLng();
+        setEditGeoFromMap(p.lat, p.lng);
+      });
+    }
+    editMapInstance.on('click', function(e) {
+      setEditGeoFromMap(e.latlng.lat, e.latlng.lng);
+    });
+  });
+}
+function setEditGeoFromMap(lat, lng) {
+  const flatLat = parseFloat(lat).toFixed(6);
+  const flatLon = parseFloat(lng).toFixed(6);
+  document.getElementById('ed-geo-lat').value = flatLat;
+  document.getElementById('ed-geo-lon').value = flatLon;
+  activeModal.data.geo_lat = flatLat;
+  activeModal.data.geo_lon = flatLon;
+  if (editMapMarker) { editMapMarker.setLatLng([lat, lng]); }
+  else { editMapMarker = L.marker([lat, lng], {draggable: true}).addTo(editMapInstance); editMapMarker.on('dragend', function() { const p = editMapMarker.getLatLng(); setEditGeoFromMap(p.lat, p.lng); }); }
+  fetch('https://photon.komoot.io/reverse?lon='+flatLon+'&lat='+flatLat+'&lang=es')
+    .then(r=>r.json()).then(rj=>{
+      const p = rj.features?.[0]?.properties || {};
+      const city = p.city||p.town||p.village||p.district||p.suburb||'';
+      const region = p.state||'';
+      const country = p.country||'';
+      document.getElementById('ed-geo-city').value = city;
+      document.getElementById('ed-geo-region').value = region;
+      document.getElementById('ed-geo-country').value = country;
+      activeModal.data.geo_city = city;
+      activeModal.data.geo_region = region;
+      activeModal.data.geo_country = country;
+      const res = document.getElementById('geocode-result');
+      if (res) res.innerHTML = '<span style="color:#4CAF50">📍 ' + [city,region,country].filter(Boolean).join(', ') + '</span>';
+    }).catch(()=>{});
 }
 function buildEditModal() {
   const d=activeModal.data;
@@ -1181,12 +1235,9 @@ function buildEditModal() {
     </div>
 
     <div style="margin-top:18px;padding-top:16px;border-top:2px solid #f0f2f5">
-      <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#2196F3"></span>Ubicacion Manual</div>
-      <p style="font-size:11px;color:#999;margin-bottom:12px">La ubicacion se detecta por IP pero puede ser imprecisa. Busca por direccion o edita manualmente.</p>
-      <div style="display:flex;gap:8px;margin-bottom:10px">
-        <input class="modal-input" id="ed-geo-address" placeholder="Ej: Don Torcuato, Buenos Aires" style="font-size:13px;padding:8px;flex:1" oninput="activeModal.data._geoAddr=this.value" value="${d._geoAddr||''}" onkeydown="if(event.key==='Enter'){event.preventDefault();geocodeAddress()}"/>
-        <button class="modal-btn sm" onclick="geocodeAddress()" id="btn-geocode" style="white-space:nowrap">📍 Buscar</button>
-      </div>
+      <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#2196F3"></span>Ubicacion</div>
+      <p style="font-size:11px;color:#999;margin-bottom:8px">Hace click en el mapa para marcar la ubicacion exacta.</p>
+      <div id="edit-map" style="width:100%;height:250px;border-radius:10px;margin-bottom:10px;background:#e0e0e0"></div>
       <div id="geocode-result" style="font-size:12px;margin-bottom:8px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
         <div><label style="font-size:11px;color:#999">Ciudad</label><input class="modal-input" id="ed-geo-city" value="${d.geo_city||''}" placeholder="Don Torcuato" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_city=this.value"/></div>
@@ -1218,78 +1269,6 @@ function buildEditModal() {
     <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
     <button class="modal-btn danger" onclick="deleteMachine(${d.id})" style="margin-top:20px">Eliminar máquina</button>
   </div></div>`;
-}
-function fillGeoFields(city, region, country, lat, lon, display) {
-  document.getElementById('ed-geo-city').value = city;
-  document.getElementById('ed-geo-region').value = region;
-  document.getElementById('ed-geo-country').value = country;
-  document.getElementById('ed-geo-lat').value = lat;
-  document.getElementById('ed-geo-lon').value = lon;
-  activeModal.data.geo_city = city;
-  activeModal.data.geo_region = region;
-  activeModal.data.geo_country = country;
-  activeModal.data.geo_lat = lat;
-  activeModal.data.geo_lon = lon;
-  document.getElementById('geocode-result').innerHTML = '<span style="color:#4CAF50">✅ ' + display + '</span>';
-}
-async function geocodeAddress() {
-  const addr = document.getElementById('ed-geo-address')?.value?.trim();
-  if (!addr) return;
-  const btn = document.getElementById('btn-geocode');
-  const result = document.getElementById('geocode-result');
-  btn.disabled = true; btn.textContent = '⏳';
-  result.innerHTML = '';
-  try {
-    const coordMatch = addr.match(/^[^\d]*(-?\d+[.,]\d+)\s*[,;\s]\s*(-?\d+[.,]\d+)\s*$/);
-    if (coordMatch) {
-      const lat = parseFloat(coordMatch[1].replace(',','.')).toFixed(6);
-      const lon = parseFloat(coordMatch[2].replace(',','.')).toFixed(6);
-      const rr = await fetch('https://photon.komoot.io/reverse?lon='+lon+'&lat='+lat+'&lang=es');
-      const rj = await rr.json();
-      const p = rj.features?.[0]?.properties || {};
-      fillGeoFields(p.city||p.town||p.village||p.district||'', p.state||'', p.country||'', lat, lon, [p.name,p.city||p.town||p.village,p.state,p.country].filter(Boolean).join(', ')||lat+', '+lon);
-      return;
-    }
-    const clean = addr.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
-    async function tryDatosGobAr(q) {
-      const r = await fetch('https://apis.datos.gob.ar/georef/api/direcciones?' + q + '&max=5');
-      const rj = await r.json();
-      const dirs = rj.direcciones || [];
-      if (dirs.length > 0 && dirs[0].ubicacion?.lat) {
-        const d = dirs[0];
-        fillGeoFields(d.localidad_censal?.nombre||d.departamento?.nombre||'', d.provincia?.nombre||'', 'Argentina', parseFloat(d.ubicacion.lat).toFixed(6), parseFloat(d.ubicacion.lon).toFixed(6), d.nomenclatura + ', ' + (d.localidad_censal?.nombre||'') + ', ' + (d.provincia?.nombre||''));
-        return true;
-      }
-      return false;
-    }
-    if (await tryDatosGobAr('direccion=' + encodeURIComponent(clean))) return;
-    const splitMatch = clean.match(/^(.+?\s+\d+)\s*[,.]?\s+(.+)$/);
-    if (splitMatch) {
-      const calle = splitMatch[1].trim();
-      const resto = splitMatch[2].trim();
-      const parts = resto.split(/\s*,\s*/);
-      const localidad = parts[0];
-      const provincia = parts[1] || '';
-      let q = 'direccion=' + encodeURIComponent(calle) + '&localidad=' + encodeURIComponent(localidad);
-      if (provincia) q += '&provincia=' + encodeURIComponent(provincia);
-      if (await tryDatosGobAr(q)) return;
-    }
-    const r2 = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean + (clean.toLowerCase().includes('argentin')?'':', argentina')) + '&limit=5&lang=es');
-    const rj2 = await r2.json();
-    const features = rj2.features || [];
-    if (features.length === 0) {
-      result.innerHTML = '<span style="color:#F44336">No se encontro la direccion.</span>';
-      return;
-    }
-    const f = features[0];
-    const p = f.properties || {};
-    const coords = f.geometry?.coordinates || [];
-    fillGeoFields(p.city||p.town||p.village||p.district||'', p.state||'', p.country||'', parseFloat(coords[1]).toFixed(6), parseFloat(coords[0]).toFixed(6), [p.name,p.street,p.city||p.town||p.village,p.state,p.country].filter(Boolean).join(', '));
-  } catch (e) {
-    result.innerHTML = '<span style="color:#F44336">Error: ' + e.message + '</span>';
-  } finally {
-    btn.disabled = false; btn.textContent = '📍 Buscar';
-  }
 }
 async function saveEdit() {
   const parseAlert = (id) => { const v=document.getElementById(id)?.value; return v?parseInt(v):null; };
