@@ -2195,6 +2195,41 @@ app.delete('/api/url-monitors/:id', authenticateToken, async (req, res) => {
 });
 
 // URL monitor checker (runs every 60 seconds)
+function followRedirects(urlStr, method, timeoutMs, maxRedirects) {
+  const https = require('https');
+  const http = require('http');
+  return new Promise((resolve, reject) => {
+    let redirects = 0;
+    function doRequest(url) {
+      const urlObj = new URL(url);
+      const client = urlObj.protocol === 'https:' ? https : http;
+      const opts = {
+        method: method || 'GET',
+        timeout: timeoutMs || 10000,
+        headers: { 'User-Agent': 'ServerEyes/1.0 (URL Monitor)' },
+        rejectAuthorized: false
+      };
+      const timer = setTimeout(() => reject(new Error('Timeout')), timeoutMs || 10000);
+      const r = client.request(urlObj, opts, (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirects < (maxRedirects || 5)) {
+          redirects++;
+          let next = res.headers.location;
+          if (next.startsWith('/')) next = urlObj.protocol + '//' + urlObj.host + next;
+          res.resume();
+          doRequest(next);
+          return;
+        }
+        clearTimeout(timer);
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => resolve({ status: res.statusCode, redirects }));
+      });
+      r.on('error', (e) => { clearTimeout(timer); reject(e); });
+      r.end();
+    }
+    doRequest(urlStr);
+  });
+}
 setInterval(async () => {
   try {
     const monitors = await pool.query(
@@ -2203,36 +2238,23 @@ setInterval(async () => {
        WHERE um.is_active = true
        AND (um.last_check IS NULL OR um.last_check < NOW() - (um.interval_seconds || ' seconds')::INTERVAL)`
     );
-    const https = require('https');
-    const http = require('http');
     for (const mon of monitors.rows) {
       const startTime = Date.now();
       try {
-        const urlObj = new URL(mon.url);
-        const client = urlObj.protocol === 'https:' ? https : http;
-        const result = await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('Timeout')), mon.timeout_ms || 10000);
-          const r = client.request(urlObj, { method: mon.method || 'GET', timeout: mon.timeout_ms || 10000 }, (res) => {
-            clearTimeout(timer);
-            let body = '';
-            res.on('data', c => body += c);
-            res.on('end', () => resolve({ status: res.statusCode, ms: Date.now() - startTime }));
-          });
-          r.on('error', (e) => { clearTimeout(timer); reject(e); });
-          r.end();
-        });
-        const isUp = result.status === (mon.expected_status || 200);
+        const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, 5);
+        const expectedStatus = mon.expected_status || 200;
+        const isUp = result.status >= 200 && result.status < 400;
         const wasDown = !mon.is_up;
         await pool.query(
           `UPDATE url_monitors SET last_status=$1, last_response_ms=$2, last_check=NOW(), last_error=NULL,
            is_up=$3, down_since=CASE WHEN $3=true THEN NULL ELSE COALESCE(down_since, NOW()) END
            WHERE id=$4`,
-          [result.status, result.ms, isUp, mon.id]
+          [result.status, Date.now() - startTime, isUp, mon.id]
         );
         if (wasDown && isUp && mon.notify_down) {
-          sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${result.ms}ms)`, { type: 'url_up' });
+          sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${Date.now() - startTime}ms)`, { type: 'url_up' });
         } else if (!isUp && mon.is_up && mon.notify_down) {
-          sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url} respondio ${result.status} (esperado: ${mon.expected_status})`, { type: 'url_down' });
+          sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url} respondio ${result.status}`, { type: 'url_down' });
         }
       } catch (err) {
         const wasUp = mon.is_up;
