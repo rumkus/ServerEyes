@@ -448,20 +448,32 @@ export default function App() {
         return;
       }
       const clean = q.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
-      const r = await fetch('https://apis.datos.gob.ar/georef/api/direcciones?direccion=' + encodeURIComponent(clean) + '&max=5');
-      const rj = await r.json();
-      const dirs = rj.direcciones || [];
-      if (dirs.length > 0 && dirs[0].ubicacion?.lat) {
-        const d = dirs[0];
+      const fillFromDatos = (d: any) => {
         setEditGeoCity(d.localidad_censal?.nombre||d.departamento?.nombre||'');
         setEditGeoRegion(d.provincia?.nombre||'');
         setEditGeoCountry('Argentina');
         setEditGeoLat(parseFloat(d.ubicacion.lat).toFixed(6));
         setEditGeoLon(parseFloat(d.ubicacion.lon).toFixed(6));
-        setGeoSearchResult(d.nomenclatura + ', ' + (d.provincia?.nombre||''));
-        return;
+        setGeoSearchResult(d.nomenclatura + ', ' + (d.localidad_censal?.nombre||'') + ', ' + (d.provincia?.nombre||''));
+      };
+      const tryDatos = async (qs: string) => {
+        const r = await fetch('https://apis.datos.gob.ar/georef/api/direcciones?' + qs + '&max=5');
+        const rj = await r.json();
+        const dirs = rj.direcciones || [];
+        if (dirs.length > 0 && dirs[0].ubicacion?.lat) { fillFromDatos(dirs[0]); return true; }
+        return false;
+      };
+      if (await tryDatos('direccion=' + encodeURIComponent(clean))) return;
+      const splitMatch = clean.match(/^(.+?\s+\d+)\s*[,.]?\s+(.+)$/);
+      if (splitMatch) {
+        const calle = splitMatch[1].trim();
+        const resto = splitMatch[2].trim();
+        const parts = resto.split(/\s*,\s*/);
+        let qs = 'direccion=' + encodeURIComponent(calle) + '&localidad=' + encodeURIComponent(parts[0]);
+        if (parts[1]) qs += '&provincia=' + encodeURIComponent(parts[1]);
+        if (await tryDatos(qs)) return;
       }
-      const r2 = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean + (clean.toLowerCase().includes('argentin')?'':' argentina')) + '&limit=5&lang=es');
+      const r2 = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean + (clean.toLowerCase().includes('argentin')?'':', argentina')) + '&limit=5&lang=es');
       const rj2 = await r2.json();
       const features = rj2.features || [];
       if (features.length === 0) { setGeoSearchResult('No se encontro la direccion.'); return; }
