@@ -348,23 +348,33 @@ function renderLogin(err) {
 }
 
 async function doLogin() {
-  const email = document.getElementById('le').value.trim();
-  const pass  = document.getElementById('lp').value;
-  if (!email||!pass) { renderLogin('Completá todos los campos'); return; }
-  const r = await api('/api/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
-  if (r.ok && r.data.token) {
-    token = r.data.token;
-    localStorage.setItem('se_token', token);
-    startDashboard();
-  } else {
-    renderLogin(r.data?.error || 'Error de autenticación');
+  try {
+    const le = document.getElementById('le');
+    const lp = document.getElementById('lp');
+    if (!le || !lp) return;
+    const email = le.value.trim();
+    const pass = lp.value;
+    if (!email||!pass) { renderLogin('Completa todos los campos'); return; }
+    const r = await api('/api/auth/login', {method:'POST', body:JSON.stringify({email, password:pass})});
+    if (r.ok && r.data.token) {
+      token = r.data.token;
+      localStorage.setItem('se_token', token);
+      render();
+      startDashboard();
+    } else {
+      renderLogin(r.data?.error || 'Error de autenticacion');
+    }
+  } catch(e) {
+    renderLogin('Error: ' + e.message);
   }
 }
 
 function logout() {
   token = null;
   localStorage.removeItem('se_token');
-  if (refreshInterval) clearInterval(refreshInterval);
+  if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+  activeModal = null;
+  machines = [];
   renderLogin();
 }
 
