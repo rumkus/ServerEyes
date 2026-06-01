@@ -1234,26 +1234,24 @@ async function geocodeAddress() {
     if (coordMatch) {
       const lat = parseFloat(coordMatch[1].replace(',','.')).toFixed(6);
       const lon = parseFloat(coordMatch[2].replace(',','.')).toFixed(6);
-      const rr = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+lat+'&lon='+lon+'&addressdetails=1', {headers:{'Accept-Language':'es'}});
-      const p = await rr.json();
-      const ad = p.address || {};
-      fillGeoFields(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'', ad.state||ad.province||'', ad.country||'', lat, lon, p.display_name||lat+', '+lon);
+      const rr = await fetch('https://photon.komoot.io/reverse?lon='+lon+'&lat='+lat+'&lang=es');
+      const rj = await rr.json();
+      const p = rj.features?.[0]?.properties || {};
+      fillGeoFields(p.city||p.town||p.village||p.district||'', p.state||'', p.country||'', lat, lon, [p.name,p.city||p.town||p.village,p.state,p.country].filter(Boolean).join(', ')||lat+', '+lon);
       return;
     }
     const clean = addr.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
-    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1&countrycodes=ar', {headers:{'Accept-Language':'es'}});
-    let data = await r.json();
-    if (data.length === 0) {
-      const r2 = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1', {headers:{'Accept-Language':'es'}});
-      data = await r2.json();
-    }
-    if (data.length === 0) {
+    const r = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean) + '&limit=5&lang=es');
+    const rj = await r.json();
+    const features = rj.features || [];
+    if (features.length === 0) {
       result.innerHTML = '<span style="color:#F44336">No se encontro. Proba simplificando la direccion (ej: "Don Torcuato, Buenos Aires")</span>';
       return;
     }
-    const p = data[0];
-    const ad = p.address || {};
-    fillGeoFields(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'', ad.state||ad.province||'', ad.country||'', parseFloat(p.lat).toFixed(6), parseFloat(p.lon).toFixed(6), p.display_name);
+    const f = features[0];
+    const p = f.properties || {};
+    const coords = f.geometry?.coordinates || [];
+    fillGeoFields(p.city||p.town||p.village||p.district||'', p.state||'', p.country||'', parseFloat(coords[1]).toFixed(6), parseFloat(coords[0]).toFixed(6), [p.name,p.street,p.city||p.town||p.village,p.state,p.country].filter(Boolean).join(', '));
   } catch (e) {
     result.innerHTML = '<span style="color:#F44336">Error: ' + e.message + '</span>';
   } finally {

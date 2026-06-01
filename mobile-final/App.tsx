@@ -437,32 +437,30 @@ export default function App() {
       if (coordMatch) {
         const lat = parseFloat(coordMatch[1].replace(',','.')).toFixed(6);
         const lon = parseFloat(coordMatch[2].replace(',','.')).toFixed(6);
-        const rr = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+lat+'&lon='+lon+'&addressdetails=1', {headers:{'Accept-Language':'es'}});
-        const p = await rr.json();
-        const ad = p.address || {};
-        setEditGeoCity(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'');
-        setEditGeoRegion(ad.state||ad.province||'');
-        setEditGeoCountry(ad.country||'');
+        const rr = await fetch('https://photon.komoot.io/reverse?lon='+lon+'&lat='+lat+'&lang=es');
+        const rj = await rr.json();
+        const p = rj.features?.[0]?.properties || {};
+        setEditGeoCity(p.city||p.town||p.village||p.district||'');
+        setEditGeoRegion(p.state||'');
+        setEditGeoCountry(p.country||'');
         setEditGeoLat(lat); setEditGeoLon(lon);
-        setGeoSearchResult(p.display_name||lat+', '+lon);
+        setGeoSearchResult([p.name,p.city||p.town||p.village,p.state,p.country].filter(Boolean).join(', ')||lat+', '+lon);
         return;
       }
       const clean = q.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
-      let r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1&countrycodes=ar', {headers:{'Accept-Language':'es'}});
-      let data = await r.json();
-      if (data.length === 0) {
-        r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(clean) + '&limit=5&addressdetails=1', {headers:{'Accept-Language':'es'}});
-        data = await r.json();
-      }
-      if (data.length === 0) { setGeoSearchResult('No se encontro. Proba simplificando (ej: "Don Torcuato, Buenos Aires")'); return; }
-      const p = data[0];
-      const ad = p.address || {};
-      setEditGeoCity(ad.city||ad.town||ad.village||ad.municipality||ad.suburb||'');
-      setEditGeoRegion(ad.state||ad.province||'');
-      setEditGeoCountry(ad.country||'');
-      setEditGeoLat(parseFloat(p.lat).toFixed(6));
-      setEditGeoLon(parseFloat(p.lon).toFixed(6));
-      setGeoSearchResult(p.display_name);
+      const r = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean) + '&limit=5&lang=es');
+      const rj = await r.json();
+      const features = rj.features || [];
+      if (features.length === 0) { setGeoSearchResult('No se encontro. Proba simplificando (ej: "Don Torcuato, Buenos Aires")'); return; }
+      const f = features[0];
+      const p = f.properties || {};
+      const coords = f.geometry?.coordinates || [];
+      setEditGeoCity(p.city||p.town||p.village||p.district||'');
+      setEditGeoRegion(p.state||'');
+      setEditGeoCountry(p.country||'');
+      setEditGeoLat(parseFloat(coords[1]).toFixed(6));
+      setEditGeoLon(parseFloat(coords[0]).toFixed(6));
+      setGeoSearchResult([p.name,p.street,p.city||p.town||p.village,p.state,p.country].filter(Boolean).join(', '));
     } catch (e: any) { setGeoSearchResult('Error: ' + e.message); }
     finally { setGeoSearching(false); }
   };
