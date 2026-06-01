@@ -1996,6 +1996,40 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
   }
 });
 
+// Historial de caidas (outages)
+app.get('/api/machines/:id/outages', authenticateToken, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    const events = await pool.query(
+      `SELECT status, timestamp FROM uptime_log
+       WHERE machine_id = $1 AND timestamp > NOW() - INTERVAL '1 day' * $2
+       ORDER BY timestamp ASC`,
+      [req.params.id, days]
+    );
+    const outages = [];
+    let offlineStart = null;
+    for (const e of events.rows) {
+      if (e.status === 'offline') {
+        offlineStart = e.timestamp;
+      } else if (e.status === 'online' && offlineStart) {
+        const dur = Math.round((new Date(e.timestamp).getTime() - new Date(offlineStart).getTime()) / 60000);
+        outages.push({ start: offlineStart, end: e.timestamp, duration_min: dur });
+        offlineStart = null;
+      }
+    }
+    if (offlineStart) {
+      const dur = Math.round((Date.now() - new Date(offlineStart).getTime()) / 60000);
+      outages.push({ start: offlineStart, end: null, duration_min: dur, ongoing: true });
+    }
+    res.json({ outages: outages.reverse(), total: outages.length, days });
+  } catch (error) {
+    console.error('Error en outages:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // Endpoint para cambios de IP no vistos
 app.get('/api/ip-changes', authenticateToken, async (req, res) => {
   try {

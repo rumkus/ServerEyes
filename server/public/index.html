@@ -984,6 +984,7 @@ function buildModal() {
   switch(activeModal.type) {
     case 'detail':   return buildDetailModal();
     case 'uptime':   return buildUptimeModal();
+    case 'outages':  return buildOutagesModal();
     case 'ips':      return buildIpHistoryModal();
     case 'edit':     return buildEditModal();
     case 'disks':    return buildDiskModal();
@@ -1108,12 +1109,83 @@ function buildUptimeModal() {
     ${data.map(day=>{
       const c=day.percentage>=95?'#4CAF50':day.percentage>=80?'#FF9800':'#F44336';
       const dateStr=new Date(day.date+'T12:00:00').toLocaleDateString('es',{weekday:'short',day:'numeric',month:'short'});
-      return `<div class="uptime-row">
+      return `<div class="uptime-row" style="cursor:pointer" onclick="openOutages(${activeModal.machineId})" title="Ver caidas">
         <span class="uptime-day">${dateStr}</span>
         <div class="uptime-bg"><div class="uptime-fg" style="width:${day.percentage}%;background:${c}"></div></div>
         <span class="uptime-pct" style="color:${c}">${day.percentage}%</span>
       </div>`;
-    }).join('')}`}
+    }).join('')}
+    <button class="modal-btn sm" onclick="openOutages(${activeModal.machineId})" style="margin-top:14px;width:100%">🔴 Ver historial de caidas</button>
+    `}
+  </div></div>`;
+}
+
+function openOutages(id) {
+  activeModal={type:'outages',machineId:id,data:null,days:30};
+  render();
+  loadOutages(id,30);
+}
+async function loadOutages(id,days) {
+  const r=await api('/api/machines/'+id+'/outages?days='+days);
+  if(r.ok){activeModal.data=r.data;render();}
+}
+function fmtDuration(min) {
+  if (min < 1) return '<1 min';
+  if (min < 60) return min + ' min';
+  const h = Math.floor(min/60);
+  const m = min % 60;
+  if (h < 24) return h + 'h ' + (m>0?m+'m':'');
+  const d = Math.floor(h/24);
+  const rh = h % 24;
+  return d + 'd ' + (rh>0?rh+'h':'');
+}
+function buildOutagesModal() {
+  const m=machines.find(x=>x.id===activeModal.machineId);
+  const d=activeModal.data;
+  const outages=d?.outages||[];
+  const totalDown=outages.reduce((a,o)=>a+o.duration_min,0);
+  return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-header"><h2>🔴 Caidas — ${m?.machine_name||''}</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
+    <div class="day-tabs">
+      ${[7,14,30,90].map(dd=>`<button class="day-tab ${activeModal.days===dd?'active':''}" onclick="activeModal.days=${dd};loadOutages(${activeModal.machineId},${dd})">${dd} días</button>`).join('')}
+    </div>
+    ${!d?'<p style="color:#999;text-align:center;padding:20px">Cargando...</p>':`
+    <div style="display:flex;gap:16px;justify-content:center;margin:16px 0;flex-wrap:wrap">
+      <div style="text-align:center;padding:12px 20px;background:var(--bg3,#f8f9fa);border-radius:10px">
+        <div style="font-size:28px;font-weight:800;color:#F44336">${outages.length}</div>
+        <div style="font-size:12px;color:#999">Caidas</div>
+      </div>
+      <div style="text-align:center;padding:12px 20px;background:var(--bg3,#f8f9fa);border-radius:10px">
+        <div style="font-size:28px;font-weight:800;color:#FF9800">${fmtDuration(totalDown)}</div>
+        <div style="font-size:12px;color:#999">Tiempo total offline</div>
+      </div>
+      <div style="text-align:center;padding:12px 20px;background:var(--bg3,#f8f9fa);border-radius:10px">
+        <div style="font-size:28px;font-weight:800;color:#2196F3">${outages.length>0?fmtDuration(Math.round(totalDown/outages.length)):'—'}</div>
+        <div style="font-size:12px;color:#999">Duracion promedio</div>
+      </div>
+    </div>
+    ${outages.length===0?'<p style="text-align:center;color:#4CAF50;padding:20px;font-weight:600">✅ Sin caidas en los ultimos '+d.days+' dias</p>':`
+    <div style="max-height:400px;overflow-y:auto">
+    ${outages.map((o,i)=>{
+      const start=new Date(o.start);
+      const durColor=o.duration_min>60?'#F44336':o.duration_min>10?'#FF9800':'#FFC107';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:12px;margin-bottom:6px;background:var(--bg3,#f8f9fa);border-radius:10px;border-left:4px solid ${durColor}">
+        <div style="flex-shrink:0;width:36px;height:36px;border-radius:50%;background:${durColor}20;display:flex;align-items:center;justify-content:center;font-size:16px">${o.ongoing?'⚡':'🔴'}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:700;color:var(--text,#333)">${start.toLocaleDateString('es',{weekday:'long',day:'numeric',month:'long'})}</div>
+          <div style="font-size:12px;color:#999;margin-top:2px">
+            ${start.toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}${o.end?' → '+new Date(o.end).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'}):' → <span style="color:#F44336;font-weight:700">AHORA</span>'}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:16px;font-weight:800;color:${durColor}">${fmtDuration(o.duration_min)}</div>
+          <div style="font-size:10px;color:#999">${o.ongoing?'en curso':'offline'}</div>
+        </div>
+      </div>`;
+    }).join('')}
+    </div>`}
+    `}
   </div></div>`;
 }
 

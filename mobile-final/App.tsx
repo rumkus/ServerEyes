@@ -121,6 +121,9 @@ export default function App() {
   const [uptimeData, setUptimeData] = useState<any[]>([]);
   const [uptimeDays, setUptimeDays] = useState(7);
   const [uptimeLoading, setUptimeLoading] = useState(false);
+  const [outagesMachine, setOutagesMachine] = useState<any>(null);
+  const [outagesData, setOutagesData] = useState<any>(null);
+  const [outagesDays, setOutagesDays] = useState(30);
   const [viewMode, setViewMode] = useState<'all' | 'groups'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showGroupPicker, setShowGroupPicker] = useState<any>(null);
@@ -200,6 +203,7 @@ export default function App() {
     if (showAdd) { setShowAdd(false); setNewKey(''); return true; }
     if (editingMachine) { setEditingMachine(null); return true; }
     if (showGroupPicker) { setShowGroupPicker(null); return true; }
+    if (outagesMachine) { setOutagesMachine(null); return true; }
     if (uptimeMachine) { setUptimeMachine(null); return true; }
     if (metricsMachine) { setMetricsMachine(null); return true; }
     if (ipHistoryMachine) { setIpHistoryMachine(null); return true; }
@@ -525,6 +529,29 @@ export default function App() {
     setUptimeMachine(machine);
     setUptimeDays(7);
     loadUptime(machine.id, 7);
+  };
+
+  const loadOutages = async (machineId: number, days: number) => {
+    try {
+      const res = await apiRequest(`/api/machines/${machineId}/outages?days=${days}`, {}, token);
+      if (res.ok) setOutagesData(res.data);
+    } catch {}
+  };
+  const openOutages = (machine: any) => {
+    setOutagesMachine(machine);
+    setOutagesDays(30);
+    setOutagesData(null);
+    loadOutages(machine.id, 30);
+  };
+  const fmtDuration = (min: number) => {
+    if (min < 1) return '<1 min';
+    if (min < 60) return min + ' min';
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (h < 24) return h + 'h ' + (m > 0 ? m + 'm' : '');
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return d + 'd ' + (rh > 0 ? rh + 'h' : '');
   };
 
   const loadIpHistory = async (machineId: number) => {
@@ -1051,6 +1078,77 @@ export default function App() {
   }
 
   // UPTIME
+  if (outagesMachine) {
+    const outages = outagesData?.outages || [];
+    const totalDown = outages.reduce((a: number, o: any) => a + o.duration_min, 0);
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Historial de caidas" subtitle={outagesMachine.machine_name} />
+        <View style={{paddingHorizontal: 16, paddingTop: 8}}>
+          <View style={{flexDirection: 'row', marginTop: 12}}>
+            {[7, 14, 30, 90].map(d => (
+              <TouchableOpacity key={d}
+                onPress={() => { setOutagesDays(d); loadOutages(outagesMachine.id, d); }}
+                style={{backgroundColor: outagesDays === d ? '#ff5252' : '#2a2a4a', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6, marginRight: 8}}>
+                <Text style={{color: outagesDays === d ? '#fff' : '#888', fontWeight: '600', fontSize: 13}}>{d} dias</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        {!outagesData ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+            <ActivityIndicator size="large" color="#ff5252" />
+          </View>
+        ) : (
+          <ScrollView style={{flex: 1, padding: 16}}>
+            <View style={{flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20}}>
+              <View style={{alignItems: 'center', backgroundColor: '#16213e', borderRadius: 12, padding: 16, flex: 1, marginRight: 8}}>
+                <Text style={{fontSize: 32, fontWeight: '800', color: '#ff5252'}}>{outages.length}</Text>
+                <Text style={{color: '#888', fontSize: 11}}>Caidas</Text>
+              </View>
+              <View style={{alignItems: 'center', backgroundColor: '#16213e', borderRadius: 12, padding: 16, flex: 1, marginRight: 8}}>
+                <Text style={{fontSize: 20, fontWeight: '800', color: '#ff9800'}}>{fmtDuration(totalDown)}</Text>
+                <Text style={{color: '#888', fontSize: 11}}>Total offline</Text>
+              </View>
+              <View style={{alignItems: 'center', backgroundColor: '#16213e', borderRadius: 12, padding: 16, flex: 1}}>
+                <Text style={{fontSize: 20, fontWeight: '800', color: '#00d4ff'}}>{outages.length > 0 ? fmtDuration(Math.round(totalDown / outages.length)) : '—'}</Text>
+                <Text style={{color: '#888', fontSize: 11}}>Promedio</Text>
+              </View>
+            </View>
+            {outages.length === 0 ? (
+              <View style={{alignItems: 'center', padding: 30}}>
+                <Text style={{fontSize: 40, marginBottom: 8}}>✅</Text>
+                <Text style={{color: '#00e676', fontSize: 16, fontWeight: '700'}}>Sin caidas en los ultimos {outagesDays} dias</Text>
+              </View>
+            ) : outages.map((o: any, i: number) => {
+              const start = new Date(o.start);
+              const durColor = o.duration_min > 60 ? '#ff5252' : o.duration_min > 10 ? '#ff9800' : '#FFC107';
+              return (
+                <View key={i} style={{flexDirection: 'row', alignItems: 'center', backgroundColor: '#16213e', borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 4, borderLeftColor: durColor}}>
+                  <Text style={{fontSize: 22, marginRight: 12}}>{o.ongoing ? '⚡' : '🔴'}</Text>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: '#ddd', fontSize: 14, fontWeight: '700'}}>
+                      {start.toLocaleDateString('es', {weekday: 'long', day: 'numeric', month: 'long'})}
+                    </Text>
+                    <Text style={{color: '#888', fontSize: 12, marginTop: 2}}>
+                      {start.toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit'})}
+                      {o.end ? ' → ' + new Date(o.end).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit'}) : ' → AHORA'}
+                    </Text>
+                  </View>
+                  <View style={{alignItems: 'flex-end'}}>
+                    <Text style={{color: durColor, fontSize: 18, fontWeight: '800'}}>{fmtDuration(o.duration_min)}</Text>
+                    <Text style={{color: '#666', fontSize: 10}}>{o.ongoing ? 'en curso' : 'offline'}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
   if (uptimeMachine) {
     const avgUptime = uptimeData.length > 0
       ? Math.round(uptimeData.reduce((a: number, d: any) => a + d.percentage, 0) / uptimeData.length)
@@ -1099,7 +1197,12 @@ export default function App() {
               );
             })}
 
-            <View style={{marginTop: 20, backgroundColor: '#16213e', borderRadius: 12, padding: 16}}>
+            <TouchableOpacity onPress={() => openOutages(uptimeMachine)}
+              style={{marginTop: 20, backgroundColor: '#ff525220', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#ff525250'}}>
+              <Text style={{color: '#ff5252', fontSize: 15, fontWeight: '700'}}>🔴 Ver historial de caidas</Text>
+            </TouchableOpacity>
+
+            <View style={{marginTop: 16, backgroundColor: '#16213e', borderRadius: 12, padding: 16}}>
               <Text style={{color: '#888', fontSize: 12, marginBottom: 8}}>Detalle:</Text>
               {uptimeData.slice(-7).reverse().map((day: any, i: number) => (
                 <View key={i} style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4}}>
