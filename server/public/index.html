@@ -369,14 +369,13 @@ function logout() {
 }
 
 // ── RENDER MAIN ──
-let _renderLock = false;
-function render(force) {
+function pauseRefresh() { if(refreshInterval){clearInterval(refreshInterval);refreshInterval=null;} }
+function resumeRefresh() { if(!refreshInterval){refreshInterval=setInterval(()=>{loadMachines();loadUrlMonitors(true);},10000);} }
+function render() {
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
-  if (!force && _renderLock) return;
   el.innerHTML = buildLayout();
   attachEvents();
-  _renderLock = activeModal && (activeModal.type === 'edit' || activeModal.type === 'addurl' || activeModal.type === 'addmaintenance');
   if (activeNav === 'noc') {
     setTimeout(initInlineMap, 120);
     setTimeout(loadNocTrends, 200);
@@ -994,7 +993,7 @@ function buildModal() {
   }
 }
 
-function closeModal() { activeModal=null; _renderLock=false; render(); }
+function closeModal() { activeModal=null; resumeRefresh(); render(); }
 
 // ── DETAIL MODAL ──
 function buildDetailModal() {
@@ -1135,6 +1134,7 @@ function buildIpHistoryModal() {
 function openEditModal(id) {
   const m=machines.find(x=>x.id===id);
   if(!m)return;
+  pauseRefresh();
   activeModal={type:'edit',machineId:id,data:{...m}};
   render();
 }
@@ -1184,8 +1184,8 @@ function buildEditModal() {
         <div><label style="font-size:11px;color:#999">Pais</label><input class="modal-input" id="ed-geo-country" value="${d.geo_country||''}" placeholder="Argentina" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_country=this.value"/></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
-        <div><label style="font-size:11px;color:#999">Latitud</label><input class="modal-input" id="ed-geo-lat" type="number" step="any" value="${d.geo_lat||''}" placeholder="-34.4833" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_lat=this.value"/></div>
-        <div><label style="font-size:11px;color:#999">Longitud</label><input class="modal-input" id="ed-geo-lon" type="number" step="any" value="${d.geo_lon||''}" placeholder="-58.6167" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_lon=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Latitud</label><input class="modal-input" id="ed-geo-lat" type="text" inputmode="decimal" value="${d.geo_lat||''}" placeholder="-34.4833" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_lat=this.value"/></div>
+        <div><label style="font-size:11px;color:#999">Longitud</label><input class="modal-input" id="ed-geo-lon" type="text" inputmode="decimal" value="${d.geo_lon||''}" placeholder="-58.6167" style="font-size:13px;padding:8px" oninput="activeModal.data.geo_lon=this.value"/></div>
       </div>
     </div>
 
@@ -1782,6 +1782,7 @@ function buildUrlsView() {
 }
 
 function openAddUrlMonitor() {
+  pauseRefresh();
   activeModal = { type: 'addurl' };
   render();
 }
@@ -1844,6 +1845,7 @@ function buildMwCard(w, bg, color) {
   </div>`;
 }
 function openAddMaintenance() {
+  pauseRefresh();
   activeModal = { type: 'addmaintenance' };
   render();
 }
