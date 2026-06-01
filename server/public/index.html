@@ -1998,20 +1998,21 @@ function buildAddUrlModal() {
   return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
   <div class="modal-box">
     <div class="modal-header"><h2>🌐 Agregar Monitor URL</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
-    <label class="modal-label">URL</label>
+    <label class="modal-label">URL del sitio</label>
     <input class="modal-input" id="um-url" placeholder="https://ejemplo.com"/>
-    <label class="modal-label">Nombre (opcional)</label>
+    <label class="modal-label">Nombre (para identificarlo)</label>
     <input class="modal-input" id="um-name" placeholder="Mi sitio web"/>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-      <div><label class="modal-label">Método</label>
-        <select class="modal-input" id="um-method"><option>GET</option><option>HEAD</option><option>POST</option></select></div>
-      <div><label class="modal-label">Status esperado</label>
-        <input class="modal-input" id="um-status" type="number" value="200"/></div>
-      <div><label class="modal-label">Timeout (ms)</label>
-        <input class="modal-input" id="um-timeout" type="number" value="10000"/></div>
-      <div><label class="modal-label">Intervalo (seg)</label>
-        <input class="modal-input" id="um-interval" type="number" value="300"/></div>
+    <label class="modal-label">Verificar cada</label>
+    <div class="chip-row" style="margin-bottom:12px">
+      <button class="chip" onclick="document.getElementById('um-interval').value=60" style="font-size:12px">1 min</button>
+      <button class="chip" onclick="document.getElementById('um-interval').value=300" style="font-size:12px;background:#2196F3;color:#fff">5 min</button>
+      <button class="chip" onclick="document.getElementById('um-interval').value=600" style="font-size:12px">10 min</button>
+      <button class="chip" onclick="document.getElementById('um-interval').value=1800" style="font-size:12px">30 min</button>
     </div>
+    <input type="hidden" id="um-interval" value="300"/>
+    <input type="hidden" id="um-method" value="GET"/>
+    <input type="hidden" id="um-status" value="200"/>
+    <input type="hidden" id="um-timeout" value="10000"/>
     <button class="modal-btn" onclick="saveUrlMonitor()">Agregar monitor</button>
     <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
   </div></div>`;

@@ -687,43 +687,24 @@ export default function App() {
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Agregar Monitor URL" />
         <ScrollView contentContainerStyle={{padding: 24}}>
-          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>URL:</Text>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>URL del sitio:</Text>
           <TextInput style={s.input} value={urlUrl} onChangeText={setUrlUrl} placeholder="https://ejemplo.com" placeholderTextColor="#555" autoCapitalize="none" keyboardType="url" />
-          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Nombre (opcional):</Text>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Nombre (para identificarlo):</Text>
           <TextInput style={s.input} value={urlName} onChangeText={setUrlName} placeholder="Mi sitio web" placeholderTextColor="#555" />
-          <View style={{flexDirection: 'row', marginBottom: 8}}>
-            <View style={{flex: 1, marginRight: 6}}>
-              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Metodo</Text>
-              <View style={{flexDirection: 'row'}}>
-                {['GET', 'HEAD', 'POST'].map(m => (
-                  <TouchableOpacity key={m} onPress={() => setUrlMethod(m)}
-                    style={{backgroundColor: urlMethod === m ? '#00d4ff' : '#1a2a3a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginRight: 6}}>
-                    <Text style={{color: urlMethod === m ? '#0a1628' : '#607d8b', fontWeight: '600', fontSize: 13}}>{m}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-            <View style={{flex: 1}}>
-              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Status esperado</Text>
-              <TextInput style={[s.input, {marginBottom: 0}]} value={urlExpectedStatus} onChangeText={setUrlExpectedStatus} keyboardType="number-pad" placeholderTextColor="#555" />
-            </View>
-          </View>
-          <View style={{flexDirection: 'row', marginBottom: 12}}>
-            <View style={{flex: 1, marginRight: 6}}>
-              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Timeout (ms)</Text>
-              <TextInput style={[s.input, {marginBottom: 0}]} value={urlTimeout} onChangeText={setUrlTimeout} keyboardType="number-pad" placeholderTextColor="#555" />
-            </View>
-            <View style={{flex: 1}}>
-              <Text style={{color: '#888', fontSize: 11, marginBottom: 3}}>Intervalo (seg)</Text>
-              <TextInput style={[s.input, {marginBottom: 0}]} value={urlInterval} onChangeText={setUrlInterval} keyboardType="number-pad" placeholderTextColor="#555" />
-            </View>
+          <Text style={{color: '#888', fontSize: 12, marginBottom: 8}}>Verificar cada:</Text>
+          <View style={{flexDirection: 'row', marginBottom: 16}}>
+            {[{l:'1 min',v:'60'},{l:'5 min',v:'300'},{l:'10 min',v:'600'},{l:'30 min',v:'1800'}].map(o => (
+              <TouchableOpacity key={o.v} onPress={() => setUrlInterval(o.v)}
+                style={{backgroundColor: urlInterval === o.v ? '#00d4ff' : '#1a2a3a', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8}}>
+                <Text style={{color: urlInterval === o.v ? '#0a1628' : '#607d8b', fontWeight: '600', fontSize: 13}}>{o.l}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
           <TouchableOpacity style={s.btn} onPress={async () => {
             if (!urlUrl.trim()) { Alert.alert('Error', 'URL requerida'); return; }
             const res = await apiRequest('/api/url-monitors', { method: 'POST', body: JSON.stringify({
-              url: urlUrl.trim(), name: urlName.trim() || null, method: urlMethod,
-              expected_status: parseInt(urlExpectedStatus) || 200,
-              timeout_ms: parseInt(urlTimeout) || 10000,
+              url: urlUrl.trim(), name: urlName.trim() || null, method: 'GET',
+              expected_status: 200, timeout_ms: 10000,
               interval_seconds: parseInt(urlInterval) || 300
             }) }, token);
             if (res.ok) { setShowAddUrl(false); setUrlUrl(''); setUrlName(''); loadUrlMonitors(); }
