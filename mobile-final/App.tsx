@@ -448,10 +448,23 @@ export default function App() {
         return;
       }
       const clean = q.replace(/\b[A-Z]\d{4}\b/g, '').replace(/\s+/g,' ').trim();
-      const r = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean) + '&limit=5&lang=es');
+      const r = await fetch('https://apis.datos.gob.ar/georef/api/direcciones?direccion=' + encodeURIComponent(clean) + '&max=5');
       const rj = await r.json();
-      const features = rj.features || [];
-      if (features.length === 0) { setGeoSearchResult('No se encontro. Proba simplificando (ej: "Don Torcuato, Buenos Aires")'); return; }
+      const dirs = rj.direcciones || [];
+      if (dirs.length > 0 && dirs[0].ubicacion?.lat) {
+        const d = dirs[0];
+        setEditGeoCity(d.localidad_censal?.nombre||d.departamento?.nombre||'');
+        setEditGeoRegion(d.provincia?.nombre||'');
+        setEditGeoCountry('Argentina');
+        setEditGeoLat(parseFloat(d.ubicacion.lat).toFixed(6));
+        setEditGeoLon(parseFloat(d.ubicacion.lon).toFixed(6));
+        setGeoSearchResult(d.nomenclatura + ', ' + (d.provincia?.nombre||''));
+        return;
+      }
+      const r2 = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(clean + (clean.toLowerCase().includes('argentin')?'':' argentina')) + '&limit=5&lang=es');
+      const rj2 = await r2.json();
+      const features = rj2.features || [];
+      if (features.length === 0) { setGeoSearchResult('No se encontro la direccion.'); return; }
       const f = features[0];
       const p = f.properties || {};
       const coords = f.geometry?.coordinates || [];
