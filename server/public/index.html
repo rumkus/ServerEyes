@@ -369,17 +369,14 @@ function logout() {
 }
 
 // ── RENDER MAIN ──
-let _renderPending = false;
-function render() {
+let _renderLock = false;
+function render(force) {
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
-  if (activeModal && (activeModal.type === 'edit' || activeModal.type === 'addurl' || activeModal.type === 'addmaintenance')) {
-    _renderPending = true;
-    return;
-  }
-  _renderPending = false;
+  if (!force && _renderLock) return;
   el.innerHTML = buildLayout();
   attachEvents();
+  _renderLock = activeModal && (activeModal.type === 'edit' || activeModal.type === 'addurl' || activeModal.type === 'addmaintenance');
   if (activeNav === 'noc') {
     setTimeout(initInlineMap, 120);
     setTimeout(loadNocTrends, 200);
@@ -997,7 +994,7 @@ function buildModal() {
   }
 }
 
-function closeModal() { activeModal=null; _renderPending=false; render(); }
+function closeModal() { activeModal=null; _renderLock=false; render(); }
 
 // ── DETAIL MODAL ──
 function buildDetailModal() {
