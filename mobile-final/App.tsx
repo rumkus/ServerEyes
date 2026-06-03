@@ -182,6 +182,12 @@ export default function App() {
   const [geoSearchAddr, setGeoSearchAddr] = useState('');
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchResult, setGeoSearchResult] = useState('');
+  const [logsMachine, setLogsMachine] = useState<any>(null);
+  const [logsData, setLogsData] = useState('');
+  const [servicesMachine, setServicesMachine] = useState<any>(null);
+  const [servicesData, setServicesData] = useState<any>(null);
+  const [configMachine, setConfigMachine] = useState<any>(null);
+  const [configData, setConfigData] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
@@ -191,6 +197,9 @@ export default function App() {
     if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
     if (showMaintenance) { setShowMaintenance(false); return true; }
     if (showAuditLog) { setShowAuditLog(false); return true; }
+    if (logsMachine) { setLogsMachine(null); return true; }
+    if (servicesMachine) { setServicesMachine(null); return true; }
+    if (configMachine) { setConfigMachine(null); return true; }
     if (backupMachine) { setBackupMachine(null); return true; }
     if (shareUserId) { setShareUserId(null); return true; }
     if (detailMachine) { setDetailMachine(null); return true; }
@@ -950,12 +959,36 @@ export default function App() {
             </View>
           ) : auditLog.map((a: any, i: number) => {
             const date = new Date(a.created_at);
+            const fullLabel = actionLabels[a.action] || a.action;
+            const emoji = fullLabel.split(' ')[0];
+            const labelText = fullLabel.split(' ').slice(1).join(' ');
+            let detailText = '';
+            if (a.details) {
+              try {
+                const d = typeof a.details === 'string' ? JSON.parse(a.details) : a.details;
+                if (a.action === 'edit_machine' && d.machine_name) {
+                  const parts = [d.machine_name];
+                  if (d.grupo) parts.push('Grupo: ' + d.grupo);
+                  if (d.location) parts.push(d.location);
+                  detailText = parts.join(' · ');
+                } else if (a.action === 'remote_command' && d.command) {
+                  detailText = d.command;
+                } else if (a.action === 'create_url_monitor' && (d.url || d.name)) {
+                  detailText = d.name || d.url;
+                } else if (typeof d === 'object') {
+                  detailText = Object.entries(d).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).slice(0, 3).join(' · ');
+                } else {
+                  detailText = String(d);
+                }
+              } catch { detailText = String(a.details); }
+            }
+            if (a.target_type) detailText += (detailText ? ' ' : '') + '(' + a.target_type + ' #' + a.target_id + ')';
             return (
               <View key={i} style={{backgroundColor: '#111d2e', borderRadius: 10, padding: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center'}}>
-                <Text style={{fontSize: 20, marginRight: 12}}>{(actionLabels[a.action] || a.action).split(' ')[0]}</Text>
+                <Text style={{fontSize: 20, marginRight: 12}}>{emoji}</Text>
                 <View style={{flex: 1}}>
-                  <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{actionLabels[a.action] || a.action}</Text>
-                  {a.details && <Text style={{color: '#607d8b', fontSize: 11, marginTop: 2}}>{a.details}</Text>}
+                  <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{labelText}</Text>
+                  {detailText !== '' && <Text style={{color: '#607d8b', fontSize: 11, marginTop: 2}} numberOfLines={2}>{detailText}</Text>}
                 </View>
                 <View style={{alignItems: 'flex-end'}}>
                   <Text style={{color: '#555', fontSize: 11}}>{date.toLocaleDateString('es', {day: '2-digit', month: 'short'})}</Text>
@@ -1571,18 +1604,20 @@ export default function App() {
             {icon: '📈', label: t('metrics'), action: () => openMetrics(item)},
             {icon: '🌐', label: t('ips'), action: () => openIpHistory(item)},
             {icon: '💿', label: t('disks'), action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
-            {icon: '📋', label: t('logs'), action: async () => { const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token); if (res.ok) Alert.alert('Logs: ' + item.machine_name, res.data.logs || t('no_data')); }},
+            {icon: '📋', label: t('logs'), action: async () => {
+              setLogsMachine(item); setLogsData('');
+              const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token);
+              if (res.ok) setLogsData(res.data.logs || '');
+            }},
             {icon: '⚙', label: t('services'), action: async () => {
+              setServicesMachine(item); setServicesData(null);
               const res = await apiRequest(`/api/machines/${item.id}/services`, {}, token);
-              if (res.ok) {
-                const svcs = (res.data.services || []).map((s: any) => `${s.state === 'RUNNING' ? '🟢' : '🔴'} ${s.display} (${s.state})`).join('\n');
-                const ports = (res.data.open_ports || []).join(', ');
-                Alert.alert(item.machine_name, (svcs || 'Sin servicios') + '\n\nPuertos: ' + (ports || 'Sin datos'));
-              }
+              if (res.ok) setServicesData(res.data);
             }},
             {icon: '💾', label: t('config'), action: async () => {
+              setConfigMachine(item); setConfigData(null);
               const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
-              if (res.ok) Alert.alert('Config: ' + item.machine_name, res.data.config ? JSON.stringify(res.data.config, null, 2) + '\n\nBackup: ' + (res.data.backed_up_at ? new Date(res.data.backed_up_at).toLocaleString() : '---') : 'Sin backup');
+              if (res.ok) setConfigData(res.data);
             }},
             ...(!item.is_online && item.mac_address ? [{icon: '⚡', label: 'WOL', action: async () => {
               const res = await apiRequest(`/api/machines/${item.id}/wol`, { method: 'POST' }, token);
@@ -1732,6 +1767,140 @@ export default function App() {
             <Text style={s.btnTxt}>Guardar seleccion</Text>
           </TouchableOpacity>
           <Text style={{color: '#666', fontSize: 11, textAlign: 'center', marginTop: 6, marginBottom: 30}}>Si no seleccionas ninguno, se muestran todos en el resumen.</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // LOGS SCREEN
+  if (logsMachine) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Logs del Agente" subtitle={logsMachine.machine_name} />
+        <ScrollView contentContainerStyle={{padding: 16}}>
+          {!logsData ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>📋</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin logs disponibles</Text>
+            </View>
+          ) : (
+            <View style={{backgroundColor: '#111d2e', borderRadius: 12, padding: 14}}>
+              {logsData.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+                const isError = /error|fail|exception/i.test(line);
+                const isWarning = /warn|timeout/i.test(line);
+                return (
+                  <View key={i} style={{flexDirection: 'row', paddingVertical: 4, borderBottomWidth: i < logsData.split('\n').length - 1 ? 1 : 0, borderBottomColor: '#1a2a3a'}}>
+                    <Text style={{color: '#3a5068', fontSize: 10, width: 28, textAlign: 'right', marginRight: 8}}>{i + 1}</Text>
+                    <Text style={{color: isError ? '#ff5252' : isWarning ? '#ff9800' : '#ccc', fontSize: 11, flex: 1}} selectable>{line}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // SERVICES SCREEN
+  if (servicesMachine) {
+    const svcs = servicesData?.services || [];
+    const ports = servicesData?.open_ports || [];
+    const running = svcs.filter((s: any) => s.state === 'RUNNING').length;
+    const stopped = svcs.length - running;
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Servicios" subtitle={servicesMachine.machine_name} />
+        <ScrollView contentContainerStyle={{padding: 16}}>
+          {svcs.length === 0 && ports.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>⚙</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin datos de servicios</Text>
+            </View>
+          ) : (
+            <>
+              {svcs.length > 0 && (
+                <>
+                  <View style={{flexDirection: 'row', marginBottom: 16}}>
+                    <View style={{flex: 1, backgroundColor: '#112a1a', borderRadius: 10, padding: 12, marginRight: 8, alignItems: 'center'}}>
+                      <Text style={{color: '#00e676', fontSize: 24, fontWeight: '800'}}>{running}</Text>
+                      <Text style={{color: '#607d8b', fontSize: 11}}>Activos</Text>
+                    </View>
+                    <View style={{flex: 1, backgroundColor: '#2a1118', borderRadius: 10, padding: 12, alignItems: 'center'}}>
+                      <Text style={{color: '#ff5252', fontSize: 24, fontWeight: '800'}}>{stopped}</Text>
+                      <Text style={{color: '#607d8b', fontSize: 11}}>Detenidos</Text>
+                    </View>
+                  </View>
+                  {svcs.map((svc: any, i: number) => (
+                    <View key={i} style={{backgroundColor: '#111d2e', borderRadius: 10, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center'}}>
+                      <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: svc.state === 'RUNNING' ? '#00e676' : '#ff5252', marginRight: 12}} />
+                      <View style={{flex: 1}}>
+                        <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{svc.display || svc.name}</Text>
+                        {svc.name !== svc.display && <Text style={{color: '#3a5068', fontSize: 10}}>{svc.name}</Text>}
+                      </View>
+                      <Text style={{color: svc.state === 'RUNNING' ? '#00e676' : '#ff5252', fontSize: 11, fontWeight: '600'}}>{svc.state}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+              {ports.length > 0 && (
+                <View style={{marginTop: 16}}>
+                  <Text style={{color: '#607d8b', fontSize: 12, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5}}>Puertos abiertos</Text>
+                  <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+                    {ports.map((p: any, i: number) => (
+                      <View key={i} style={{backgroundColor: '#111d2e', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8, marginBottom: 8}}>
+                        <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '700'}}>{p}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // CONFIG SCREEN
+  if (configMachine) {
+    const cfg = configData?.config;
+    const backedUp = configData?.backed_up_at;
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Configuracion" subtitle={configMachine.machine_name} />
+        <ScrollView contentContainerStyle={{padding: 16}}>
+          {!cfg ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>💾</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin backup de configuracion</Text>
+            </View>
+          ) : (
+            <>
+              {backedUp && (
+                <View style={{backgroundColor: '#111d2e', borderRadius: 12, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{fontSize: 18, marginRight: 10}}>🕐</Text>
+                  <View>
+                    <Text style={{color: '#607d8b', fontSize: 11}}>Ultimo backup</Text>
+                    <Text style={{color: '#eee', fontSize: 14, fontWeight: '600'}}>{new Date(backedUp).toLocaleString('es')}</Text>
+                  </View>
+                </View>
+              )}
+              <View style={{backgroundColor: '#111d2e', borderRadius: 12, padding: 14}}>
+                {Object.entries(cfg).map(([key, val]: [string, any], i: number) => (
+                  <View key={i} style={{paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1a2a3a'}}>
+                    <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 2}}>{key}</Text>
+                    <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}} selectable>
+                      {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
         </ScrollView>
       </View>
     );

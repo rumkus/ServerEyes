@@ -1933,8 +1933,12 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
       dailyUptime[key] = { date: key, online_minutes: 0, offline_minutes: 0, total_minutes: 1440, percentage: 0 };
     }
 
-    // Procesar eventos para calcular minutos online/offline por dia
-    let lastStatus = 'offline';
+    // Determinar estado inicial antes del periodo consultado
+    const priorEvent = await pool.query(
+      `SELECT status FROM uptime_log WHERE machine_id = $1 AND timestamp <= NOW() - INTERVAL '1 day' * $2 ORDER BY timestamp DESC LIMIT 1`,
+      [req.params.id, days]
+    );
+    let lastStatus = priorEvent.rows.length > 0 ? priorEvent.rows[0].status : 'offline';
     let lastTime = new Date(now.getTime() - days * 86400000);
 
     for (const event of events.rows) {

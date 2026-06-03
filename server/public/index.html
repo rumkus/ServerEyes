@@ -388,7 +388,6 @@ function render() {
   attachEvents();
   if (activeNav === 'noc') {
     setTimeout(initInlineMap, 120);
-    setTimeout(loadNocTrends, 200);
   }
   if (activeNav === 'ajustes') {
     setTimeout(loadSmtpConfig, 100);
@@ -547,29 +546,36 @@ function buildNocView(healthPct, alerts, avgCpu, avgRam, avgDisk, avgPing, filte
   <!-- Mid row -->
   <div class="noc-grid-mid">
     <div style="display:flex;flex-direction:column;gap:16px;">
-      <!-- Recursos Globales -->
+      <!-- Recursos por Maquina -->
       <div class="panel">
-        <div class="panel-title"><span class="dot" style="background:#9C27B0"></span>Recursos Globales</div>
-        <div class="recursos-wrap">
-          <div class="recursos-list">
-            ${[
-              {label:'CPU',   val:avgCpu,  warn:70, crit:90},
-              {label:'RAM',   val:avgRam,  warn:75, crit:90},
-              {label:'Disco', val:avgDisk, warn:80, crit:92},
-              {label:'Ping',  val:Math.min(avgPing,200), warn:80, crit:160, raw: avgPing+'ms'}
-            ].map(r=>`<div class="rec-row">
-              <span class="rec-label">${r.label}</span>
-              <div class="rec-bar-bg"><div class="rec-bar-fg" style="width:${r.val}%;background:${colorPct(r.val,r.warn,r.crit)}"></div></div>
-              <span class="rec-pct" style="color:${colorPct(r.val,r.warn,r.crit)}">${r.raw||r.val+'%'}</span>
-            </div>`).join('')}
-          </div>
+        <div class="panel-title"><span class="dot" style="background:#9C27B0"></span>Recursos por Maquina</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;max-height:420px;overflow-y:auto;padding:4px 0">
+          ${filtered.map(m=>{
+            const cpu = m.cpu_usage!=null ? m.cpu_usage : null;
+            const ramPct = m.ram_usage&&m.ram_total ? Math.round(m.ram_usage/m.ram_total*100) : null;
+            const disks = m.disks||[];
+            const maxDisk = disks.length>0 ? Math.max(...disks.map(d=>d.total>0?Math.round(d.used/d.total*100):0)) : null;
+            return `<div style="background:var(--bg);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;cursor:pointer" onclick="openMachineDetail(${m.id})">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                <span class="status-dot ${m.is_online?'on':'off'}" style="width:8px;height:8px"></span>
+                <span style="font-weight:700;font-size:13px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.machine_name}</span>
+                ${m.grupo?`<span style="font-size:10px;color:#888;background:var(--border2);padding:1px 6px;border-radius:4px">${m.grupo}</span>`:''}
+              </div>
+              ${[
+                {label:'CPU', val:cpu, warn:70, crit:90, txt:cpu!=null?cpu+'%':'—'},
+                {label:'RAM', val:ramPct, warn:75, crit:90, txt:ramPct!=null?ramPct+'% ('+m.ram_usage+'/'+m.ram_total+'GB)':'—'},
+                {label:'Disco', val:maxDisk, warn:80, crit:92, txt:maxDisk!=null?maxDisk+'%':'—'},
+                {label:'Ping', val:m.ping_ms?Math.min(m.ping_ms,200):null, warn:80, crit:160, txt:m.ping_ms?m.ping_ms+'ms':'—'}
+              ].map(r=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+                <span style="font-size:10px;color:#888;width:36px">${r.label}</span>
+                <div style="flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden">
+                  ${r.val!=null?`<div style="width:${r.val}%;height:100%;background:${colorPct(r.val,r.warn||70,r.crit||90)};border-radius:3px"></div>`:''}
+                </div>
+                <span style="font-size:10px;color:${r.val!=null?colorPct(r.val,r.warn||70,r.crit||90):'#555'};width:60px;text-align:right;font-weight:600">${r.txt}</span>
+              </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>
-      </div>
-
-      <!-- Tendencias CPU/RAM -->
-      <div class="panel">
-        <div class="panel-title"><span class="dot" style="background:#2196F3"></span>Tendencias (ultimas horas)</div>
-        <div style="height:180px"><canvas id="noc-trends-chart"></canvas></div>
       </div>
 
       <!-- Acciones rápidas -->
@@ -940,33 +946,6 @@ function createLineChart(canvasId, labels, datasets, opts={}) {
   });
 }
 
-// ── NOC TRENDS CHART ──
-let nocTrendsCache = null;
-async function loadNocTrends() {
-  if (!machines.length) return;
-  const firstOnline = machines.find(m => m.is_online);
-  if (!firstOnline) return;
-  if (nocTrendsCache && nocTrendsCache.machineId === firstOnline.id && Date.now() - nocTrendsCache.ts < 30000) {
-    renderNocTrends(nocTrendsCache.data);
-    return;
-  }
-  const r = await api('/api/machines/' + firstOnline.id + '/metrics?hours=6');
-  if (r.ok && r.data.length > 0) {
-    nocTrendsCache = { machineId: firstOnline.id, data: r.data, ts: Date.now() };
-    renderNocTrends(r.data);
-  }
-}
-function renderNocTrends(data) {
-  const labels = data.map(d => { const dt = new Date(d.time); return dt.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }); });
-  const cpuVals = data.map(d => d.cpu != null ? parseFloat(d.cpu) : null);
-  const ramTotal = data.find(d => d.ram_total)?.ram_total || 1;
-  const ramPctVals = data.map(d => d.ram != null ? Math.round(parseFloat(d.ram) / ramTotal * 100) : null);
-  const pingVals = data.map(d => d.ping != null ? parseInt(d.ping) : null);
-  createLineChart('noc-trends-chart', labels, [
-    { label: 'CPU %', data: cpuVals, borderColor: '#4CAF50', backgroundColor: 'rgba(76,175,80,0.06)', fill: true },
-    { label: 'RAM %', data: ramPctVals, borderColor: '#2196F3', backgroundColor: 'rgba(33,150,243,0.06)', fill: true },
-  ], { unit: '%', max: 100 });
-}
 
 // ── MACHINE DETAIL (opens modal chooser) ──
 function openMachineDetail(id) {
@@ -1971,11 +1950,24 @@ function buildAuditSection() {
     <div style="max-height:400px;overflow-y:auto">
       ${auditLog.map(a=>{
         const date = new Date(a.created_at);
+        let detailText = '';
+        if (a.details) {
+          try {
+            const d = typeof a.details === 'string' ? JSON.parse(a.details) : a.details;
+            if (a.action === 'edit_machine' && d.machine_name) { const p=[d.machine_name]; if(d.grupo)p.push('Grupo: '+d.grupo); if(d.location)p.push(d.location); detailText=p.join(' · '); }
+            else if (a.action === 'remote_command' && d.command) { detailText = d.command; }
+            else if (a.action === 'create_url_monitor' && (d.url||d.name)) { detailText = d.name||d.url; }
+            else if (typeof d === 'object') { detailText = Object.entries(d).filter(([,v])=>v).map(([k,v])=>k+': '+v).slice(0,3).join(' · '); }
+            else { detailText = String(d); }
+          } catch(e) { detailText = String(a.details); }
+        }
+        if (a.target_type) detailText += (detailText?' ':'') + '('+a.target_type+' #'+a.target_id+')';
+        const fullLabel = actionLabels[a.action]||a.action;
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);font-size:13px">
-          <span style="font-size:16px">${(actionLabels[a.action]||a.action).split(' ')[0]}</span>
+          <span style="font-size:16px">${fullLabel.split(' ')[0]}</span>
           <div style="flex:1">
-            <div style="font-weight:600;color:var(--text)">${actionLabels[a.action]||a.action}</div>
-            <div style="font-size:11px;color:#999">${a.details||''} ${a.target_type?'('+a.target_type+' #'+a.target_id+')':''}</div>
+            <div style="font-weight:600;color:var(--text)">${fullLabel.split(' ').slice(1).join(' ')}</div>
+            <div style="font-size:11px;color:#999">${detailText}</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
             <div style="font-size:11px;color:#999">${date.toLocaleDateString('es',{day:'2-digit',month:'short'})}</div>
