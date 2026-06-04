@@ -4,5 +4,6 @@ node_modules/
 dist/
 out/
 *.exe
+*.apk
 firebase-service-account.json
 *-service-account.json

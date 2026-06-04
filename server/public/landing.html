@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ServerEyes — Monitoreo de Servidores en Tiempo Real</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{--bg:#0a1628;--card:#0d1b2a;--border:#1a2a3a;--text:#e6edf3;--sub:#607d8b;--accent:#00d4ff;--green:#00e676;--red:#ff5252;--orange:#ff9800;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;}
+a{color:var(--accent);text-decoration:none;}
+.container{max-width:1100px;margin:0 auto;padding:0 20px;}
+
+/* NAV */
+nav{background:var(--card);border-bottom:1px solid var(--border);padding:16px 0;position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);}
+nav .container{display:flex;align-items:center;justify-content:space-between;}
+.nav-brand{font-size:20px;font-weight:800;color:var(--accent);display:flex;align-items:center;gap:8px;}
+.nav-links{display:flex;gap:24px;align-items:center;}
+.nav-links a{color:var(--sub);font-size:14px;font-weight:600;transition:color .2s;}
+.nav-links a:hover{color:var(--text);}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:10px;font-weight:700;font-size:14px;border:none;cursor:pointer;transition:all .2s;}
+.btn-primary{background:var(--accent);color:var(--bg);}
+.btn-primary:hover{background:#33ddff;transform:translateY(-1px);}
+.btn-outline{background:transparent;border:2px solid var(--border);color:var(--text);}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent);}
+.btn-green{background:var(--green);color:var(--bg);}
+.btn-green:hover{background:#33ff99;}
+.btn-lg{padding:14px 32px;font-size:16px;border-radius:12px;}
+
+/* HERO */
+.hero{padding:80px 0 60px;text-align:center;}
+.hero h1{font-size:48px;font-weight:900;margin-bottom:16px;line-height:1.1;}
+.hero h1 span{color:var(--accent);}
+.hero p{font-size:18px;color:var(--sub);max-width:600px;margin:0 auto 32px;}
+.hero-badges{display:flex;justify-content:center;gap:12px;margin-top:24px;flex-wrap:wrap;}
+.badge{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-size:13px;color:var(--sub);display:flex;align-items:center;gap:6px;}
+.badge .dot{width:8px;height:8px;border-radius:50%;background:var(--green);}
+
+/* FEATURES */
+.features{padding:60px 0;}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+.feature-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;transition:border-color .2s;}
+.feature-card:hover{border-color:var(--accent);}
+.feature-icon{font-size:32px;margin-bottom:12px;}
+.feature-card h3{font-size:16px;font-weight:700;margin-bottom:6px;}
+.feature-card p{font-size:13px;color:var(--sub);}
+
+/* HOW IT WORKS */
+.how{padding:60px 0;}
+.section-title{text-align:center;font-size:32px;font-weight:800;margin-bottom:12px;}
+.section-sub{text-align:center;font-size:16px;color:var(--sub);margin-bottom:40px;}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.step{text-align:center;padding:24px 16px;}
+.step-num{width:40px;height:40px;border-radius:50%;background:var(--accent);color:var(--bg);font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+.step h4{font-size:15px;font-weight:700;margin-bottom:6px;}
+.step p{font-size:12px;color:var(--sub);}
+
+/* REGISTER */
+.register-section{padding:60px 0;}
+.register-box{max-width:480px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:36px;}
+.register-box h2{font-size:24px;font-weight:800;text-align:center;margin-bottom:6px;}
+.register-box .sub{text-align:center;color:var(--sub);font-size:14px;margin-bottom:24px;}
+.form-group{margin-bottom:14px;}
+.form-group label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px;font-weight:600;}
+.form-input{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:10px;padding:12px 14px;font-size:15px;color:var(--text);outline:none;transition:border-color .2s;}
+.form-input:focus{border-color:var(--accent);}
+.form-error{color:var(--red);font-size:13px;text-align:center;margin-bottom:12px;display:none;}
+.form-success{display:none;}
+
+/* POST REGISTER */
+.post-register{max-width:700px;margin:0 auto;}
+.cred-box{background:var(--bg);border:2px solid var(--accent);border-radius:14px;padding:24px;margin-bottom:24px;text-align:center;}
+.cred-box h3{color:var(--accent);font-size:18px;margin-bottom:16px;}
+.cred-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);}
+.cred-item:last-child{border:none;}
+.cred-label{color:var(--sub);font-size:13px;}
+.cred-value{color:var(--text);font-weight:700;font-size:15px;font-family:monospace;}
+.download-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px;}
+.download-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;text-align:center;}
+.download-card .icon{font-size:40px;margin-bottom:10px;}
+.download-card h4{font-size:15px;margin-bottom:4px;}
+.download-card p{font-size:12px;color:var(--sub);margin-bottom:14px;}
+
+/* INSTALL GUIDE */
+.guide{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;margin-bottom:24px;}
+.guide h3{font-size:18px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.guide-step{margin-bottom:16px;padding-left:16px;border-left:3px solid var(--accent);}
+.guide-step h4{font-size:14px;font-weight:700;margin-bottom:4px;}
+.guide-step p{font-size:13px;color:var(--sub);}
+.code-block{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-family:monospace;font-size:13px;color:var(--green);margin:8px 0;overflow-x:auto;position:relative;}
+.code-block .copy-btn{position:absolute;top:6px;right:8px;background:var(--border);border:none;color:var(--sub);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;}
+.code-block .copy-btn:hover{background:var(--accent);color:var(--bg);}
+
+/* FOOTER */
+footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color:var(--sub);font-size:13px;}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  .hero h1{font-size:32px;}
+  .features-grid{grid-template-columns:1fr;}
+  .steps{grid-template-columns:1fr 1fr;}
+  .download-grid{grid-template-columns:1fr;}
+  .nav-links{display:none;}
+}
+@media(max-width:480px){
+  .hero h1{font-size:26px;}
+  .steps{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <div class="nav-brand">👁 ServerEyes</div>
+    <div class="nav-links">
+      <a href="#features">Funciones</a>
+      <a href="#como-funciona">Como funciona</a>
+      <a href="#registro">Registrarse</a>
+      <a href="/index.html" class="btn btn-outline">Iniciar sesion</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="container">
+    <h1>Monitorea tus servidores<br><span>en tiempo real</span></h1>
+    <p>Controla el estado de todos tus servidores y servicios web desde una sola plataforma. Alertas instantaneas, metricas detalladas y acceso remoto desde cualquier lugar.</p>
+    <div>
+      <a href="#registro" class="btn btn-primary btn-lg">Comenzar gratis</a>
+    </div>
+    <div class="hero-badges">
+      <div class="badge"><span class="dot"></span> Monitoreo 24/7</div>
+      <div class="badge">📱 App Android</div>
+      <div class="badge">🔔 Alertas push y email</div>
+      <div class="badge">🌐 Status page publica</div>
+      <div class="badge">⚡ Wake-on-LAN remoto</div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="container">
+    <h2 class="section-title">Todo lo que necesitas</h2>
+    <p class="section-sub">Una plataforma completa para mantener tus servidores bajo control</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">📡</div>
+        <h3>Monitoreo en tiempo real</h3>
+        <p>CPU, RAM, disco, ping, velocidad de internet. Heartbeat cada 30 segundos para detectar caidas al instante.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔔</div>
+        <h3>Alertas inteligentes</h3>
+        <p>Notificaciones push al celular y por email cuando un servidor se cae o supera umbrales criticos de recursos.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🌐</div>
+        <h3>Monitoreo de URLs</h3>
+        <p>Verifica que tus sitios web esten online. Detecta caidas, mide tiempos de respuesta y sigue redirecciones.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Historial y metricas</h3>
+        <p>Graficos de CPU, RAM y ping. Historial de uptime por dia. Registro de cambios de IP publica.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Wake-on-LAN</h3>
+        <p>Enciende tus servidores remotamente desde la app o el dashboard web. Ideal con VPN para acceso desde cualquier lugar.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">👥</div>
+        <h3>Equipos y tecnicos</h3>
+        <p>Crea tu empresa, invita tecnicos con codigo, comparte maquinas especificas. Cada uno ve solo lo que le corresponde.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🛡</div>
+        <h3>Backup y config</h3>
+        <p>Backup automatico de la configuracion del agente. Verifica el estado de tus backups programados.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">💻</div>
+        <h3>Comandos remotos</h3>
+        <p>Ejecuta comandos en tus servidores de forma remota. Historial completo de comandos ejecutados.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📋</div>
+        <h3>Auditoria completa</h3>
+        <p>Registro de todas las acciones: logins, ediciones, comandos. Sabe quien hizo que y cuando.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="como-funciona">
+  <div class="container">
+    <h2 class="section-title">Como funciona</h2>
+    <p class="section-sub">En 4 pasos tenes todo funcionando</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h4>Registrate</h4>
+        <p>Crea tu cuenta gratis. Solo necesitas un email y una contraseña.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h4>Agrega tu servidor</h4>
+        <p>Desde el dashboard o la app, crea una maquina y obtene la clave de vinculacion.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h4>Instala el agente</h4>
+        <p>Descarga el agente en tu servidor Windows, pegale la clave y listo. Se conecta automaticamente.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <h4>Monitorea</h4>
+        <p>Ve el estado en tiempo real desde la web o la app. Recibe alertas si algo falla.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- REGISTER -->
+<section class="register-section" id="registro">
+  <div class="container">
+
+    <!-- Registration form -->
+    <div class="register-box" id="registerForm">
+      <h2>Crear cuenta gratis</h2>
+      <p class="sub">Sin tarjeta de credito. Sin limite de tiempo.</p>
+
+      <div id="regError" class="form-error"></div>
+
+      <div class="form-group">
+        <label>Nombre o empresa</label>
+        <input class="form-input" id="regName" type="text" placeholder="Ej: Juan Perez o MiEmpresa SRL">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input class="form-input" id="regEmail" type="email" placeholder="tu@email.com">
+      </div>
+      <div class="form-group">
+        <label>Contraseña (minimo 6 caracteres)</label>
+        <input class="form-input" id="regPass" type="password" placeholder="••••••••">
+      </div>
+      <div class="form-group">
+        <label>Repetir contraseña</label>
+        <input class="form-input" id="regPass2" type="password" placeholder="••••••••">
+      </div>
+
+      <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;margin-top:8px" onclick="doRegister()">
+        Crear mi cuenta
+      </button>
+
+      <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--sub)">
+        Ya tenes cuenta? <a href="/index.html">Inicia sesion</a>
+      </p>
+    </div>
+
+    <!-- Post-registration success -->
+    <div class="form-success" id="postRegister">
+      <div class="post-register">
+        <div class="cred-box">
+          <h3>✅ Cuenta creada con exito</h3>
+          <div class="cred-item">
+            <span class="cred-label">Email</span>
+            <span class="cred-value" id="credEmail">—</span>
+          </div>
+          <div class="cred-item">
+            <span class="cred-label">Contraseña</span>
+            <span class="cred-value" id="credPass">—</span>
+          </div>
+          <p style="color:var(--orange);font-size:12px;margin-top:12px">⚠ Guarda tus credenciales. Las vas a necesitar para iniciar sesion en la app y el dashboard.</p>
+        </div>
+
+        <!-- Downloads -->
+        <h3 class="section-title" style="font-size:22px;margin-bottom:20px">Descargas</h3>
+        <div class="download-grid">
+          <div class="download-card">
+            <div class="icon">📱</div>
+            <h4>App Android</h4>
+            <p>Monitorea desde tu celular. Alertas push, Wake-on-LAN y mas.</p>
+            <a href="https://github.com/rumkus/ServerEyes/releases/latest/download/ServerEyes.apk" class="btn btn-green" download>Descargar APK</a>
+          </div>
+          <div class="download-card">
+            <div class="icon">🖥</div>
+            <h4>Agente Windows</h4>
+            <p>Instala en cada servidor que quieras monitorear.</p>
+            <a href="/api/agent/download" class="btn btn-primary" download>Descargar Agente</a>
+          </div>
+        </div>
+
+        <!-- Installation Guide -->
+        <div class="guide">
+          <h3>🖥 Guia de instalacion del Agente (Windows)</h3>
+
+          <div class="guide-step">
+            <h4>1. Descargar el agente</h4>
+            <p>Descarga el archivo <strong>ServerEyesAgent.exe</strong> en el servidor que quieras monitorear.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>2. Crear una maquina en ServerEyes</h4>
+            <p>Ingresa al <a href="/index.html">dashboard web</a> o a la app y toca <strong>"+"</strong> para agregar una maquina nueva. El sistema te dara una <strong>clave de vinculacion</strong> (machine key).</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>3. Ejecutar el agente</h4>
+            <p>Abre una terminal <strong>como administrador</strong> en la carpeta donde descargaste el agente y ejecuta:</p>
+            <div class="code-block">
+              ServerEyesAgent.exe
+              <button class="copy-btn" onclick="copyCode(this)">Copiar</button>
+            </div>
+            <p>La primera vez te pedira la <strong>clave de vinculacion</strong>. Pegala y presiona Enter. El agente se vincula automaticamente con tu cuenta.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>4. Instalar como servicio (recomendado)</h4>
+            <p>Para que el agente se inicie automaticamente con Windows y se ejecute en segundo plano:</p>
+            <div class="code-block">
+              ServerEyesAgent.exe --install
+              <button class="copy-btn" onclick="copyCode(this)">Copiar</button>
+            </div>
+            <p>Esto crea un servicio de Windows llamado <strong>ServerEyesAgent</strong> que se inicia solo al prender la maquina.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>5. Verificar la conexion</h4>
+            <p>Volvete al dashboard o a la app. En unos segundos la maquina deberia aparecer como <strong style="color:var(--green)">ONLINE</strong> con sus metricas de CPU, RAM, disco y ping.</p>
+          </div>
+        </div>
+
+        <div class="guide">
+          <h3>📱 Guia de instalacion de la App</h3>
+
+          <div class="guide-step">
+            <h4>1. Descargar el APK</h4>
+            <p>Descarga el archivo <strong>ServerEyes.apk</strong> en tu celular Android.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>2. Habilitar origenes desconocidos</h4>
+            <p>Si es la primera vez, Android te pedira que habilites la instalacion desde origenes desconocidos. Acepta para continuar.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>3. Instalar y abrir</h4>
+            <p>Abre el APK descargado, toca <strong>Instalar</strong> y luego <strong>Abrir</strong>. Ingresa con el email y contraseña que creaste recien.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>4. Permitir notificaciones</h4>
+            <p>Cuando la app te pida permisos de notificacion, acepta para recibir <strong>alertas push</strong> cuando un servidor se caiga o suba.</p>
+          </div>
+        </div>
+
+        <div class="guide">
+          <h3>❓ Preguntas frecuentes</h3>
+
+          <div class="guide-step">
+            <h4>Funciona en Linux?</h4>
+            <p>Por ahora el agente solo funciona en <strong>Windows</strong>. Estamos trabajando en soporte para Linux.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>Cuantas maquinas puedo monitorear?</h4>
+            <p>No hay limite. Agrega todas las maquinas que necesites.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>Puedo monitorear URLs/sitios web?</h4>
+            <p>Si. Desde el menu lateral podes agregar URLs y ServerEyes las verifica periodicamente (cada 1, 5, 10 o 30 minutos).</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>Puedo compartir maquinas con tecnicos?</h4>
+            <p>Si. Crea una empresa, genera un codigo de invitacion y compartilo. Luego elegis que maquinas puede ver cada tecnico.</p>
+          </div>
+
+          <div class="guide-step">
+            <h4>Como enciendo un servidor apagado?</h4>
+            <p>Si el servidor tiene Wake-on-LAN activado en la BIOS y en Windows, podes encenderlo desde la app o el dashboard tocando el boton WOL (aparece cuando la maquina esta offline y tiene MAC configurada). Necesitas que el agente de otra maquina en la misma red este corriendo.</p>
+          </div>
+        </div>
+
+        <div style="text-align:center;margin-top:24px">
+          <a href="/index.html" class="btn btn-primary btn-lg">Ir al Dashboard</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>ServerEyes — Monitoreo de servidores en tiempo real</p>
+  </div>
+</footer>
+
+<script>
+function copyCode(btn) {
+  const code = btn.parentElement.textContent.replace('Copiar','').trim();
+  navigator.clipboard.writeText(code);
+  btn.textContent = 'Copiado!';
+  setTimeout(() => btn.textContent = 'Copiar', 2000);
+}
+
+async function doRegister() {
+  const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const pass = document.getElementById('regPass').value;
+  const pass2 = document.getElementById('regPass2').value;
+  const errEl = document.getElementById('regError');
+
+  errEl.style.display = 'none';
+
+  if (!email || !pass) { errEl.textContent = 'Completa email y contraseña'; errEl.style.display = 'block'; return; }
+  if (pass.length < 6) { errEl.textContent = 'La contraseña debe tener al menos 6 caracteres'; errEl.style.display = 'block'; return; }
+  if (pass !== pass2) { errEl.textContent = 'Las contraseñas no coinciden'; errEl.style.display = 'block'; return; }
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass, nombre: name })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Error al registrar';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    document.getElementById('credEmail').textContent = email;
+    document.getElementById('credPass').textContent = pass;
+    document.getElementById('registerForm').style.display = 'none';
+    document.getElementById('postRegister').style.display = 'block';
+    document.getElementById('postRegister').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    errEl.textContent = 'Error de conexion. Intenta de nuevo.';
+    errEl.style.display = 'block';
+  }
+}
+
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const el = document.querySelector(a.getAttribute('href'));
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+</script>
+</body>
+</html>

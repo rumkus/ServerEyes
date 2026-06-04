@@ -11,8 +11,8 @@ const API_URL = 'https://servereyes-production.up.railway.app';
 
 // i18n
 const LANGS: {[k:string]: {name:string, flag:string, [k:string]:string}} = {
-  es: { name: 'Español', flag: '🇪🇸', login_title: 'Iniciar sesion', login_btn: 'Iniciar sesion', create_account: 'Crear cuenta', have_account: 'Ya tengo cuenta', new_account: 'Crear cuenta nueva', show_password: 'Ver contraseña', fill_fields: 'Completa todos los campos', logout: 'Salir', machines_count: 'maquinas', search: 'Buscar...', save: 'Guardar', cancel: 'Cancelar', close: 'Cerrar', back: 'Volver', language: 'Idioma', uptime: 'Uptime', metrics: 'Metricas', ips: 'IPs', disks: 'Discos', logs: 'Logs', services: 'Servicios', config: 'Config', backup: 'Backup', edit: 'Editar', change_pass: 'Cambiar contraseña', current_pass: 'Contraseña actual', new_pass: 'Nueva contraseña (min 6 caracteres)', pass_updated: 'Contraseña actualizada', email_config: 'Configurar Email', email_notif: 'Recibir notificaciones por email', smtp_host: 'Host SMTP (vacio para Gmail)', smtp_port: 'Puerto', smtp_user: 'Email SMTP', smtp_pass: 'Contraseña SMTP', smtp_from: 'Remitente (opcional)', smtp_test: 'Enviar email de prueba', smtp_hint: 'Para Gmail: deja Host vacio, usa tu email y una contraseña de aplicacion', team: 'Empresa y Equipo', force_check: 'Forzar chequeo', check_requested: 'Resultado en ~30 segundos', backup_date: 'Ultima fecha del backup', checked_at: 'Chequeado', share_machines: 'Compartir maquinas', select_machines: 'Selecciona las maquinas que este tecnico podra ver', invite_tech: 'Invitar tecnico', join_team: 'Te invitaron a un equipo?', join_btn: 'Unirme', create_company: 'Crear empresa', company_name: 'Nombre de la empresa', ip_history: 'Historial de IPs', current_ip: 'IP actual', no_changes: 'Sin cambios de IP registrados' },
-  en: { name: 'English', flag: '🇺🇸', login_title: 'Sign in', login_btn: 'Sign in', create_account: 'Create account', have_account: 'Already have an account', new_account: 'Create new account', show_password: 'Show password', fill_fields: 'Fill all fields', logout: 'Logout', machines_count: 'machines', search: 'Search...', save: 'Save', cancel: 'Cancel', close: 'Close', back: 'Back', language: 'Language', uptime: 'Uptime', metrics: 'Metrics', ips: 'IPs', disks: 'Disks', logs: 'Logs', services: 'Services', config: 'Config', backup: 'Backup', edit: 'Edit', change_pass: 'Change password', current_pass: 'Current password', new_pass: 'New password (min 6 characters)', pass_updated: 'Password updated', email_config: 'Configure Email', email_notif: 'Receive email notifications', smtp_host: 'SMTP Host (empty for Gmail)', smtp_port: 'Port', smtp_user: 'SMTP Email', smtp_pass: 'SMTP Password', smtp_from: 'Sender (optional)', smtp_test: 'Send test email', smtp_hint: 'For Gmail: leave Host empty, use your email and an app password', team: 'Company & Team', force_check: 'Force check', check_requested: 'Result in ~30 seconds', backup_date: 'Last backup date', checked_at: 'Checked', share_machines: 'Share machines', select_machines: 'Select machines this technician can see', invite_tech: 'Invite technician', join_team: 'Were you invited to a team?', join_btn: 'Join', create_company: 'Create company', company_name: 'Company name', ip_history: 'IP History', current_ip: 'Current IP', no_changes: 'No IP changes recorded' },
+  es: { name: 'Español', flag: '🇪🇸', login_title: 'Iniciar sesion', login_email: 'Escriba su correo de usuario', login_btn: 'Iniciar sesion', create_account: 'Crear cuenta', have_account: 'Ya tengo cuenta', new_account: 'Crear cuenta nueva', show_password: 'Ver contraseña', fill_fields: 'Completa todos los campos', logout: 'Salir', machines_count: 'maquinas', search: 'Buscar...', save: 'Guardar', cancel: 'Cancelar', close: 'Cerrar', back: 'Volver', language: 'Idioma', uptime: 'Uptime', metrics: 'Metricas', ips: 'IPs', disks: 'Discos', logs: 'Logs', services: 'Servicios', config: 'Config', backup: 'Backup', edit: 'Editar', change_pass: 'Cambiar contraseña', current_pass: 'Contraseña actual', new_pass: 'Nueva contraseña (min 6 caracteres)', pass_updated: 'Contraseña actualizada', email_config: 'Configurar Email', email_notif: 'Recibir notificaciones por email', smtp_host: 'Host SMTP (vacio para Gmail)', smtp_port: 'Puerto', smtp_user: 'Email SMTP', smtp_pass: 'Contraseña SMTP', smtp_from: 'Remitente (opcional)', smtp_test: 'Enviar email de prueba', smtp_hint: 'Para Gmail: deja Host vacio, usa tu email y una contraseña de aplicacion', team: 'Empresa y Equipo', force_check: 'Forzar chequeo', check_requested: 'Resultado en ~30 segundos', backup_date: 'Ultima fecha del backup', checked_at: 'Chequeado', share_machines: 'Compartir maquinas', select_machines: 'Selecciona las maquinas que este tecnico podra ver', invite_tech: 'Invitar tecnico', join_team: 'Te invitaron a un equipo?', join_btn: 'Unirme', create_company: 'Crear empresa', company_name: 'Nombre de la empresa', ip_history: 'Historial de IPs', current_ip: 'IP actual', no_changes: 'Sin cambios de IP registrados' },
+  en: { name: 'English', flag: '🇺🇸', login_title: 'Sign in', login_email: 'Enter your email', login_btn: 'Sign in', create_account: 'Create account', have_account: 'Already have an account', new_account: 'Create new account', show_password: 'Show password', fill_fields: 'Fill all fields', logout: 'Logout', machines_count: 'machines', search: 'Search...', save: 'Save', cancel: 'Cancel', close: 'Close', back: 'Back', language: 'Language', uptime: 'Uptime', metrics: 'Metrics', ips: 'IPs', disks: 'Disks', logs: 'Logs', services: 'Services', config: 'Config', backup: 'Backup', edit: 'Edit', change_pass: 'Change password', current_pass: 'Current password', new_pass: 'New password (min 6 characters)', pass_updated: 'Password updated', email_config: 'Configure Email', email_notif: 'Receive email notifications', smtp_host: 'SMTP Host (empty for Gmail)', smtp_port: 'Port', smtp_user: 'SMTP Email', smtp_pass: 'SMTP Password', smtp_from: 'Sender (optional)', smtp_test: 'Send test email', smtp_hint: 'For Gmail: leave Host empty, use your email and an app password', team: 'Company & Team', force_check: 'Force check', check_requested: 'Result in ~30 seconds', backup_date: 'Last backup date', checked_at: 'Checked', share_machines: 'Share machines', select_machines: 'Select machines this technician can see', invite_tech: 'Invite technician', join_team: 'Were you invited to a team?', join_btn: 'Join', create_company: 'Create company', company_name: 'Company name', ip_history: 'IP History', current_ip: 'Current IP', no_changes: 'No IP changes recorded' },
 };
 let _currentLang = 'es';
 const t = (key: string) => (LANGS[_currentLang] && LANGS[_currentLang][key]) || LANGS.es[key] || key;
@@ -182,6 +182,7 @@ export default function App() {
   const [geoSearchAddr, setGeoSearchAddr] = useState('');
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchResult, setGeoSearchResult] = useState('');
+  const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
   const [logsMachine, setLogsMachine] = useState<any>(null);
   const [logsData, setLogsData] = useState('');
   const [servicesMachine, setServicesMachine] = useState<any>(null);
@@ -405,9 +406,8 @@ export default function App() {
     const timeout = setTimeout(async () => {
       try {
         await loadMachines();
-        // Consumir IP changes pendientes sin mostrar alerta (evita crash post-login)
+        loadUrlMonitors();
         await apiRequest('/api/ip-changes', {}, token);
-        // Registrar token FCM para push notifications
         await registerFCM();
         log.info('Primera carga completada');
       } catch (e: any) { log.error(`Primera carga error: ${e.message}`); }
@@ -1505,137 +1505,160 @@ export default function App() {
   }
 
   // Render de una maquina (nuevo diseño)
+  const toggleCard = (id: number) => {
+    setExpandedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   const renderMachineCard = (item: any) => {
     const isOn = item.is_online;
     const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
     const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
+    const expanded = expandedCards.has(item.id);
     const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); setGeoSearchAddr(''); setGeoSearchResult(''); };
 
     const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
 
     return (
-      <TouchableOpacity key={item.id} onPress={openEdit} onLongPress={() => { setShowGroupPicker(item); setNewGroupName(''); }}
-        style={{backgroundColor: '#0d1b2a', borderRadius: 16, marginBottom: 14, borderLeftWidth: 3, borderLeftColor: isOn ? '#00e676' : '#ff5252', overflow: 'hidden'}}>
-        {/* Header */}
-        <View style={{padding: 16, paddingBottom: 8}}>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
-            <View style={{width: 12, height: 12, borderRadius: 6, marginRight: 10, backgroundColor: isOn ? '#00e676' : '#ff5252'}} />
-            <Text style={{flex: 1, fontSize: 18, fontWeight: '800', color: '#eee'}}>{item.machine_name}</Text>
-            <View style={{backgroundColor: isOn ? '#0d2818' : '#2d1117', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6}}>
-              <Text style={{fontSize: 11, fontWeight: '800', color: isOn ? '#00e676' : '#ff5252'}}>{isOn ? 'ONLINE' : 'OFFLINE'}</Text>
+      <View key={item.id} style={{backgroundColor: '#0d1b2a', borderRadius: 16, marginBottom: 10, borderLeftWidth: 3, borderLeftColor: isOn ? '#00e676' : '#ff5252', overflow: 'hidden'}}>
+        {/* Collapsed header - always visible */}
+        <TouchableOpacity onPress={() => toggleCard(item.id)} onLongPress={() => { setShowGroupPicker(item); setNewGroupName(''); }}
+          style={{flexDirection: 'row', alignItems: 'center', padding: 14}}>
+          <View style={{width: 10, height: 10, borderRadius: 5, marginRight: 10, backgroundColor: isOn ? '#00e676' : '#ff5252'}} />
+          <View style={{flex: 1}}>
+            <Text style={{fontSize: 15, fontWeight: '700', color: '#eee'}}>{item.machine_name}</Text>
+            {item.grupo && <Text style={{color: '#00d4ff', fontSize: 11}}>{item.grupo}</Text>}
+          </View>
+          <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+            {item.ping_ms && <Text style={{color: pingColor, fontSize: 12, fontWeight: '700'}}>{item.ping_ms}ms</Text>}
+            {item.download_mbps && <Text style={{color: '#00d4ff', fontSize: 12, fontWeight: '700'}}>{item.download_mbps}Mbps</Text>}
+            <View style={{backgroundColor: isOn ? '#0d2818' : '#2d1117', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6}}>
+              <Text style={{fontSize: 10, fontWeight: '800', color: isOn ? '#00e676' : '#ff5252'}}>{isOn ? 'ONLINE' : 'OFFLINE'}</Text>
             </View>
+            <Text style={{color: '#555', fontSize: 12}}>{expanded ? '▲' : '▼'}</Text>
           </View>
-          {item.grupo && <Text style={{color: '#00d4ff', fontSize: 12, fontWeight: '600', marginBottom: 2}}>{'📁'} {item.grupo}</Text>}
-          {item.is_shared && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 2}}>{'👥'} Compartida por {item.owner_name || item.owner_email}</Text>}
-          {item.geo_city && <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 2}}>{'📍'} {item.geo_city}, {item.geo_region}, {item.geo_country}</Text>}
-          {item.check_ip_change === false && <Text style={{color: '#555', fontSize: 10}}>{'🔕'} Monitoreo de IP desactivado</Text>}
-        </View>
+        </TouchableOpacity>
 
-        {/* IPs box */}
-        <View style={{flexDirection: 'row', marginHorizontal: 16, marginBottom: 10, backgroundColor: '#111d2e', borderRadius: 10, overflow: 'hidden'}}>
-          <View style={{flex: 1, padding: 10, borderRightWidth: 1, borderRightColor: '#1a2a3a'}}>
-            <Text style={{color: '#607d8b', fontSize: 10, marginBottom: 3}}>{'🌐'} IP Publica</Text>
-            <Text style={{color: '#eee', fontSize: 14, fontWeight: '700'}}>{item.public_ip || '---'}</Text>
-          </View>
-          <View style={{flex: 1, padding: 10}}>
-            <Text style={{color: '#607d8b', fontSize: 10, marginBottom: 3}}>{'🏠'} IP Local</Text>
-            {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
-              <Text key={i} style={{color: '#eee', fontSize: 12, fontWeight: '600'}}>{ip.trim()}</Text>
-            ))}
-          </View>
-        </View>
+        {/* Expanded content */}
+        {expanded && (
+          <>
+            <View style={{paddingHorizontal: 16, paddingBottom: 8}}>
+              {item.is_shared && <Text style={{color: '#ff9800', fontSize: 11, marginBottom: 2}}>{'👥'} Compartida por {item.owner_name || item.owner_email}</Text>}
+              {item.geo_city && <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 2}}>{'📍'} {item.geo_city}, {item.geo_region}, {item.geo_country}</Text>}
+              {item.check_ip_change === false && <Text style={{color: '#555', fontSize: 10}}>{'🔕'} Monitoreo de IP desactivado</Text>}
+            </View>
 
-        {/* Metrics grid */}
-        <View style={{flexDirection: 'row', marginHorizontal: 16, marginBottom: 10}}>
-          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
-            <Text style={{color: '#607d8b', fontSize: 9}}>{'💓'} Heartbeat</Text>
-            <Text style={{color: '#eee', fontSize: 15, fontWeight: '800', marginTop: 2}}>{timeSince(item.last_heartbeat)}</Text>
-          </View>
-          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
-            <Text style={{color: '#607d8b', fontSize: 9}}>{'📡'} Ping</Text>
-            <Text style={{color: pingColor, fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.ping_ms ? `${item.ping_ms} ms` : '---'}</Text>
-          </View>
-          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
-            <Text style={{color: '#607d8b', fontSize: 9}}>{'🌐'} Velocidad</Text>
-            <Text style={{color: '#00d4ff', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.download_mbps ? `${item.download_mbps} Mbps` : '---'}</Text>
-          </View>
-          <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, alignItems: 'center'}}>
-            <Text style={{color: '#607d8b', fontSize: 9}}>{'🖥'} CPU</Text>
-            <Text style={{color: item.cpu_usage != null ? cpuColor : '#555', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.cpu_usage != null ? `${item.cpu_usage}%` : '---'}</Text>
-          </View>
-        </View>
-
-        {/* RAM + Disks bars */}
-        <View style={{marginHorizontal: 16, marginBottom: 10}}>
-          {(item.ram_usage != null) && (
-            <View style={{marginBottom: 6}}>
-              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3}}>
-                <Text style={{color: '#607d8b', fontSize: 11}}>{'💾'} RAM</Text>
-                <Text style={{color: '#aaa', fontSize: 11, fontWeight: '700'}}>{item.ram_usage} / {item.ram_total} GB</Text>
+            {/* IPs box */}
+            <View style={{flexDirection: 'row', marginHorizontal: 16, marginBottom: 10, backgroundColor: '#111d2e', borderRadius: 10, overflow: 'hidden'}}>
+              <View style={{flex: 1, padding: 10, borderRightWidth: 1, borderRightColor: '#1a2a3a'}}>
+                <Text style={{color: '#607d8b', fontSize: 10, marginBottom: 3}}>{'🌐'} IP Publica</Text>
+                <Text style={{color: '#eee', fontSize: 14, fontWeight: '700'}}>{item.public_ip || '---'}</Text>
               </View>
-              <View style={{height: 7, backgroundColor: '#1a2a3a', borderRadius: 4, overflow: 'hidden'}}>
-                <View style={{width: `${Math.min((item.ram_usage / item.ram_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.ram_usage / item.ram_total) > 0.9 ? '#ff5252' : (item.ram_usage / item.ram_total) > 0.7 ? '#ff9800' : '#00e676', borderRadius: 4}} />
+              <View style={{flex: 1, padding: 10}}>
+                <Text style={{color: '#607d8b', fontSize: 10, marginBottom: 3}}>{'🏠'} IP Local</Text>
+                {(item.local_ip || '---').split(' | ').map((ip: string, i: number) => (
+                  <Text key={i} style={{color: '#eee', fontSize: 12, fontWeight: '600'}}>{ip.trim()}</Text>
+                ))}
               </View>
             </View>
-          )}
-          {filteredDisks.length > 0 ? filteredDisks.map((disk: any, idx: number) => {
-            const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
-            return (
-              <View key={idx} style={{marginBottom: 4}}>
-                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3}}>
-                  <Text style={{color: '#607d8b', fontSize: 11}}>{'💿'} Disco {disk.drive}</Text>
-                  <Text style={{color: '#aaa', fontSize: 11, fontWeight: '700'}}>{disk.used} / {disk.total} GB ({Math.round(disk.free)} GB libre)</Text>
-                </View>
-                <View style={{height: 7, backgroundColor: '#1a2a3a', borderRadius: 4, overflow: 'hidden'}}>
-                  <View style={{width: `${Math.min(pct * 100, 100)}%`, height: '100%', backgroundColor: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', borderRadius: 4}} />
-                </View>
+
+            {/* Metrics grid */}
+            <View style={{flexDirection: 'row', marginHorizontal: 16, marginBottom: 10}}>
+              <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+                <Text style={{color: '#607d8b', fontSize: 9}}>{'💓'} Heartbeat</Text>
+                <Text style={{color: '#eee', fontSize: 15, fontWeight: '800', marginTop: 2}}>{timeSince(item.last_heartbeat)}</Text>
               </View>
-            );
-          }) : null}
-        </View>
+              <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+                <Text style={{color: '#607d8b', fontSize: 9}}>{'📡'} Ping</Text>
+                <Text style={{color: pingColor, fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.ping_ms ? `${item.ping_ms} ms` : '---'}</Text>
+              </View>
+              <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+                <Text style={{color: '#607d8b', fontSize: 9}}>{'🌐'} Velocidad</Text>
+                <Text style={{color: '#00d4ff', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.download_mbps ? `${item.download_mbps} Mbps` : '---'}</Text>
+              </View>
+              <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, alignItems: 'center'}}>
+                <Text style={{color: '#607d8b', fontSize: 9}}>{'🖥'} CPU</Text>
+                <Text style={{color: item.cpu_usage != null ? cpuColor : '#555', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.cpu_usage != null ? `${item.cpu_usage}%` : '---'}</Text>
+              </View>
+            </View>
 
-        {/* OS info */}
-        {item.os_info && <Text style={{color: '#3a5068', fontSize: 10, marginHorizontal: 16, marginBottom: 8}}>{item.os_info}</Text>}
+            {/* RAM + Disks bars */}
+            <View style={{marginHorizontal: 16, marginBottom: 10}}>
+              {(item.ram_usage != null) && (
+                <View style={{marginBottom: 6}}>
+                  <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3}}>
+                    <Text style={{color: '#607d8b', fontSize: 11}}>{'💾'} RAM</Text>
+                    <Text style={{color: '#aaa', fontSize: 11, fontWeight: '700'}}>{item.ram_usage} / {item.ram_total} GB</Text>
+                  </View>
+                  <View style={{height: 7, backgroundColor: '#1a2a3a', borderRadius: 4, overflow: 'hidden'}}>
+                    <View style={{width: `${Math.min((item.ram_usage / item.ram_total) * 100, 100)}%`, height: '100%', backgroundColor: (item.ram_usage / item.ram_total) > 0.9 ? '#ff5252' : (item.ram_usage / item.ram_total) > 0.7 ? '#ff9800' : '#00e676', borderRadius: 4}} />
+                  </View>
+                </View>
+              )}
+              {filteredDisks.length > 0 ? filteredDisks.map((disk: any, idx: number) => {
+                const pct = disk.total > 0 ? (disk.used / disk.total) : 0;
+                return (
+                  <View key={idx} style={{marginBottom: 4}}>
+                    <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3}}>
+                      <Text style={{color: '#607d8b', fontSize: 11}}>{'💿'} Disco {disk.drive}</Text>
+                      <Text style={{color: '#aaa', fontSize: 11, fontWeight: '700'}}>{disk.used} / {disk.total} GB ({Math.round(disk.free)} GB libre)</Text>
+                    </View>
+                    <View style={{height: 7, backgroundColor: '#1a2a3a', borderRadius: 4, overflow: 'hidden'}}>
+                      <View style={{width: `${Math.min(pct * 100, 100)}%`, height: '100%', backgroundColor: pct > 0.95 ? '#ff5252' : pct > 0.85 ? '#ff9800' : '#00e676', borderRadius: 4}} />
+                    </View>
+                  </View>
+                );
+              }) : null}
+            </View>
 
-        {/* Action buttons */}
-        <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a', paddingVertical: 8, paddingHorizontal: 12, flexWrap: 'wrap'}}>
-          {[
-            {icon: '⏱', label: t('uptime'), action: () => openUptime(item)},
-            {icon: '📈', label: t('metrics'), action: () => openMetrics(item)},
-            {icon: '🌐', label: t('ips'), action: () => openIpHistory(item)},
-            {icon: '💿', label: t('disks'), action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
-            {icon: '📋', label: t('logs'), action: async () => {
-              setLogsMachine(item); setLogsData('');
-              const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token);
-              if (res.ok) setLogsData(res.data.logs || '');
-            }},
-            {icon: '⚙', label: t('services'), action: async () => {
-              setServicesMachine(item); setServicesData(null);
-              const res = await apiRequest(`/api/machines/${item.id}/services`, {}, token);
-              if (res.ok) setServicesData(res.data);
-            }},
-            {icon: '💾', label: t('config'), action: async () => {
-              setConfigMachine(item); setConfigData(null);
-              const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
-              if (res.ok) setConfigData(res.data);
-            }},
-            ...(!item.is_online && item.mac_address ? [{icon: '⚡', label: 'WOL', action: async () => {
-              const res = await apiRequest(`/api/machines/${item.id}/wol`, { method: 'POST' }, token);
-              if (res.ok) Alert.alert('WOL', res.data.message || 'Magic packet enviado');
-              else Alert.alert('Error', res.data?.error || 'Error al enviar WOL');
-            }}] : []),
-            {icon: '🛡', label: t('backup'), action: async () => {
-              setBackupMachine(item); setBackupData(null);
-              const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
-              if (res.ok) setBackupData(res.data);
-            }},
-          ].map((btn, i) => (
-            <TouchableOpacity key={i} onPress={btn.action} style={{paddingVertical: 6, paddingHorizontal: 10}}>
-              <Text style={{color: '#607d8b', fontSize: 12}}>{btn.icon} {btn.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </TouchableOpacity>
+            {/* OS info */}
+            {item.os_info && <Text style={{color: '#3a5068', fontSize: 10, marginHorizontal: 16, marginBottom: 8}}>{item.os_info}</Text>}
+
+            {/* Action buttons */}
+            <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a', paddingVertical: 8, paddingHorizontal: 12, flexWrap: 'wrap'}}>
+              {[
+                {icon: '✏️', label: t('edit'), action: openEdit},
+                {icon: '⏱', label: t('uptime'), action: () => openUptime(item)},
+                {icon: '📈', label: t('metrics'), action: () => openMetrics(item)},
+                {icon: '🌐', label: t('ips'), action: () => openIpHistory(item)},
+                {icon: '💿', label: t('disks'), action: () => { setDetailMachine(item); setDetailMonitored(item.monitored_disks || []); const ad: {[k:string]:string} = {}; if (item.alert_disks) { Object.entries(item.alert_disks).forEach(([k,v]) => { ad[k] = String(v); }); } setDetailAlertDisks(ad); }},
+                {icon: '📋', label: t('logs'), action: async () => {
+                  setLogsMachine(item); setLogsData('');
+                  const res = await apiRequest(`/api/machines/${item.id}/logs`, {}, token);
+                  if (res.ok) setLogsData(res.data.logs || '');
+                }},
+                {icon: '⚙', label: t('services'), action: async () => {
+                  setServicesMachine(item); setServicesData(null);
+                  const res = await apiRequest(`/api/machines/${item.id}/services`, {}, token);
+                  if (res.ok) setServicesData(res.data);
+                }},
+                {icon: '💾', label: t('config'), action: async () => {
+                  setConfigMachine(item); setConfigData(null);
+                  const res = await apiRequest(`/api/machines/${item.id}/config`, {}, token);
+                  if (res.ok) setConfigData(res.data);
+                }},
+                ...(!item.is_online && item.mac_address ? [{icon: '⚡', label: 'WOL', action: async () => {
+                  const res = await apiRequest(`/api/machines/${item.id}/wol`, { method: 'POST' }, token);
+                  if (res.ok) Alert.alert('WOL', res.data.message || 'Magic packet enviado');
+                  else Alert.alert('Error', res.data?.error || 'Error al enviar WOL');
+                }}] : []),
+                {icon: '🛡', label: t('backup'), action: async () => {
+                  setBackupMachine(item); setBackupData(null);
+                  const res = await apiRequest(`/api/machines/${item.id}/backup`, {}, token);
+                  if (res.ok) setBackupData(res.data);
+                }},
+              ].map((btn, i) => (
+                <TouchableOpacity key={i} onPress={btn.action} style={{paddingVertical: 6, paddingHorizontal: 10}}>
+                  <Text style={{color: '#607d8b', fontSize: 12}}>{btn.icon} {btn.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+      </View>
     );
   };
 
@@ -2470,7 +2493,7 @@ export default function App() {
           data={machines}
           keyExtractor={i => i.id.toString()}
           contentContainerStyle={{padding: 12, paddingBottom: 90}}
-          onRefresh={() => loadMachines()}
+          onRefresh={() => { loadMachines(); loadUrlMonitors(); }}
           refreshing={false}
           ListEmptyComponent={
             <View style={{alignItems: 'center', marginTop: 100}}>
@@ -2480,6 +2503,30 @@ export default function App() {
             </View>
           }
           renderItem={({item}) => renderMachineCard(item)}
+          ListFooterComponent={urlMonitors.length > 0 ? (
+            <View style={{marginTop: 16}}>
+              <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10, justifyContent: 'space-between'}}>
+                <Text style={{color: '#607d8b', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5}}>{'🌐'} URLs Monitoreadas</Text>
+                <TouchableOpacity onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}>
+                  <Text style={{color: '#00d4ff', fontSize: 12}}>Ver todo</Text>
+                </TouchableOpacity>
+              </View>
+              {urlMonitors.map((u: any) => (
+                <TouchableOpacity key={u.id} onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}
+                  style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, borderLeftColor: u.is_up ? '#00e676' : '#ff5252'}}>
+                  <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: u.is_up ? '#00e676' : '#ff5252', marginRight: 10}} />
+                  <View style={{flex: 1}}>
+                    <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{u.name || u.url}</Text>
+                    <Text style={{color: '#3a5068', fontSize: 11}} numberOfLines={1}>{u.url}</Text>
+                  </View>
+                  {u.response_ms && <Text style={{color: '#607d8b', fontSize: 11, marginRight: 8}}>{u.response_ms}ms</Text>}
+                  <View style={{backgroundColor: u.is_up ? '#0d2818' : '#2d1117', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6}}>
+                    <Text style={{fontSize: 10, fontWeight: '800', color: u.is_up ? '#00e676' : '#ff5252'}}>{u.is_up ? 'ONLINE' : 'OFFLINE'}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
         />
       )}
 
