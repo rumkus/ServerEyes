@@ -804,6 +804,55 @@ function buildAjustesView() {
       <button class="modal-btn sm" onclick="openAgentModal()">⚙️ Configurar versión de agente</button>
     </div>
     <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:#4CAF50"></span>Descargas y Guia de Instalacion</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:28px;margin-bottom:6px">📱</div>
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">App Android</div>
+          <div style="font-size:11px;color:#999;margin-bottom:10px">Monitorea desde tu celular</div>
+          <a href="https://github.com/rumkus/ServerEyes/releases/latest/download/ServerEyes.apk" download class="modal-btn sm" style="background:#4CAF50;color:#fff;text-decoration:none;display:inline-block">Descargar APK</a>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:28px;margin-bottom:6px">🖥</div>
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Agente Windows</div>
+          <div style="font-size:11px;color:#999;margin-bottom:10px">Instalar en cada servidor</div>
+          <a href="/api/agent/download" download class="modal-btn sm" style="background:#2196F3;color:#fff;text-decoration:none;display:inline-block">Descargar Agente</a>
+        </div>
+      </div>
+      <details style="cursor:pointer">
+        <summary style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px">📖 Ver instrucciones de instalacion</summary>
+        <div style="font-size:13px;color:#999;line-height:1.7;padding:12px 0">
+          <p style="font-weight:700;color:var(--text);margin-bottom:8px">Agente Windows:</p>
+          <ol style="padding-left:20px;margin-bottom:16px">
+            <li>Descarga <strong>ServerEyesAgent.exe</strong> en el servidor</li>
+            <li>Hace doble click para ejecutarlo</li>
+            <li style="margin-top:4px">
+              <strong style="color:#FF9800">⚠ Aviso SmartScreen:</strong> Si Windows muestra "Windows protegió su PC", hace click en <strong style="color:var(--text)">"Mas informacion"</strong> y luego en <strong style="color:var(--text)">"Ejecutar de todas formas"</strong>. Es normal, aparece porque el exe no tiene firma digital.
+            </li>
+            <li>Elegi la carpeta de instalacion (por defecto C:\\ServerEyes)</li>
+            <li>Ingresa la URL del servidor (presiona Enter para usar la predeterminada)</li>
+            <li>Vincula con codigo (desde la app) o ingresa la clave manualmente</li>
+            <li>Acepta instalar como tarea programada para que arranque con Windows</li>
+          </ol>
+          <p style="font-weight:700;color:var(--text);margin-bottom:8px">App Android:</p>
+          <ol style="padding-left:20px;margin-bottom:16px">
+            <li>Descarga el APK en tu celular</li>
+            <li>Si te pide habilitar "origenes desconocidos", acepta</li>
+            <li>Instala y abri la app</li>
+            <li>Ingresa con tu email y contraseña</li>
+            <li>Acepta permisos de notificaciones para recibir alertas push</li>
+          </ol>
+          <p style="font-weight:700;color:var(--text);margin-bottom:8px">Vincular un servidor:</p>
+          <ol style="padding-left:20px">
+            <li>En el dashboard o la app, toca <strong>+</strong> para agregar una maquina</li>
+            <li>Copia la <strong>clave de vinculacion</strong> que se genera</li>
+            <li>Pegala en el agente cuando te la pida, o usa el <strong>codigo de vinculacion</strong> desde la app</li>
+            <li>En segundos la maquina aparece como <strong style="color:#4CAF50">ONLINE</strong></li>
+          </ol>
+        </div>
+      </details>
+    </div>
+    <div class="panel">
       <div class="panel-title"><span class="dot" style="background:#F44336"></span>Sesión</div>
       <button class="modal-btn danger sm" onclick="logout()">Cerrar sesión</button>
     </div>
