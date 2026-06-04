@@ -560,6 +560,58 @@ function uninstall() {
   console.log('Tareas programadas y archivos auxiliares eliminados.');
 }
 
+// Instalacion: copiar exe a carpeta elegida y relanzar desde ahi
+async function installToFolder() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => new Promise(r => rl.question(q, r));
+  const defaultDir = 'C:\\ServerEyes';
+
+  console.log('\n========================================');
+  console.log('   ServerEyes Agent - Instalacion');
+  console.log('========================================\n');
+  console.log('Este asistente instalara el agente en tu servidor.\n');
+
+  const inputDir = await ask(`Carpeta de instalacion [${defaultDir}]: `);
+  const installDir = inputDir.trim() || defaultDir;
+  rl.close();
+
+  // Crear carpeta si no existe
+  if (!fs.existsSync(installDir)) {
+    try {
+      fs.mkdirSync(installDir, { recursive: true });
+      console.log(`\nCarpeta creada: ${installDir}`);
+    } catch (err) {
+      console.log(`\nError al crear la carpeta: ${err.message}`);
+      console.log('Ejecuta como Administrador si la carpeta requiere permisos elevados.');
+      process.exit(1);
+    }
+  }
+
+  const exeName = path.basename(EXE_PATH);
+  const destExe = path.join(installDir, exeName);
+
+  // Si ya estamos en la carpeta destino, no copiar
+  if (path.resolve(EXE_DIR) === path.resolve(installDir)) {
+    console.log(`\nEl agente ya esta en ${installDir}`);
+    return true;
+  }
+
+  // Copiar exe a la carpeta destino
+  try {
+    fs.copyFileSync(EXE_PATH, destExe);
+    console.log(`\nAgente copiado a: ${destExe}`);
+  } catch (err) {
+    console.log(`\nError al copiar: ${err.message}`);
+    process.exit(1);
+  }
+
+  // Relanzar desde la nueva ubicacion con --setup
+  console.log('Iniciando configuracion desde la nueva ubicacion...\n');
+  const child = spawn(destExe, ['--setup'], { stdio: 'inherit', detached: false });
+  child.on('close', (code) => process.exit(code || 0));
+  return false;
+}
+
 // Setup interactivo
 async function setup() {
   const config = loadConfig();
@@ -567,6 +619,7 @@ async function setup() {
   const ask = (q) => new Promise(r => rl.question(q, r));
 
   console.log('\n=== ServerEyes Agent - Configuracion ===\n');
+  console.log(`Ubicacion: ${EXE_DIR}`);
   console.log(`Config actual:`);
   console.log(`  Servidor: ${config.serverUrl || '(no configurado)'}`);
   console.log(`  Clave:    ${config.machineKey ? config.machineKey.slice(0, 8) + '...' : '(no configurado)'}`);
@@ -641,15 +694,18 @@ async function main() {
     console.log('ServerEyes Agent ya esta corriendo. Saliendo.');
     process.exit(0);
   }
-  acquireLock();
 
   const config = loadConfig();
 
   if (!config.serverUrl || !config.machineKey) {
-    console.log('ServerEyes Agent - No configurado');
-    console.log(`Ejecuta: ${path.basename(EXE_PATH)} --setup`);
+    // Primera ejecucion: preguntar donde instalar y luego configurar
+    const continueHere = await installToFolder();
+    if (!continueHere) return;
+    await setup();
     return;
   }
+
+  acquireLock();
 
   startHeartbeatLoop(config);
 }

@@ -91,6 +91,20 @@ nav .container{display:flex;align-items:center;justify-content:space-between;}
 .code-block .copy-btn{position:absolute;top:6px;right:8px;background:var(--border);border:none;color:var(--sub);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;}
 .code-block .copy-btn:hover{background:var(--accent);color:var(--bg);}
 
+/* SMARTSCREEN MOCKUP */
+.smartscreen{background:#0078d4;border-radius:8px;padding:28px 32px;color:#fff;max-width:420px;margin:16px auto;position:relative;box-shadow:0 4px 20px rgba(0,0,0,0.3);}
+.smartscreen .ss-close{position:absolute;top:12px;right:16px;font-size:18px;color:#fff;opacity:0.6;}
+.smartscreen h4{font-size:18px;font-weight:700;margin-bottom:10px;}
+.smartscreen p{font-size:13px;opacity:0.9;line-height:1.5;margin-bottom:6px;}
+.smartscreen .ss-link{color:#fff;text-decoration:underline;font-size:13px;opacity:0.9;}
+.smartscreen .ss-btn{background:#e1e1e1;color:#333;border:none;padding:8px 24px;border-radius:0;font-size:13px;font-weight:600;float:right;margin-top:14px;cursor:default;}
+.smartscreen-note{background:#1a2a0a;border:1px solid #33691e;border-radius:10px;padding:16px 20px;margin-top:16px;}
+.smartscreen-note h5{color:var(--green);font-size:14px;font-weight:700;margin-bottom:6px;}
+.smartscreen-note p{font-size:13px;color:var(--sub);}
+.smartscreen-note .steps-inline{margin-top:10px;padding-left:0;list-style:none;}
+.smartscreen-note .steps-inline li{color:var(--text);font-size:13px;margin-bottom:6px;padding-left:24px;position:relative;}
+.smartscreen-note .steps-inline li::before{content:'➡';position:absolute;left:0;}
+
 /* FOOTER */
 footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color:var(--sub);font-size:13px;}
 
@@ -311,22 +325,34 @@ footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color
 
           <div class="guide-step">
             <h4>3. Ejecutar el agente</h4>
-            <p>Abre una terminal <strong>como administrador</strong> en la carpeta donde descargaste el agente y ejecuta:</p>
-            <div class="code-block">
-              ServerEyesAgent.exe
-              <button class="copy-btn" onclick="copyCode(this)">Copiar</button>
+            <p>Hace doble click en <strong>ServerEyesAgent.exe</strong>. La primera vez te va a preguntar donde instalarlo (por defecto <strong>C:\ServerEyes</strong>) y luego la <strong>clave de vinculacion</strong>.</p>
+
+            <div class="smartscreen-note">
+              <h5>⚠ Aviso de Windows SmartScreen</h5>
+              <p>Es probable que Windows muestre este aviso al ejecutar el agente por primera vez:</p>
+
+              <div class="smartscreen">
+                <span class="ss-close">✕</span>
+                <h4>Windows protegió su PC</h4>
+                <p>SmartScreen de Microsoft Defender evito que se iniciara una aplicacion desconocida. Ejecutar esta aplicacion puede suponer un riesgo para tu PC.</p>
+                <a class="ss-link">Mas informacion</a>
+                <div style="clear:both;padding-top:8px"></div>
+                <span class="ss-btn">No ejecutar</span>
+                <div style="clear:both"></div>
+              </div>
+
+              <p style="margin-top:14px"><strong style="color:var(--text)">Esto es normal.</strong> Aparece porque el ejecutable no tiene firma digital (code signing), no porque sea un virus.</p>
+              <ul class="steps-inline">
+                <li>Hace click en <strong style="color:var(--text)">"Mas informacion"</strong></li>
+                <li>Aparece el boton <strong style="color:var(--text)">"Ejecutar de todas formas"</strong></li>
+                <li>Hace click en ese boton y el agente se inicia normalmente</li>
+              </ul>
             </div>
-            <p>La primera vez te pedira la <strong>clave de vinculacion</strong>. Pegala y presiona Enter. El agente se vincula automaticamente con tu cuenta.</p>
           </div>
 
           <div class="guide-step">
-            <h4>4. Instalar como servicio (recomendado)</h4>
-            <p>Para que el agente se inicie automaticamente con Windows y se ejecute en segundo plano:</p>
-            <div class="code-block">
-              ServerEyesAgent.exe --install
-              <button class="copy-btn" onclick="copyCode(this)">Copiar</button>
-            </div>
-            <p>Esto crea un servicio de Windows llamado <strong>ServerEyesAgent</strong> que se inicia solo al prender la maquina.</p>
+            <h4>4. Inicio automatico con Windows</h4>
+            <p>Durante la configuracion, el agente te preguntara si queres que arranque automaticamente con Windows. Si aceptas (recomendado), se crea una tarea programada que lo inicia en segundo plano cada vez que se enciende la maquina.</p>
           </div>
 
           <div class="guide-step">
