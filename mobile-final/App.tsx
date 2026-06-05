@@ -183,6 +183,8 @@ export default function App() {
   const [geoSearching, setGeoSearching] = useState(false);
   const [geoSearchResult, setGeoSearchResult] = useState('');
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
+  const [userNotifs, setUserNotifs] = useState<any[]>([]);
+  const [showNotifs, setShowNotifs] = useState(false);
   const [logsMachine, setLogsMachine] = useState<any>(null);
   const [logsData, setLogsData] = useState('');
   const [servicesMachine, setServicesMachine] = useState<any>(null);
@@ -197,6 +199,7 @@ export default function App() {
     if (showAddMaintenance) { setShowAddMaintenance(false); return true; }
     if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
     if (showMaintenance) { setShowMaintenance(false); return true; }
+    if (showNotifs) { setShowNotifs(false); return true; }
     if (showAuditLog) { setShowAuditLog(false); return true; }
     if (logsMachine) { setLogsMachine(null); return true; }
     if (servicesMachine) { setServicesMachine(null); return true; }
@@ -407,6 +410,7 @@ export default function App() {
       try {
         await loadMachines();
         loadUrlMonitors();
+        loadUserNotifs();
         await apiRequest('/api/ip-changes', {}, token);
         await registerFCM();
         log.info('Primera carga completada');
@@ -927,6 +931,59 @@ export default function App() {
           }}>
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // NOTIFICATIONS
+  const loadUserNotifs = async () => {
+    const res = await apiRequest('/api/notifications', {}, token);
+    if (res.ok) setUserNotifs(res.data);
+  };
+
+  const markNotifRead = async (id: number) => {
+    await apiRequest(`/api/notifications/${id}/read`, { method: 'POST' }, token);
+    setUserNotifs(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+  };
+
+  if (showNotifs) {
+    const unread = userNotifs.filter(n => !n.is_read);
+    const read = userNotifs.filter(n => n.is_read);
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Notificaciones" subtitle={`${unread.length} sin leer`} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
+          {userNotifs.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>📭</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin notificaciones</Text>
+            </View>
+          ) : (
+            <>
+              {unread.length > 0 && unread.map((n: any) => (
+                <TouchableOpacity key={n.id} onPress={() => markNotifRead(n.id)}
+                  style={{backgroundColor: '#111d2e', borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#9C27B0'}}>
+                  <Text style={{color: '#ce93d8', fontSize: 14, fontWeight: '700'}}>{n.title}</Text>
+                  <Text style={{color: '#ccc', fontSize: 13, marginTop: 4, lineHeight: 20}}>{n.message}</Text>
+                  <Text style={{color: '#3a5068', fontSize: 11, marginTop: 6}}>{new Date(n.created_at).toLocaleString('es')}</Text>
+                </TouchableOpacity>
+              ))}
+              {read.length > 0 && (
+                <>
+                  {unread.length > 0 && <Text style={{color: '#3a5068', fontSize: 12, marginVertical: 10, textTransform: 'uppercase'}}>Leidas</Text>}
+                  {read.map((n: any) => (
+                    <View key={n.id} style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#1a2a3a'}}>
+                      <Text style={{color: '#607d8b', fontSize: 14, fontWeight: '700'}}>{n.title}</Text>
+                      <Text style={{color: '#888', fontSize: 13, marginTop: 4, lineHeight: 20}}>{n.message}</Text>
+                      <Text style={{color: '#3a5068', fontSize: 11, marginTop: 6}}>{new Date(n.created_at).toLocaleString('es')}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </ScrollView>
       </View>
     );
   }
@@ -2452,6 +2509,7 @@ export default function App() {
               {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
               {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
               {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
+              {icon: '💬', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
               {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
               {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
               {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},

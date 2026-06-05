@@ -395,6 +395,27 @@ async function initDB() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_notifications (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      sender_id INTEGER REFERENCES users(id),
+      target VARCHAR(20) DEFAULT 'all',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notification_reads (
+      id SERIAL PRIMARY KEY,
+      notification_id INTEGER REFERENCES admin_notifications(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id),
+      read_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(notification_id, user_id)
+    )
+  `);
+
   // Wake-on-LAN
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
@@ -1895,6 +1916,97 @@ app.post('/api/admin/test-push', authenticateToken, requireAdmin, async (req, re
   } catch (error) {
     console.error('Error test push:', error);
     res.status(500).json({ error: 'Error enviando push: ' + error.message });
+  }
+});
+
+// ── ADMIN BROADCAST NOTIFICATIONS ──
+app.post('/api/admin/broadcast', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { title, message } = req.body;
+    if (!title || !message) return res.status(400).json({ error: 'Titulo y mensaje requeridos' });
+
+    const notif = await pool.query(
+      'INSERT INTO admin_notifications (title, message, sender_id) VALUES ($1, $2, $3) RETURNING id, created_at',
+      [title, message, req.user.id]
+    );
+
+    // Send push to all users with FCM tokens
+    let pushSent = 0, pushFailed = 0;
+    if (firebaseAdmin) {
+      const users = await pool.query('SELECT id, fcm_token FROM users WHERE fcm_token IS NOT NULL');
+      for (const u of users.rows) {
+        try {
+          await firebaseAdmin.messaging().send({
+            token: u.fcm_token,
+            notification: { title, body: message },
+            android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
+          });
+          pushSent++;
+        } catch (e) {
+          pushFailed++;
+          if (e.code === 'messaging/registration-token-not-registered') {
+            await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [u.id]);
+          }
+        }
+      }
+    }
+
+    res.json({ message: 'Notificacion enviada', id: notif.rows[0].id, pushSent, pushFailed });
+  } catch (error) {
+    console.error('Error broadcast:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.get('/api/admin/notifications', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT n.*, u.email as sender_email,
+       (SELECT COUNT(*) FROM notification_reads nr WHERE nr.notification_id = n.id) as read_count
+       FROM admin_notifications n LEFT JOIN users u ON n.sender_id = u.id
+       ORDER BY n.created_at DESC LIMIT 50`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.delete('/api/admin/notifications/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM admin_notifications WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Eliminada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// User notifications
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT n.id, n.title, n.message, n.created_at,
+       EXISTS(SELECT 1 FROM notification_reads nr WHERE nr.notification_id = n.id AND nr.user_id = $1) as is_read
+       FROM admin_notifications n
+       WHERE n.created_at > NOW() - INTERVAL '30 days'
+       ORDER BY n.created_at DESC LIMIT 20`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    await pool.query(
+      'INSERT INTO notification_reads (notification_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [req.params.id, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 

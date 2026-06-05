@@ -89,6 +89,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .help-modal-body li{font-size:13px;color:#666;line-height:1.6;margin-bottom:4px;}
 .help-modal-body strong{color:var(--text,#333);}
 .help-modal-body .help-tip{background:var(--bg,#f8f9fa);border-left:3px solid var(--accent,#2196F3);border-radius:0 8px 8px 0;padding:10px 14px;font-size:12px;color:#666;margin-top:12px;}
+.notif-wrap{position:relative;display:inline-block;}
+.notif-badge{position:absolute;top:-4px;right:-4px;background:#9C27B0;color:#fff;font-size:9px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+.notif-dropdown{position:absolute;top:100%;right:0;width:340px;max-height:400px;overflow-y:auto;background:var(--card-bg,#fff);border:1px solid var(--border2,#eee);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:200;margin-top:8px;}
+.notif-dropdown-header{padding:14px 16px;border-bottom:1px solid var(--border2,#eee);font-size:14px;font-weight:700;color:var(--text,#333);}
+.notif-item{padding:12px 16px;border-bottom:1px solid var(--border2,#eee);cursor:pointer;transition:background .2s;}
+.notif-item:hover{background:var(--bg,#f8f9fa);}
+.notif-item.unread{border-left:3px solid #9C27B0;}
+.notif-item .ni-title{font-size:13px;font-weight:700;color:var(--text,#333);}
+.notif-item .ni-msg{font-size:12px;color:#888;margin-top:2px;line-height:1.4;}
+.notif-item .ni-time{font-size:10px;color:#bbb;margin-top:4px;}
+.notif-empty{padding:30px;text-align:center;color:#999;font-size:13px;}
 
 /* ── DONUT SALUD ── */
 .donut-wrap{display:flex;flex-direction:column;align-items:center;}
@@ -476,6 +487,13 @@ function buildHeader() {
         🔔
         ${(machines.filter(m=>!m.is_online).length + getThresholdAlerts().length) > 0 ? `<span class="badge-dot">${machines.filter(m=>!m.is_online).length + getThresholdAlerts().length}</span>` : ''}
       </button>
+      <div class="notif-wrap">
+        <button class="icon-btn" onclick="toggleNotifDropdown()" title="Notificaciones">
+          💬
+          ${getUnreadCount() > 0 ? `<span class="notif-badge" id="notif-count-badge">${getUnreadCount()}</span>` : '<span class="notif-badge" id="notif-count-badge" style="display:none">0</span>'}
+        </button>
+        <div class="notif-dropdown" id="notif-dropdown" style="display:none"></div>
+      </div>
       <button class="icon-btn" onclick="toggleDarkMode()" title="Modo oscuro">${isDark()?'☀️':'🌙'}</button>
       <button class="icon-btn" onclick="activeNav='ajustes';render()" title="Ajustes">⚙️</button>
       <button class="icon-btn pulse" onclick="loadMachines()" title="Refrescar">🔄</button>
@@ -1073,6 +1091,60 @@ const helpContent = {
   wol: { title: 'Wake-on-LAN', body: `<p>Enciende un servidor apagado remotamente enviando un "magic packet" a su placa de red.</p><p><strong>Requisitos:</strong></p><ol><li>La BIOS del servidor debe tener WOL activado</li><li>El adaptador de red en Windows debe tener "Wake on Magic Packet" habilitado</li><li>El servidor debe estar conectado por cable Ethernet (no WiFi)</li><li>Debe tener la MAC Address cargada en ServerEyes</li><li>Otro agente en la misma red debe estar corriendo para enviar el paquete</li></ol><div class="help-tip">💡 El boton WOL solo aparece cuando la maquina esta offline y tiene MAC configurada.</div>` },
   language: { title: 'Idioma', body: `<p>Cambia el idioma de la interfaz del dashboard.</p><p>El cambio se aplica inmediatamente a todos los textos del sistema.</p>` },
 };
+
+// ── USER NOTIFICATIONS ──
+let userNotifs = [];
+let notifDropdownOpen = false;
+
+async function loadUserNotifs() {
+  const res = await api('/api/notifications');
+  if (res.ok) userNotifs = res.data;
+}
+
+function getUnreadCount() {
+  return userNotifs.filter(n => !n.is_read).length;
+}
+
+function toggleNotifDropdown() {
+  notifDropdownOpen = !notifDropdownOpen;
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) { dd.style.display = notifDropdownOpen ? 'block' : 'none'; }
+  if (notifDropdownOpen) renderNotifDropdown();
+}
+
+function renderNotifDropdown() {
+  const dd = document.getElementById('notif-dropdown');
+  if (!dd) return;
+  if (userNotifs.length === 0) {
+    dd.innerHTML = '<div class="notif-dropdown-header">Notificaciones</div><div class="notif-empty">📭 Sin notificaciones</div>';
+    return;
+  }
+  dd.innerHTML = '<div class="notif-dropdown-header">Notificaciones</div>' +
+    userNotifs.map(n => `<div class="notif-item ${n.is_read ? '' : 'unread'}" onclick="markNotifRead(${n.id}, this)">
+      <div class="ni-title">${n.title}</div>
+      <div class="ni-msg">${n.message}</div>
+      <div class="ni-time">${timeSince(n.created_at)}</div>
+    </div>`).join('');
+}
+
+async function markNotifRead(id, el) {
+  await api('/api/notifications/' + id + '/read', { method: 'POST' });
+  const n = userNotifs.find(x => x.id === id);
+  if (n) n.is_read = true;
+  if (el) el.classList.remove('unread');
+  const badge = document.getElementById('notif-count-badge');
+  const unread = getUnreadCount();
+  if (badge) badge.style.display = unread > 0 ? 'flex' : 'none';
+  if (badge) badge.textContent = unread;
+}
+
+document.addEventListener('click', (e) => {
+  if (notifDropdownOpen && !e.target.closest('.notif-wrap')) {
+    notifDropdownOpen = false;
+    const dd = document.getElementById('notif-dropdown');
+    if (dd) dd.style.display = 'none';
+  }
+});
 
 function showHelp(key, btn) {
   const h = helpContent[key];
@@ -1765,9 +1837,9 @@ async function loadAgentInfo() {
   if(r.ok)agentInfo=r.data;
 }
 async function startDashboard() {
-  await Promise.all([loadMachines(),loadAgentInfo(),loadUrlMonitors(true),loadMaintenance(),loadAuditLog()]);
+  await Promise.all([loadMachines(),loadAgentInfo(),loadUrlMonitors(true),loadMaintenance(),loadAuditLog(),loadUserNotifs()]);
   if(refreshInterval)clearInterval(refreshInterval);
-  refreshInterval=setInterval(()=>{ loadMachines(); loadUrlMonitors(true); },10000);
+  refreshInterval=setInterval(()=>{ loadMachines(); loadUrlMonitors(true); loadUserNotifs(); },10000);
 }
 
 // ── INIT ──
