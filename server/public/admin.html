@@ -481,7 +481,7 @@ async function resetPassword(userId, email) {
 
 // Init
 if (token) { loadData(); } else { renderLogin(); }
-setInterval(() => { if (token && data) loadData(); }, 15000);
+setInterval(() => { if (token && data && tab !== 'notifs') loadData(); }, 15000);
 </script>
 </body>
 </html>
