@@ -390,21 +390,7 @@ function renderNotifs() {
 
     <div class="section">
       <h2>&#128203; Historial de Notificaciones</h2>
-      ${adminNotifs.length === 0 ? '<p style="color:#888">Sin notificaciones enviadas</p>' :
-        adminNotifs.map(n => `<div style="background:#0f0f23;border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ff9800">
-          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
-            <div>
-              <strong style="color:#ff9800;font-size:15px">${n.title}</strong>
-              <span style="color:#555;font-size:11px;margin-left:8px">${fmtDate(n.created_at)}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="color:#888;font-size:11px">&#128065; ${n.read_count} leidos</span>
-              <button class="badge badge-off" style="cursor:pointer;border:none" onclick="deleteNotif(${n.id})">&#128465;</button>
-            </div>
-          </div>
-          <p style="color:#ccc;font-size:13px;line-height:1.5">${n.message}</p>
-          <span style="color:#555;font-size:11px">Enviado por ${n.sender_email || '---'}</span>
-        </div>`).join('')}
+      <div id="notif-history"><p style="color:#888">Cargando...</p></div>
     </div>`;
 }
 
@@ -427,7 +413,27 @@ async function sendBroadcast() {
 
 async function loadNotifs() {
   const res = await api('/api/admin/notifications');
-  if (res.ok) { adminNotifs = res.data; if (tab === 'notifs') render(); }
+  if (res.ok) { adminNotifs = res.data; renderNotifHistory(); }
+}
+
+function renderNotifHistory() {
+  const el = document.getElementById('notif-history');
+  if (!el) return;
+  el.innerHTML = adminNotifs.length === 0 ? '<p style="color:#888">Sin notificaciones enviadas</p>' :
+    adminNotifs.map(n => `<div style="background:#0f0f23;border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ff9800">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
+        <div>
+          <strong style="color:#ff9800;font-size:15px">${n.title}</strong>
+          <span style="color:#555;font-size:11px;margin-left:8px">${fmtDate(n.created_at)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:#888;font-size:11px">&#128065; ${n.read_count} leidos</span>
+          <button class="badge badge-off" style="cursor:pointer;border:none" onclick="deleteNotif(${n.id})">&#128465;</button>
+        </div>
+      </div>
+      <p style="color:#ccc;font-size:13px;line-height:1.5">${n.message}</p>
+      <span style="color:#555;font-size:11px">Enviado por ${n.sender_email || '---'}</span>
+    </div>`).join('');
 }
 
 async function deleteNotif(id) {
@@ -459,7 +465,7 @@ function render() {
     <div class="content">${content}</div>`;
 
   if (tab === 'agent') loadHistory();
-  if (tab === 'notifs') loadNotifs();
+  if (tab === 'notifs') setTimeout(loadNotifs, 50);
 }
 
 function setTab(t) { tab = t; render(); }
