@@ -100,6 +100,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .notif-item .ni-msg{font-size:12px;color:#888;margin-top:2px;line-height:1.4;}
 .notif-item .ni-time{font-size:10px;color:#bbb;margin-top:4px;}
 .notif-empty{padding:30px;text-align:center;color:#999;font-size:13px;}
+.notif-toast{position:fixed;top:20px;right:20px;background:#9C27B0;color:#fff;border-radius:14px;padding:14px 20px;box-shadow:0 6px 24px rgba(156,39,176,.4);z-index:700;max-width:360px;cursor:pointer;animation:toastIn .4s ease-out;display:flex;align-items:start;gap:12px;}
+.notif-toast .nt-icon{font-size:22px;flex-shrink:0;}
+.notif-toast .nt-title{font-size:14px;font-weight:700;}
+.notif-toast .nt-msg{font-size:12px;opacity:.9;margin-top:2px;line-height:1.4;}
+.notif-toast .nt-close{position:absolute;top:8px;right:12px;font-size:16px;opacity:.6;cursor:pointer;}
+.notif-toast .nt-close:hover{opacity:1;}
+@keyframes toastIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
 
 /* ── DONUT SALUD ── */
 .donut-wrap{display:flex;flex-direction:column;align-items:center;}
@@ -1095,10 +1102,31 @@ const helpContent = {
 // ── USER NOTIFICATIONS ──
 let userNotifs = [];
 let notifDropdownOpen = false;
+let knownNotifIds = new Set();
 
 async function loadUserNotifs() {
   const res = await api('/api/notifications');
-  if (res.ok) userNotifs = res.data;
+  if (!res.ok) return;
+  const prev = knownNotifIds;
+  const newNotifs = res.data.filter(n => !prev.has(n.id) && !n.is_read);
+  userNotifs = res.data;
+  knownNotifIds = new Set(res.data.map(n => n.id));
+  if (prev.size > 0 && newNotifs.length > 0) {
+    newNotifs.forEach(n => showNotifToast(n));
+  }
+  const badge = document.getElementById('notif-count-badge');
+  const unread = getUnreadCount();
+  if (badge) { badge.style.display = unread > 0 ? 'flex' : 'none'; badge.textContent = unread; }
+  if (notifDropdownOpen) renderNotifDropdown();
+}
+
+function showNotifToast(n) {
+  const toast = document.createElement('div');
+  toast.className = 'notif-toast';
+  toast.innerHTML = `<span class="nt-icon">💬</span><div><div class="nt-title">${n.title}</div><div class="nt-msg">${n.message}</div></div><span class="nt-close" onclick="event.stopPropagation();this.parentElement.remove()">✕</span>`;
+  toast.onclick = () => { toast.remove(); toggleNotifDropdown(); };
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentElement) toast.remove(); }, 8000);
 }
 
 function getUnreadCount() {

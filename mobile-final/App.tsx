@@ -421,6 +421,7 @@ export default function App() {
     // Refresh periodico: maquinas + IP changes (solo despues de la primera carga)
     const interval = setInterval(() => {
       loadMachines();
+      loadUserNotifs();
       if (firstLoadDone.current) {
         try { checkIPChanges(); } catch (e: any) { log.error(`checkIP error: ${e.message}`); }
       }
@@ -2488,6 +2489,14 @@ export default function App() {
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <TouchableOpacity onPress={async () => { await loadUserNotifs(); setShowNotifs(true); }} style={{padding: 8, position: 'relative'}}>
+              <Text style={{color: '#607d8b', fontSize: 16}}>{'💬'}</Text>
+              {userNotifs.filter(n => !n.is_read).length > 0 && (
+                <View style={{position: 'absolute', top: 2, right: 2, backgroundColor: '#9C27B0', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3}}>
+                  <Text style={{color: '#fff', fontSize: 9, fontWeight: '800'}}>{userNotifs.filter(n => !n.is_read).length}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => loadMachines()} style={{padding: 8}}><Text style={{color: '#607d8b', fontSize: 16}}>{'🔄'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => { setViewMode(viewMode === 'all' ? 'groups' : 'all'); }} style={{padding: 8}}>
               <Text style={{color: viewMode === 'groups' ? '#00d4ff' : '#607d8b', fontSize: 16}}>{viewMode === 'all' ? '📁' : '📋'}</Text>
