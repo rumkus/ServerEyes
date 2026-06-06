@@ -468,6 +468,24 @@ async function initDB() {
     )
   `);
 
+  // SSL monitoring
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ssl_monitors (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      hostname VARCHAR(255) NOT NULL,
+      name VARCHAR(255),
+      alert_days JSONB DEFAULT '[30, 14, 7, 1]',
+      last_check TIMESTAMP,
+      last_days_left INTEGER,
+      last_issuer VARCHAR(255),
+      last_expiry TIMESTAMP,
+      last_status VARCHAR(20),
+      last_alerted_days INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // Wake-on-LAN
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
@@ -1533,6 +1551,53 @@ setInterval(async () => {
   } catch (e) { console.error('Error trial check:', e.message); }
 }, 3600000);
 
+// ============== SSL CERTIFICATE CHECKER (cada 6 horas) ==============
+async function checkSSLCert(hostname) {
+  return new Promise((resolve) => {
+    const tls = require('tls');
+    const socket = tls.connect(443, hostname, { servername: hostname, timeout: 10000 }, () => {
+      const cert = socket.getPeerCertificate();
+      socket.destroy();
+      if (!cert || !cert.valid_to) return resolve(null);
+      const expiresAt = new Date(cert.valid_to);
+      const daysLeft = Math.ceil((expiresAt - Date.now()) / 86400000);
+      resolve({ issuer: cert.issuer?.O || cert.issuer?.CN || '?', expires_at: expiresAt, days_left: daysLeft, status: daysLeft <= 0 ? 'expired' : daysLeft <= 14 ? 'warning' : 'ok' });
+    });
+    socket.on('error', () => resolve(null));
+    socket.on('timeout', () => { socket.destroy(); resolve(null); });
+  });
+}
+
+setInterval(async () => {
+  try {
+    const monitors = await pool.query('SELECT sm.*, u.id as uid FROM ssl_monitors sm JOIN users u ON sm.user_id = u.id');
+    for (const mon of monitors.rows) {
+      const result = await checkSSLCert(mon.hostname);
+      if (!result) {
+        await pool.query('UPDATE ssl_monitors SET last_check = NOW(), last_status = $1 WHERE id = $2', ['error', mon.id]);
+        continue;
+      }
+      await pool.query(
+        'UPDATE ssl_monitors SET last_check = NOW(), last_days_left = $1, last_issuer = $2, last_expiry = $3, last_status = $4 WHERE id = $5',
+        [result.days_left, result.issuer, result.expires_at, result.status, mon.id]
+      );
+      const alertDays = mon.alert_days || [30, 14, 7, 1];
+      const matchedDay = alertDays.sort((a, b) => b - a).find(d => result.days_left <= d);
+      if (matchedDay !== undefined && matchedDay !== mon.last_alerted_days) {
+        sendPush(mon.user_id, `🔒 SSL: ${mon.name || mon.hostname}`, `Certificado vence en ${result.days_left} dias (${result.expires_at.toLocaleDateString('es')})`, { type: 'ssl_alert' });
+        await pool.query('UPDATE ssl_monitors SET last_alerted_days = $1 WHERE id = $2', [matchedDay, mon.id]);
+        console.log(`[SSL] Alerta: ${mon.hostname} vence en ${result.days_left} dias`);
+      }
+    }
+  } catch (e) { console.error('Error SSL check:', e.message); }
+}, 6 * 3600000);
+setTimeout(async () => {
+  try {
+    const monitors = await pool.query('SELECT id FROM ssl_monitors WHERE last_check IS NULL LIMIT 10');
+    if (monitors.rows.length > 0) console.log(`[SSL] ${monitors.rows.length} certificados pendientes de chequeo inicial`);
+  } catch {}
+}, 30000);
+
 // ============== DETECTOR DE OFFLINE ==============
 
 // Cada 30 segundos, marcar maquinas sin heartbeat en 60s como offline
@@ -2331,6 +2396,50 @@ app.post('/api/ssl-check', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Error: ' + error.message });
   }
+});
+
+// ── SSL MONITORS CRUD ──
+app.get('/api/ssl-monitors', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM ssl_monitors WHERE user_id = $1 ORDER BY hostname', [req.user.id]);
+    res.json(result.rows);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.post('/api/ssl-monitors', authenticateToken, async (req, res) => {
+  try {
+    const { hostname, name, alert_days } = req.body;
+    if (!hostname) return res.status(400).json({ error: 'hostname requerido' });
+    const h = hostname.replace(/^https?:\/\//, '').split('/')[0];
+    const days = alert_days || [30, 14, 7, 1];
+    const result = await pool.query(
+      'INSERT INTO ssl_monitors (user_id, hostname, name, alert_days) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.user.id, h, name || h, JSON.stringify(days)]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.delete('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ssl_monitors WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
+  try {
+    const { alert_days, name } = req.body;
+    const fields = [];
+    const vals = [];
+    let idx = 1;
+    if (alert_days !== undefined) { fields.push(`alert_days = $${idx++}`); vals.push(JSON.stringify(alert_days)); }
+    if (name !== undefined) { fields.push(`name = $${idx++}`); vals.push(name); }
+    if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
+    vals.push(req.params.id, req.user.id);
+    await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx}`, vals);
+    res.json({ message: 'Actualizado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 // ── INCIDENTS PDF EXPORT ──

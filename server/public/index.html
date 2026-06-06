@@ -428,6 +428,9 @@ function render() {
     setTimeout(loadSmtpConfig, 100);
     setTimeout(loadSessionDur, 150);
   }
+  if (activeNav === 'urls') {
+    setTimeout(loadSSLMonitors, 100);
+  }
   if (activeNav === 'incidentes' && !incidentsLoaded) {
     incidentsLoaded = true;
     loadIncidents();
@@ -2368,7 +2371,68 @@ function buildUrlsView() {
       </tr>`).join('')}
       </tbody></table>`}
     </div>
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-title"><span class="dot" style="background:#00838F"></span>🔒 Monitoreo de Certificados SSL</div>
+      <p style="font-size:12px;color:#999;margin-bottom:12px">Recibe alertas cuando un certificado SSL esta por vencer.</p>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="modal-input" id="ssl-hostname" placeholder="ejemplo.com" style="flex:1;font-size:13px;padding:8px"/>
+        <input class="modal-input" id="ssl-name" placeholder="Nombre (opcional)" style="flex:1;font-size:13px;padding:8px"/>
+        <button class="modal-btn sm" onclick="addSSLMonitor()">+ Agregar</button>
+      </div>
+      <div id="ssl-list"><p style="color:#888;font-size:12px">Cargando...</p></div>
+    </div>
   </div>`;
+}
+
+let sslMonitors = [];
+async function loadSSLMonitors() {
+  const r = await api('/api/ssl-monitors');
+  if (r.ok) { sslMonitors = r.data; renderSSLList(); }
+}
+function renderSSLList() {
+  const el = document.getElementById('ssl-list');
+  if (!el) return;
+  if (sslMonitors.length === 0) { el.innerHTML = '<p style="color:#888;text-align:center;font-size:13px">Sin certificados monitoreados</p>'; return; }
+  el.innerHTML = sslMonitors.map(s => {
+    const color = s.last_status === 'ok' ? '#4CAF50' : s.last_status === 'warning' ? '#FF9800' : s.last_status === 'expired' ? '#F44336' : '#888';
+    const icon = s.last_status === 'ok' ? '🟢' : s.last_status === 'warning' ? '🟡' : s.last_status === 'expired' ? '🔴' : '⏳';
+    const days = s.alert_days || [30,14,7,1];
+    return `<div style="background:var(--bg);border-left:3px solid ${color};border-radius:0 10px 10px 0;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:16px">${icon}</span>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px;color:var(--text)">${s.name || s.hostname}</div>
+        <div style="font-size:11px;color:#888">${s.hostname} · ${s.last_issuer || '?'} · ${s.last_days_left != null ? s.last_days_left + ' dias restantes' : 'Sin chequear'}</div>
+        <div style="font-size:10px;color:#999;margin-top:2px">Alertas: ${days.map(d => `<span style="background:var(--border2);padding:1px 6px;border-radius:3px;margin-right:3px">${d}d</span>`).join('')}</div>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center">
+        <button class="modal-btn sm" style="padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="checkSSL('${s.hostname}')">Verificar</button>
+        <button class="modal-btn sm" style="padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="editSSLDays(${s.id})">⚙ Dias</button>
+        <button class="modal-btn sm" style="background:#FFEBEE;color:#F44336;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="deleteSSLMonitor(${s.id})">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function addSSLMonitor() {
+  const hostname = document.getElementById('ssl-hostname')?.value?.trim();
+  const name = document.getElementById('ssl-name')?.value?.trim();
+  if (!hostname) { alert('Ingresa el dominio'); return; }
+  const r = await api('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name }) });
+  if (r.ok) { document.getElementById('ssl-hostname').value = ''; document.getElementById('ssl-name').value = ''; loadSSLMonitors(); }
+  else alert(r.data?.error || 'Error');
+}
+async function deleteSSLMonitor(id) {
+  if (!confirm('Eliminar monitor SSL?')) return;
+  await api('/api/ssl-monitors/' + id, { method: 'DELETE' });
+  loadSSLMonitors();
+}
+function editSSLDays(id) {
+  const mon = sslMonitors.find(s => s.id === id);
+  const current = (mon?.alert_days || [30,14,7,1]).join(', ');
+  const input = prompt('Dias antes del vencimiento para alertar (separados por coma):', current);
+  if (input === null) return;
+  const days = input.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a,b) => b-a);
+  if (days.length === 0) { alert('Ingresa al menos un numero'); return; }
+  api('/api/ssl-monitors/' + id, { method: 'PUT', body: JSON.stringify({ alert_days: days }) }).then(() => loadSSLMonitors());
 }
 
 function openAddUrlMonitor() {
