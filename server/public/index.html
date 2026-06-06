@@ -1049,10 +1049,11 @@ let incidentDetail = null;
 
 async function loadIncidents() {
   const res = await api('/api/incidents');
-  if (res.ok) { incidentsList = res.data; render(); }
+  if (res.ok) { incidentsList = res.data; if (activeNav === 'incidentes') render(); }
 }
 
 async function openIncident(id) {
+  notifDropdownOpen = false;
   const res = await api('/api/incidents/' + id);
   if (res.ok) { incidentDetail = res.data; render(); }
 }
