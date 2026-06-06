@@ -426,7 +426,8 @@ function render() {
   if (activeNav === 'ajustes') {
     setTimeout(loadSmtpConfig, 100);
   }
-  if (activeNav === 'incidentes' && !incidentsList.length && !incidentDetail) {
+  if (activeNav === 'incidentes' && !incidentsLoaded) {
+    incidentsLoaded = true;
     loadIncidents();
   }
   if (notifDropdownOpen) {
@@ -1049,14 +1050,11 @@ function createLineChart(canvasId, labels, datasets, opts={}) {
 // ── INCIDENTS VIEW ──
 let incidentsList = [];
 let incidentDetail = null;
+let incidentsLoaded = false;
 
-let incidentsLoading = false;
 async function loadIncidents() {
-  if (incidentsLoading) return;
-  incidentsLoading = true;
   const res = await api('/api/incidents');
-  incidentsLoading = false;
-  if (res.ok) { incidentsList = res.data; if (activeNav === 'incidentes') render(); }
+  if (res.ok) { incidentsList = res.data; incidentsLoaded = true; render(); }
 }
 
 async function openIncident(id) {
