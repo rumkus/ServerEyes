@@ -212,6 +212,11 @@ export default function App() {
   const [showIncidents, setShowIncidents] = useState(false);
   const [incidents, setIncidents] = useState<any[]>([]);
   const [incidentDetail, setIncidentDetail] = useState<any>(null);
+  const [showSSL, setShowSSL] = useState(false);
+  const [sslMonitors, setSslMonitors] = useState<any[]>([]);
+  const [sslAdding, setSslAdding] = useState(false);
+  const [sslHostname, setSslHostname] = useState('');
+  const [sslName, setSslName] = useState('');
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
@@ -220,6 +225,8 @@ export default function App() {
     if (showAddMaintenance) { setShowAddMaintenance(false); return true; }
     if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
     if (showMaintenance) { setShowMaintenance(false); return true; }
+    if (sslAdding) { setSslAdding(false); return true; }
+    if (showSSL) { setShowSSL(false); return true; }
     if (incidentDetail) { setIncidentDetail(null); return true; }
     if (showIncidents) { setShowIncidents(false); return true; }
     if (showNotifs) { setShowNotifs(false); return true; }
@@ -995,6 +1002,111 @@ export default function App() {
           }}>
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // SSL MONITORS
+  const loadSSLMonitors = async () => {
+    const res = await apiRequest('/api/ssl-monitors', {}, token);
+    if (res.ok) setSslMonitors(res.data);
+  };
+
+  if (sslAdding) {
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Agregar Certificado SSL" />
+        <ScrollView contentContainerStyle={{padding: 24}}>
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Dominio (sin https://)</Text>
+          <TextInput style={s.input} value={sslHostname} onChangeText={setSslHostname} placeholder="ejemplo.com" placeholderTextColor="#555" autoCapitalize="none" />
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Nombre (opcional)</Text>
+          <TextInput style={s.input} value={sslName} onChangeText={setSslName} placeholder="Mi sitio web" placeholderTextColor="#555" />
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            if (!sslHostname.trim()) return;
+            const res = await apiRequest('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname: sslHostname.trim().replace(/^https?:\/\//, '').split('/')[0], name: sslName.trim() || undefined }) }, token);
+            if (res.ok) { setSslAdding(false); setSslHostname(''); setSslName(''); loadSSLMonitors(); }
+            else Alert.alert('Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Agregar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setSslAdding(false)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (showSSL) {
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Certificados SSL" subtitle={`${sslMonitors.length} monitoreados`} />
+        <TouchableOpacity style={{backgroundColor: '#1a2a3a', borderRadius: 8, padding: 10, marginHorizontal: 16, marginBottom: 4, alignItems: 'center'}} onPress={loadSSLMonitors}>
+          <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '600'}}>🔄 Actualizar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{backgroundColor: '#00838F', borderRadius: 8, padding: 10, marginHorizontal: 16, marginBottom: 8, alignItems: 'center'}} onPress={() => { setSslHostname(''); setSslName(''); setSslAdding(true); }}>
+          <Text style={{color: '#fff', fontSize: 13, fontWeight: '600'}}>+ Agregar certificado</Text>
+        </TouchableOpacity>
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
+          {sslMonitors.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>🔒</Text>
+              <Text style={{color: th.sub, fontSize: 16}}>Sin certificados monitoreados</Text>
+              <Text style={{color: '#3a5068', fontSize: 13, marginTop: 4}}>Agrega un dominio para monitorear su SSL</Text>
+            </View>
+          ) : sslMonitors.map((mon: any) => {
+            const color = mon.last_status === 'ok' ? '#4CAF50' : mon.last_status === 'warning' ? '#ff9800' : mon.last_status === 'expired' ? '#ff5252' : '#607d8b';
+            const icon = mon.last_status === 'ok' ? '🟢' : mon.last_status === 'warning' ? '🟡' : mon.last_status === 'expired' ? '🔴' : '⏳';
+            const days = mon.alert_days || [30, 14, 7, 1];
+            return (
+              <View key={mon.id} style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 10, borderLeftWidth: 3, borderLeftColor: color}}>
+                <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
+                  <Text style={{fontSize: 18, marginRight: 10}}>{icon}</Text>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{mon.name || mon.hostname}</Text>
+                    <Text style={{color: th.sub, fontSize: 11}}>{mon.hostname}</Text>
+                  </View>
+                  {mon.last_days_left != null && (
+                    <View style={{backgroundColor: color + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8}}>
+                      <Text style={{color, fontSize: 12, fontWeight: '700'}}>{mon.last_days_left}d</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={{flexDirection: 'row', gap: 12, marginBottom: 6}}>
+                  <Text style={{color: th.sub, fontSize: 11}}>Emisor: {mon.last_issuer || '?'}</Text>
+                  {mon.last_expiry && <Text style={{color: th.sub, fontSize: 11}}>Vence: {new Date(mon.last_expiry).toLocaleDateString('es')}</Text>}
+                </View>
+                <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8}}>
+                  <Text style={{color: th.sub, fontSize: 10}}>Alertas:</Text>
+                  {days.map((d: number, i: number) => (
+                    <View key={i} style={{backgroundColor: th.border, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1}}>
+                      <Text style={{color: th.sub, fontSize: 10}}>{d}d</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={{flexDirection: 'row', gap: 8}}>
+                  <TouchableOpacity style={{flex: 1, backgroundColor: th.border, borderRadius: 8, padding: 8, alignItems: 'center'}}
+                    onPress={() => {
+                      const input = (mon.alert_days || [30,14,7,1]).join(', ');
+                      Alert.prompt ? Alert.prompt('Dias de alerta', 'Separados por coma', async (text: string) => {
+                        const parsed = text.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a: number, b: number) => b - a);
+                        if (parsed.length > 0) { await apiRequest(`/api/ssl-monitors/${mon.id}`, { method: 'PUT', body: JSON.stringify({ alert_days: parsed }) }, token); loadSSLMonitors(); }
+                      }, 'plain-text', input) : Alert.alert('Dias de alerta', `Actual: ${input}\n\nPara editar, usa la version web.`);
+                    }}>
+                    <Text style={{color: '#00d4ff', fontSize: 12}}>⚙ Dias</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={{flex: 1, backgroundColor: '#2d1117', borderRadius: 8, padding: 8, alignItems: 'center'}}
+                    onPress={async () => {
+                      await apiRequest(`/api/ssl-monitors/${mon.id}`, { method: 'DELETE' }, token);
+                      loadSSLMonitors();
+                    }}>
+                    <Text style={{color: '#ff5252', fontSize: 12}}>Eliminar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
       </View>
     );
   }
@@ -2724,6 +2836,7 @@ export default function App() {
               {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
               {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
               {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
+              {icon: '🔒', label: 'Certificados SSL', action: async () => { setMenuOpen(false); await loadSSLMonitors(); setShowSSL(true); }},
               {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
               {icon: '💬', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
               {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
