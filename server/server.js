@@ -416,6 +416,41 @@ async function initDB() {
     )
   `);
 
+  // Plans
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) DEFAULT 'free'`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_machines INTEGER DEFAULT 3`).catch(() => {});
+
+  // SLA
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS sla_target NUMERIC(5,2) DEFAULT 99.9`).catch(() => {});
+
+  // Incidents
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS incidents (
+      id SERIAL PRIMARY KEY,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id),
+      title VARCHAR(255),
+      status VARCHAR(20) DEFAULT 'open',
+      started_at TIMESTAMP DEFAULT NOW(),
+      ended_at TIMESTAMP,
+      duration_minutes INTEGER,
+      resolution_notes TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS incident_events (
+      id SERIAL PRIMARY KEY,
+      incident_id INTEGER REFERENCES incidents(id) ON DELETE CASCADE,
+      event_type VARCHAR(30) NOT NULL,
+      message TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // Wake-on-LAN
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
@@ -968,6 +1003,21 @@ app.post('/api/heartbeat', async (req, res) => {
       );
       if (lastLog.rows.length === 0 || lastLog.rows[0].status === 'offline') {
         await pool.query('INSERT INTO uptime_log (machine_id, status) VALUES ($1, $2)', [updatedMachine.id, 'online']);
+        // Auto-resolver incidentes abiertos
+        try {
+          const openInc = await pool.query(
+            `UPDATE incidents SET status = 'resolved', ended_at = NOW(),
+             duration_minutes = EXTRACT(EPOCH FROM (NOW() - started_at)) / 60
+             WHERE machine_id = $1 AND status = 'open' RETURNING id`,
+            [updatedMachine.id]
+          );
+          for (const inc of openInc.rows) {
+            await pool.query(
+              `INSERT INTO incident_events (incident_id, event_type, message) VALUES ($1, 'resolved', 'Maquina volvio a estar online')`,
+              [inc.id]
+            );
+          }
+        } catch (ie) {}
       }
     }
 
@@ -1149,6 +1199,16 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 
     if (!machine_name) {
       return res.status(400).json({ error: 'machine_name es requerido' });
+    }
+
+    // Verificar limite del plan
+    const userPlan = await pool.query('SELECT plan, max_machines FROM users WHERE id = $1', [req.user.id]);
+    const { plan, max_machines } = userPlan.rows[0] || { plan: 'free', max_machines: 3 };
+    if (plan !== 'pro' && plan !== 'enterprise') {
+      const count = await pool.query('SELECT COUNT(*) as cnt FROM machines WHERE user_id = $1', [req.user.id]);
+      if (parseInt(count.rows[0].cnt) >= max_machines) {
+        return res.status(403).json({ error: `Limite del plan ${plan}: maximo ${max_machines} maquinas. Actualiza a Pro para agregar mas.` });
+      }
     }
 
     // Generar clave unica para la maquina
@@ -1357,6 +1417,18 @@ setInterval(async () => {
           'UPDATE machines SET offline_notified = true WHERE id = $1',
           [machine.id]
         );
+        // Auto-crear incidente
+        try {
+          const inc = await pool.query(
+            `INSERT INTO incidents (machine_id, user_id, title, status, started_at)
+             VALUES ($1, $2, $3, 'open', NOW()) RETURNING id`,
+            [machine.id, machine.user_id, `${machine.machine_name} offline`]
+          );
+          await pool.query(
+            `INSERT INTO incident_events (incident_id, event_type, message) VALUES ($1, 'detected', $2)`,
+            [inc.rows[0].id, `Maquina dejo de responder. Ultima IP: ${machine.public_ip || 'desconocida'}`]
+          );
+        } catch (ie) { console.error('Error creando incidente:', ie.message); }
         if (machine.alert_offline !== false) {
           const inMaint = await isInMaintenance(machine.id, machine.user_id);
           if (!inMaint) {
@@ -1385,7 +1457,7 @@ async function requireAdmin(req, res, next) {
 // Dashboard admin: todos los usuarios y maquinas
 app.get('/api/admin/overview', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const users = await pool.query('SELECT id, email, nombre, is_admin, created_at, fcm_token IS NOT NULL as has_push FROM users ORDER BY id');
+    const users = await pool.query('SELECT id, email, nombre, is_admin, plan, max_machines, created_at, fcm_token IS NOT NULL as has_push FROM users ORDER BY id');
     const machines = await pool.query(`SELECT m.*, u.email as owner_email FROM machines m LEFT JOIN users u ON m.user_id = u.id ORDER BY m.id`);
     const totalUsers = users.rows.length;
     const totalMachines = machines.rows.length;
@@ -1916,6 +1988,166 @@ app.post('/api/admin/test-push', authenticateToken, requireAdmin, async (req, re
   } catch (error) {
     console.error('Error test push:', error);
     res.status(500).json({ error: 'Error enviando push: ' + error.message });
+  }
+});
+
+// ── PLAN INFO ──
+app.get('/api/plan', authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query('SELECT plan, max_machines, plan_expires_at FROM users WHERE id = $1', [req.user.id]);
+    const machineCount = await pool.query('SELECT COUNT(*) as cnt FROM machines WHERE user_id = $1', [req.user.id]);
+    const p = user.rows[0] || {};
+    res.json({ plan: p.plan || 'free', max_machines: p.max_machines || 3, current_machines: parseInt(machineCount.rows[0].cnt), expires_at: p.plan_expires_at });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Admin: cambiar plan de usuario
+app.post('/api/admin/set-plan', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { user_id, plan, max_machines } = req.body;
+    const maxM = plan === 'pro' ? 999 : plan === 'enterprise' ? 9999 : (max_machines || 3);
+    await pool.query('UPDATE users SET plan = $1, max_machines = $2 WHERE id = $3', [plan || 'free', maxM, user_id]);
+    res.json({ message: 'Plan actualizado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── SLA TRACKING ──
+app.get('/api/machines/:id/sla', authenticateToken, async (req, res) => {
+  try {
+    const machine = await pool.query(
+      'SELECT id, sla_target FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))',
+      [req.params.id, req.user.id]
+    );
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'No encontrada' });
+    const slaTarget = parseFloat(machine.rows[0].sla_target) || 99.9;
+
+    const months = [];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const start = d.toISOString();
+      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).toISOString();
+      const events = await pool.query(
+        `SELECT status, timestamp FROM uptime_log WHERE machine_id = $1 AND timestamp BETWEEN $2 AND $3 ORDER BY timestamp ASC`,
+        [req.params.id, start, end]
+      );
+      const priorEvent = await pool.query(
+        `SELECT status FROM uptime_log WHERE machine_id = $1 AND timestamp < $2 ORDER BY timestamp DESC LIMIT 1`,
+        [req.params.id, start]
+      );
+      let lastStatus = priorEvent.rows.length > 0 ? priorEvent.rows[0].status : 'offline';
+      let onlineMs = 0, totalMs = 0;
+      const monthStart = d.getTime();
+      const monthEnd = Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime(), now.getTime());
+      let cursor = monthStart;
+
+      for (const evt of events.rows) {
+        const evtTime = new Date(evt.timestamp).getTime();
+        if (lastStatus === 'online') onlineMs += evtTime - cursor;
+        cursor = evtTime;
+        lastStatus = evt.status;
+      }
+      if (lastStatus === 'online') onlineMs += monthEnd - cursor;
+      totalMs = monthEnd - monthStart;
+
+      const uptime = totalMs > 0 ? parseFloat(((onlineMs / totalMs) * 100).toFixed(3)) : 0;
+      months.push({
+        month: d.toLocaleDateString('es', { month: 'short', year: 'numeric' }),
+        uptime,
+        target: slaTarget,
+        met: uptime >= slaTarget,
+        online_hours: Math.round(onlineMs / 3600000),
+        total_hours: Math.round(totalMs / 3600000),
+        downtime_minutes: Math.round((totalMs - onlineMs) / 60000)
+      });
+    }
+    res.json({ sla_target: slaTarget, months });
+  } catch (error) {
+    console.error('Error SLA:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.put('/api/machines/:id/sla', authenticateToken, async (req, res) => {
+  try {
+    const { sla_target } = req.body;
+    await pool.query('UPDATE machines SET sla_target = $1 WHERE id = $2 AND user_id = $3', [sla_target || 99.9, req.params.id, req.user.id]);
+    res.json({ message: 'SLA actualizado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── INCIDENTS ──
+app.get('/api/incidents', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT i.*, m.machine_name,
+       (SELECT COUNT(*) FROM incident_events ie WHERE ie.incident_id = i.id) as event_count
+       FROM incidents i JOIN machines m ON i.machine_id = m.id
+       WHERE i.user_id = $1
+       ORDER BY i.created_at DESC LIMIT 50`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.get('/api/incidents/:id', authenticateToken, async (req, res) => {
+  try {
+    const inc = await pool.query(
+      `SELECT i.*, m.machine_name FROM incidents i JOIN machines m ON i.machine_id = m.id WHERE i.id = $1 AND i.user_id = $2`,
+      [req.params.id, req.user.id]
+    );
+    if (inc.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    const events = await pool.query(
+      `SELECT ie.*, u.email as user_email FROM incident_events ie LEFT JOIN users u ON ie.created_by = u.id WHERE ie.incident_id = $1 ORDER BY ie.created_at ASC`,
+      [req.params.id]
+    );
+    res.json({ ...inc.rows[0], events: events.rows });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/incidents/:id/events', authenticateToken, async (req, res) => {
+  try {
+    const { event_type, message } = req.body;
+    const inc = await pool.query('SELECT id FROM incidents WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (inc.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    await pool.query(
+      'INSERT INTO incident_events (incident_id, event_type, message, created_by) VALUES ($1, $2, $3, $4)',
+      [req.params.id, event_type || 'update', message, req.user.id]
+    );
+    res.json({ message: 'Evento agregado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/incidents/:id/resolve', authenticateToken, async (req, res) => {
+  try {
+    const { resolution_notes } = req.body;
+    const inc = await pool.query('SELECT id, started_at FROM incidents WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (inc.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    const dur = Math.round((Date.now() - new Date(inc.rows[0].started_at).getTime()) / 60000);
+    await pool.query(
+      `UPDATE incidents SET status = 'resolved', ended_at = NOW(), duration_minutes = $1, resolution_notes = $2 WHERE id = $3`,
+      [dur, resolution_notes || null, req.params.id]
+    );
+    await pool.query(
+      `INSERT INTO incident_events (incident_id, event_type, message, created_by) VALUES ($1, 'resolved', $2, $3)`,
+      [req.params.id, resolution_notes || 'Incidente resuelto manualmente', req.user.id]
+    );
+    res.json({ message: 'Incidente resuelto' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 

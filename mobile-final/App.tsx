@@ -191,6 +191,9 @@ export default function App() {
   const [servicesData, setServicesData] = useState<any>(null);
   const [configMachine, setConfigMachine] = useState<any>(null);
   const [configData, setConfigData] = useState<any>(null);
+  const [showIncidents, setShowIncidents] = useState(false);
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [incidentDetail, setIncidentDetail] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
@@ -199,6 +202,8 @@ export default function App() {
     if (showAddMaintenance) { setShowAddMaintenance(false); return true; }
     if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
     if (showMaintenance) { setShowMaintenance(false); return true; }
+    if (incidentDetail) { setIncidentDetail(null); return true; }
+    if (showIncidents) { setShowIncidents(false); return true; }
     if (showNotifs) { setShowNotifs(false); return true; }
     if (showAuditLog) { setShowAuditLog(false); return true; }
     if (logsMachine) { setLogsMachine(null); return true; }
@@ -932,6 +937,136 @@ export default function App() {
           }}>
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // INCIDENTS
+  const loadIncidents = async () => {
+    const res = await apiRequest('/api/incidents', {}, token);
+    if (res.ok) setIncidents(res.data);
+  };
+
+  const openIncidentDetail = async (id: number) => {
+    const res = await apiRequest(`/api/incidents/${id}`, {}, token);
+    if (res.ok) setIncidentDetail(res.data);
+  };
+
+  const fmtIncDuration = (min: number) => {
+    if (!min) return '---';
+    if (min < 60) return Math.round(min) + ' min';
+    if (min < 1440) return Math.round(min / 60) + 'h ' + Math.round(min % 60) + 'min';
+    return Math.floor(min / 1440) + 'd ' + Math.round((min % 1440) / 60) + 'h';
+  };
+
+  if (incidentDetail) {
+    const d = incidentDetail;
+    const evtColors: any = { detected: '#ff5252', acknowledged: '#ff9800', update: '#2196F3', resolved: '#4CAF50' };
+    const evtIcons: any = { detected: '🔴', acknowledged: '👁', update: '📝', resolved: '✅' };
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title={d.title} subtitle={d.machine_name} />
+        <ScrollView contentContainerStyle={{padding: 16}}>
+          <View style={{flexDirection: 'row', marginBottom: 16, gap: 8}}>
+            <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 12, alignItems: 'center'}}>
+              <Text style={{color: '#607d8b', fontSize: 10}}>Estado</Text>
+              <Text style={{color: d.status === 'open' ? '#ff5252' : '#4CAF50', fontSize: 14, fontWeight: '800', marginTop: 2}}>{d.status === 'open' ? 'ABIERTO' : 'RESUELTO'}</Text>
+            </View>
+            <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 12, alignItems: 'center'}}>
+              <Text style={{color: '#607d8b', fontSize: 10}}>Duracion</Text>
+              <Text style={{color: '#eee', fontSize: 14, fontWeight: '800', marginTop: 2}}>{d.ended_at ? fmtIncDuration(d.duration_minutes) : fmtIncDuration((Date.now() - new Date(d.started_at).getTime()) / 60000)}</Text>
+            </View>
+          </View>
+          {d.resolution_notes && (
+            <View style={{backgroundColor: '#112a1a', borderLeftWidth: 3, borderLeftColor: '#4CAF50', borderRadius: 10, padding: 12, marginBottom: 16}}>
+              <Text style={{color: '#4CAF50', fontSize: 11, fontWeight: '700', marginBottom: 4}}>Resolucion</Text>
+              <Text style={{color: '#ccc', fontSize: 13}}>{d.resolution_notes}</Text>
+            </View>
+          )}
+          <Text style={{color: '#607d8b', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 12}}>Timeline</Text>
+          {(d.events || []).map((e: any, i: number) => (
+            <View key={i} style={{flexDirection: 'row', marginBottom: 16}}>
+              <View style={{width: 24, alignItems: 'center', marginRight: 12}}>
+                <View style={{width: 12, height: 12, borderRadius: 6, backgroundColor: evtColors[e.event_type] || '#888'}} />
+                {i < d.events.length - 1 && <View style={{width: 2, flex: 1, backgroundColor: '#1a2a3a', marginTop: 4}} />}
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={{color: evtColors[e.event_type] || '#888', fontSize: 11, fontWeight: '700'}}>{evtIcons[e.event_type] || '📌'} {(e.event_type || '').toUpperCase()}</Text>
+                <Text style={{color: '#ccc', fontSize: 13, marginTop: 2}}>{e.message}</Text>
+                <Text style={{color: '#3a5068', fontSize: 10, marginTop: 2}}>{new Date(e.created_at).toLocaleString('es')}{e.user_email ? ' · ' + e.user_email : ''}</Text>
+              </View>
+            </View>
+          ))}
+          {d.status === 'open' && (
+            <View style={{flexDirection: 'row', gap: 8, marginTop: 8}}>
+              <TouchableOpacity style={{flex: 1, backgroundColor: '#1a2a3a', borderRadius: 10, padding: 12, alignItems: 'center'}}
+                onPress={async () => {
+                  const msg = 'Nota agregada desde la app';
+                  await apiRequest(`/api/incidents/${d.id}/events`, { method: 'POST', body: JSON.stringify({ event_type: 'update', message: msg }) }, token);
+                  openIncidentDetail(d.id);
+                }}>
+                <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '700'}}>📝 Nota</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{flex: 1, backgroundColor: '#0d2818', borderRadius: 10, padding: 12, alignItems: 'center'}}
+                onPress={async () => {
+                  await apiRequest(`/api/incidents/${d.id}/resolve`, { method: 'POST', body: JSON.stringify({ resolution_notes: 'Resuelto desde la app' }) }, token);
+                  setIncidentDetail(null);
+                  loadIncidents();
+                }}>
+                <Text style={{color: '#4CAF50', fontSize: 13, fontWeight: '700'}}>✅ Resolver</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (showIncidents) {
+    const open = incidents.filter(i => i.status === 'open');
+    const resolved = incidents.filter(i => i.status === 'resolved');
+    return (
+      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
+        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+        <BackHeader title="Incidentes" subtitle={`${open.length} abiertos`} />
+        <TouchableOpacity style={{backgroundColor: '#1a2a3a', borderRadius: 8, padding: 10, marginHorizontal: 16, marginBottom: 8, alignItems: 'center'}} onPress={loadIncidents}>
+          <Text style={{color: '#00d4ff', fontSize: 13, fontWeight: '600'}}>🔄 Actualizar</Text>
+        </TouchableOpacity>
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
+          {incidents.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>🎉</Text>
+              <Text style={{color: '#607d8b', fontSize: 16}}>Sin incidentes</Text>
+            </View>
+          ) : (
+            <>
+              {open.map((inc: any) => (
+                <TouchableOpacity key={inc.id} onPress={() => openIncidentDetail(inc.id)}
+                  style={{backgroundColor: '#111d2e', borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#ff5252', flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{fontSize: 20, marginRight: 12}}>🔴</Text>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: '#eee', fontSize: 14, fontWeight: '700'}}>{inc.title}</Text>
+                    <Text style={{color: '#607d8b', fontSize: 11}}>{inc.machine_name} · {inc.event_count} eventos</Text>
+                  </View>
+                  <Text style={{color: '#ff5252', fontSize: 11, fontWeight: '700'}}>{fmtIncDuration((Date.now() - new Date(inc.started_at).getTime()) / 60000)}</Text>
+                </TouchableOpacity>
+              ))}
+              {resolved.length > 0 && <Text style={{color: '#3a5068', fontSize: 12, marginVertical: 10, textTransform: 'uppercase'}}>Resueltos</Text>}
+              {resolved.map((inc: any) => (
+                <TouchableOpacity key={inc.id} onPress={() => openIncidentDetail(inc.id)}
+                  style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 14, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: '#4CAF50', flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{fontSize: 16, marginRight: 12}}>✅</Text>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: '#888', fontSize: 13, fontWeight: '600'}}>{inc.title}</Text>
+                    <Text style={{color: '#3a5068', fontSize: 11}}>{inc.machine_name} · {fmtIncDuration(inc.duration_minutes)}</Text>
+                  </View>
+                  <Text style={{color: '#3a5068', fontSize: 11}}>{new Date(inc.started_at).toLocaleDateString('es')}</Text>
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+        </ScrollView>
       </View>
     );
   }
@@ -2518,6 +2653,7 @@ export default function App() {
               {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
               {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
               {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
+              {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
               {icon: '💬', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
               {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
               {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},

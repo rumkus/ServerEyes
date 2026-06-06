@@ -468,6 +468,7 @@ function buildLayout() {
       ${activeNav==='servidores' ? buildServersView(filtered) : ''}
       ${activeNav==='alertas' ? buildAlertasView(alerts) : ''}
       ${activeNav==='urls' ? buildUrlsView() : ''}
+      ${activeNav==='incidentes' ? buildIncidentesView() : ''}
       ${activeNav==='reportes' ? buildReportesView() : ''}
       ${activeNav==='ajustes' ? buildAjustesView() : ''}
     </div>
@@ -483,6 +484,7 @@ function buildHeader() {
       <span class="eye">👁️</span>
       <span class="name">ServerEyes</span>
       <span class="noc-badge">NOC MODE</span>
+      ${userPlan ? `<span class="noc-badge" style="background:${userPlan.plan==='pro'?'#4CAF50':userPlan.plan==='enterprise'?'#2196F3':'#666'}">${(userPlan.plan||'free').toUpperCase()} · ${userPlan.current_machines}/${userPlan.plan==='pro'||userPlan.plan==='enterprise'?'∞':userPlan.max_machines}</span>` : ''}
     </div>
     <div class="header-search">
       <span class="search-icon">🔍</span>
@@ -939,6 +941,7 @@ function buildBottomNav(alertBadge) {
     {id:'servidores', icon:'🖥️', label:t('nav_servers')},
     {id:'alertas', icon:'🔔', label:t('nav_alerts'), badge: alertBadge},
     {id:'urls', icon:'🌐', label:'URLs'},
+    {id:'incidentes', icon:'🚨', label:'Incidentes'},
     {id:'reportes', icon:'📋', label:t('nav_reports')},
     {id:'ajustes', icon:'⚙️', label:t('nav_settings')},
   ];
@@ -1037,6 +1040,167 @@ function createLineChart(canvasId, labels, datasets, opts={}) {
 }
 
 
+// ── INCIDENTS VIEW ──
+let incidentsList = [];
+let incidentDetail = null;
+
+async function loadIncidents() {
+  const res = await api('/api/incidents');
+  if (res.ok) { incidentsList = res.data; render(); }
+}
+
+async function openIncident(id) {
+  const res = await api('/api/incidents/' + id);
+  if (res.ok) { incidentDetail = res.data; render(); }
+}
+
+async function addIncidentNote(id) {
+  const msg = prompt('Agregar nota al incidente:');
+  if (!msg) return;
+  await api('/api/incidents/' + id + '/events', { method: 'POST', body: JSON.stringify({ event_type: 'update', message: msg }) });
+  openIncident(id);
+}
+
+async function resolveIncident(id) {
+  const notes = prompt('Notas de resolucion (opcional):');
+  await api('/api/incidents/' + id + '/resolve', { method: 'POST', body: JSON.stringify({ resolution_notes: notes || '' }) });
+  incidentDetail = null;
+  loadIncidents();
+}
+
+function fmtDuration(min) {
+  if (!min) return '---';
+  if (min < 60) return Math.round(min) + ' min';
+  if (min < 1440) return Math.round(min / 60) + 'h ' + Math.round(min % 60) + 'min';
+  return Math.floor(min / 1440) + 'd ' + Math.round((min % 1440) / 60) + 'h';
+}
+
+function buildIncidentesView() {
+  if (!incidentsList.length && !incidentDetail) setTimeout(loadIncidents, 50);
+
+  if (incidentDetail) {
+    const d = incidentDetail;
+    const evtIcons = { detected: '🔴', acknowledged: '👁', update: '📝', resolved: '✅' };
+    const evtColors = { detected: '#ff5252', acknowledged: '#ff9800', update: '#2196F3', resolved: '#4CAF50' };
+    return `<div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${d.title}</div>
+          <div style="font-size:12px;color:#888">${d.machine_name} · ${new Date(d.started_at).toLocaleString('es')}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="background:${d.status==='open'?'#ff525220':'#4CAF5020'};color:${d.status==='open'?'#ff5252':'#4CAF50'};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700">${d.status==='open'?'ABIERTO':'RESUELTO'}</span>
+          <button class="modal-btn sm" onclick="incidentDetail=null;render()">← Volver</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-bottom:20px">
+        <div style="background:var(--bg);border-radius:10px;padding:12px 16px;flex:1;text-align:center">
+          <div style="font-size:11px;color:#888">Duracion</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${d.ended_at ? fmtDuration(d.duration_minutes) : fmtDuration((Date.now() - new Date(d.started_at).getTime()) / 60000)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:10px;padding:12px 16px;flex:1;text-align:center">
+          <div style="font-size:11px;color:#888">Inicio</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${new Date(d.started_at).toLocaleString('es')}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:10px;padding:12px 16px;flex:1;text-align:center">
+          <div style="font-size:11px;color:#888">Fin</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${d.ended_at ? new Date(d.ended_at).toLocaleString('es') : 'En curso...'}</div>
+        </div>
+      </div>
+      ${d.resolution_notes ? `<div style="background:#4CAF5010;border-left:3px solid #4CAF50;border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:16px"><div style="font-size:11px;color:#4CAF50;font-weight:600;margin-bottom:4px">Resolucion</div><div style="font-size:13px;color:var(--text)">${d.resolution_notes}</div></div>` : ''}
+      <div style="font-size:13px;font-weight:700;color:#888;margin-bottom:12px;text-transform:uppercase">Timeline</div>
+      <div style="border-left:2px solid var(--border2);margin-left:10px;padding-left:20px">
+        ${(d.events||[]).map(e => `<div style="margin-bottom:16px;position:relative">
+          <div style="position:absolute;left:-27px;top:2px;width:12px;height:12px;border-radius:50%;background:${evtColors[e.event_type]||'#888'};border:2px solid var(--card-bg)"></div>
+          <div style="font-size:12px;color:${evtColors[e.event_type]||'#888'};font-weight:600">${evtIcons[e.event_type]||'📌'} ${e.event_type.toUpperCase()}</div>
+          <div style="font-size:13px;color:var(--text);margin-top:2px">${e.message||''}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px">${new Date(e.created_at).toLocaleString('es')}${e.user_email ? ' · ' + e.user_email : ''}</div>
+        </div>`).join('')}
+      </div>
+      ${d.status==='open' ? `<div style="display:flex;gap:8px;margin-top:16px">
+        <button class="modal-btn sm" onclick="addIncidentNote(${d.id})">📝 Agregar nota</button>
+        <button class="modal-btn sm" style="background:#4CAF50;color:#fff" onclick="resolveIncident(${d.id})">✅ Resolver</button>
+      </div>` : ''}
+    </div>`;
+  }
+
+  const open = incidentsList.filter(i => i.status === 'open');
+  const resolved = incidentsList.filter(i => i.status === 'resolved');
+  return `<div style="display:flex;flex-direction:column;gap:16px">
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:#ff5252"></span>Incidentes Abiertos (${open.length})<button class="help-btn" onclick="event.stopPropagation();showHelp('incidents',this)">?</button></div>
+      ${open.length === 0 ? '<div style="text-align:center;padding:30px;color:#888"><div style="font-size:36px;margin-bottom:8px">🎉</div>Sin incidentes abiertos</div>' :
+        open.map(i => `<div style="background:var(--bg);border-left:3px solid #ff5252;border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:12px" onclick="openIncident(${i.id})">
+          <span style="font-size:20px">🔴</span>
+          <div style="flex:1">
+            <div style="font-weight:700;color:var(--text);font-size:14px">${i.title}</div>
+            <div style="font-size:12px;color:#888">${i.machine_name} · hace ${timeSince(i.started_at)} · ${i.event_count} eventos</div>
+          </div>
+          <span style="color:#ff5252;font-size:12px;font-weight:600">${fmtDuration((Date.now() - new Date(i.started_at).getTime()) / 60000)}</span>
+        </div>`).join('')}
+    </div>
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:#4CAF50"></span>Resueltos (${resolved.length})</div>
+      ${resolved.length === 0 ? '<p style="text-align:center;color:#888;padding:12px 0">Sin incidentes resueltos</p>' :
+        resolved.slice(0, 20).map(i => `<div style="background:var(--bg);border-left:3px solid #4CAF50;border-radius:0 10px 10px 0;padding:10px 16px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:12px;opacity:.8" onclick="openIncident(${i.id})">
+          <span style="font-size:16px">✅</span>
+          <div style="flex:1">
+            <div style="font-weight:600;color:var(--text);font-size:13px">${i.title}</div>
+            <div style="font-size:11px;color:#888">${i.machine_name} · ${new Date(i.started_at).toLocaleDateString('es')} · ${fmtDuration(i.duration_minutes)}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ── PLAN INFO ──
+let userPlan = null;
+async function loadPlan() {
+  const res = await api('/api/plan');
+  if (res.ok) userPlan = res.data;
+}
+
+// ── SLA MODAL ──
+function openSla(id) {
+  activeModal = {type:'sla', machineId:id, data:null};
+  pauseRefresh(); render();
+  api('/api/machines/'+id+'/sla').then(r => { if(r.ok){activeModal.data=r.data;render();} });
+}
+function buildSlaModal() {
+  const m = machines.find(x=>x.id===activeModal.machineId);
+  const d = activeModal.data;
+  return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-header"><h2>📋 SLA — ${m?.machine_name||''}</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
+    ${!d ? '<p style="color:#999;text-align:center;padding:30px">Cargando...</p>' : `
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:12px;color:#888">Objetivo SLA</div>
+      <div style="font-size:28px;font-weight:800;color:#2196F3">${d.sla_target}%</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="border-bottom:2px solid var(--border2)"><th style="text-align:left;padding:8px;color:#888">Mes</th><th style="text-align:center;color:#888">Uptime</th><th style="text-align:center;color:#888">Downtime</th><th style="text-align:center;color:#888">SLA</th></tr>
+      ${d.months.map(mo => `<tr style="border-bottom:1px solid var(--border2)">
+        <td style="padding:8px;font-weight:600">${mo.month}</td>
+        <td style="text-align:center"><span style="font-weight:700;color:${mo.uptime>=d.sla_target?'#4CAF50':mo.uptime>=95?'#FF9800':'#F44336'}">${mo.uptime}%</span></td>
+        <td style="text-align:center;color:#888">${mo.downtime_minutes} min</td>
+        <td style="text-align:center">${mo.met?'<span style="color:#4CAF50;font-weight:700">✅ Cumple</span>':'<span style="color:#F44336;font-weight:700">❌ No cumple</span>'}</td>
+      </tr>`).join('')}
+    </table>
+    <div style="margin-top:16px;display:flex;gap:8px;align-items:center">
+      <span style="font-size:12px;color:#888">Cambiar objetivo:</span>
+      <select id="sla-select" style="background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:4px 8px;color:var(--text);font-size:13px">
+        ${[99, 99.5, 99.9, 99.95, 99.99].map(v => `<option value="${v}" ${d.sla_target==v?'selected':''}>${v}%</option>`).join('')}
+      </select>
+      <button class="modal-btn sm" onclick="updateSla(${m?.id})">Guardar</button>
+    </div>`}
+  </div></div>`;
+}
+async function updateSla(id) {
+  const val = document.getElementById('sla-select')?.value;
+  await api('/api/machines/'+id+'/sla', {method:'PUT', body:JSON.stringify({sla_target:parseFloat(val)})});
+  openSla(id);
+}
+
 // ── MACHINE DETAIL (opens modal chooser) ──
 function openMachineDetail(id) {
   const m = machines.find(x=>x.id===id);
@@ -1069,6 +1233,7 @@ function buildModal() {
     case 'backup': return renderBackupModal();
     case 'addurl': return buildAddUrlModal();
     case 'addmaintenance': return buildAddMaintenanceModal();
+    case 'sla': return buildSlaModal();
     default: return '';
   }
 }
@@ -1097,6 +1262,8 @@ const helpContent = {
   backup: { title: 'Backup', body: `<p>Verifica el estado del ultimo backup realizado en el servidor.</p><ul><li><strong>OK:</strong> el backup se realizo correctamente</li><li><strong>Error:</strong> hubo un problema con el backup</li><li><strong>Warning:</strong> el backup es antiguo o hay algo que revisar</li></ul><p>El agente chequea automaticamente los backups configurados. Podes forzar un chequeo manual con el boton "Forzar chequeo".</p>` },
   wol: { title: 'Wake-on-LAN', body: `<p>Enciende un servidor apagado remotamente enviando un "magic packet" a su placa de red.</p><p><strong>Requisitos:</strong></p><ol><li>La BIOS del servidor debe tener WOL activado</li><li>El adaptador de red en Windows debe tener "Wake on Magic Packet" habilitado</li><li>El servidor debe estar conectado por cable Ethernet (no WiFi)</li><li>Debe tener la MAC Address cargada en ServerEyes</li><li>Otro agente en la misma red debe estar corriendo para enviar el paquete</li></ol><div class="help-tip">💡 El boton WOL solo aparece cuando la maquina esta offline y tiene MAC configurada.</div>` },
   language: { title: 'Idioma', body: `<p>Cambia el idioma de la interfaz del dashboard.</p><p>El cambio se aplica inmediatamente a todos los textos del sistema.</p>` },
+  incidents: { title: 'Incidentes', body: `<p>Registro automatico de cada vez que un servidor se cae.</p><ul><li>Los incidentes se <strong>crean automaticamente</strong> cuando una maquina deja de responder</li><li>Se <strong>resuelven automaticamente</strong> cuando la maquina vuelve a estar online</li><li>Podes agregar <strong>notas</strong> para documentar que paso y como se resolvio</li><li>El <strong>timeline</strong> muestra la secuencia de eventos de cada incidente</li></ul><p>Tambien podes resolver un incidente manualmente con notas de resolucion.</p><div class="help-tip">💡 Util para llevar un historial de problemas y sus soluciones, especialmente para equipos.</div>` },
+  sla: { title: 'SLA Tracking', body: `<p>Muestra el cumplimiento del <strong>SLA (Service Level Agreement)</strong> mensual de cada maquina.</p><ul><li>El porcentaje de uptime se calcula automaticamente por mes</li><li>Se compara contra el objetivo configurado (por defecto 99.9%)</li><li>Verde = cumple el SLA, Rojo = no cumple</li></ul><p>Podes cambiar el objetivo SLA editando la maquina.</p>` },
 };
 
 // ── USER NOTIFICATIONS ──
@@ -1255,6 +1422,7 @@ function buildDetailModal() {
       <button class="modal-btn sm" style="border-radius:8px" onclick="openDiskModal(${m.id})">💾 Discos</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#E3F2FD;color:#2196F3" onclick="downloadRDP(${m.id})">🖥️ RDP</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#FFF3E0;color:#FF9800" onclick="requestSpeedTest(${m.id})">⚡ Speed</button>
+      <button class="modal-btn sm" style="border-radius:8px;background:#F3E5F5;color:#9C27B0" onclick="openSla(${m.id})">📋 SLA</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#E8F5E9;color:#4CAF50" onclick="openEditModal(${m.id})">✏️ Editar</button>
       ${!m.is_online?`<button class="modal-btn sm" style="border-radius:8px;background:#E1F5FE;color:#0288D1" onclick="sendWol(${m.id})">⚡ WOL</button>`:''}
     </div>
@@ -1865,7 +2033,7 @@ async function loadAgentInfo() {
   if(r.ok)agentInfo=r.data;
 }
 async function startDashboard() {
-  await Promise.all([loadMachines(),loadAgentInfo(),loadUrlMonitors(true),loadMaintenance(),loadAuditLog(),loadUserNotifs()]);
+  await Promise.all([loadMachines(),loadAgentInfo(),loadUrlMonitors(true),loadMaintenance(),loadAuditLog(),loadUserNotifs(),loadPlan()]);
   if(refreshInterval)clearInterval(refreshInterval);
   refreshInterval=setInterval(()=>{ loadMachines(); loadUrlMonitors(true); loadUserNotifs(); },10000);
 }
