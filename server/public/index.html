@@ -426,6 +426,9 @@ function render() {
   if (activeNav === 'ajustes') {
     setTimeout(loadSmtpConfig, 100);
   }
+  if (activeNav === 'incidentes' && !incidentsList.length && !incidentDetail) {
+    loadIncidents();
+  }
   if (notifDropdownOpen) {
     setTimeout(renderNotifDropdown, 50);
   }
@@ -1047,8 +1050,12 @@ function createLineChart(canvasId, labels, datasets, opts={}) {
 let incidentsList = [];
 let incidentDetail = null;
 
+let incidentsLoading = false;
 async function loadIncidents() {
+  if (incidentsLoading) return;
+  incidentsLoading = true;
   const res = await api('/api/incidents');
+  incidentsLoading = false;
   if (res.ok) { incidentsList = res.data; if (activeNav === 'incidentes') render(); }
 }
 
@@ -1080,7 +1087,6 @@ function fmtDuration(min) {
 }
 
 function buildIncidentesView() {
-  if (!incidentsList.length && !incidentDetail) setTimeout(loadIncidents, 50);
 
   if (incidentDetail) {
     const d = incidentDetail;
