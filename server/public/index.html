@@ -607,6 +607,7 @@ function buildNocView(healthPct, alerts, avgCpu, avgRam, avgDisk, avgPing, filte
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                 <span class="status-dot ${m.is_online?'on':'off'}" style="width:8px;height:8px"></span>
                 <span style="font-weight:700;font-size:13px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.machine_name}</span>
+                <span id="spark-${m.id}" style="opacity:0.7">${sparkData[m.id]?miniSparkSVG(sparkData[m.id].map(p=>p.cpu!=null?parseFloat(p.cpu):0),'#4CAF50'):''}</span>
                 ${m.grupo?`<span style="font-size:10px;color:#888;background:var(--border2);padding:1px 6px;border-radius:4px">${m.grupo}</span>`:''}
               </div>
               ${[
@@ -1047,6 +1048,30 @@ function createLineChart(canvasId, labels, datasets, opts={}) {
   });
 }
 
+
+// ── SPARKLINES ──
+let sparkData = {};
+async function loadSparklines() {
+  const r = await api('/api/machines/sparklines');
+  if (r.ok) {
+    sparkData = r.data;
+    // Update sparkline SVGs in NOC cards without full render
+    for (const [id, pts] of Object.entries(sparkData)) {
+      const el = document.getElementById('spark-' + id);
+      if (el && pts.length > 1) {
+        const cpuVals = pts.map(p => p.cpu != null ? parseFloat(p.cpu) : 0);
+        el.innerHTML = miniSparkSVG(cpuVals, '#4CAF50');
+      }
+    }
+  }
+}
+function miniSparkSVG(values, color) {
+  if (!values || values.length < 2) return '';
+  const max = Math.max(...values, 1), w = 80, h = 24;
+  const pts = values.map((v, i) => `${Math.round(i / (values.length - 1) * w)},${Math.round(h - (v / max) * (h - 2) - 1)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:80px;height:24px"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" opacity="0.8"/></svg>`;
+}
+setInterval(loadSparklines, 30000);
 
 // ── INCIDENTS VIEW ──
 let incidentsList = [];
@@ -1707,6 +1732,14 @@ function buildEditModal() {
         <input type="checkbox" id="ed-alert-offline" ${d.alert_offline!==false?'checked':''} onclick="event.stopPropagation();activeModal.data.alert_offline=this.checked"/>
         <span style="font-size:13px;color:#555">Notificar cuando este offline</span>
       </div>
+      <div style="margin-top:10px"><label style="font-size:11px;color:#999">Duracion minima (min) — solo alerta si el umbral se supera por este tiempo</label><input class="modal-input" id="ed-alert-duration" type="number" min="1" max="60" value="${d.alert_duration||5}" placeholder="5" style="font-size:13px;padding:8px" oninput="activeModal.data.alert_duration=this.value"/></div>
+    </div>
+
+    <div style="background:var(--bg);border-radius:12px;padding:16px;margin-top:16px">
+      <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#2196F3"></span>Monitoreo de Procesos</div>
+      <p style="font-size:11px;color:#999;margin-bottom:8px">Ingresa nombres de servicios Windows a monitorear. Recibiras alerta si alguno deja de correr.</p>
+      <input class="modal-input" id="ed-processes" value="${(d.monitored_processes||[]).join(', ')}" placeholder="ej: MSSQLSERVER, wuauserv, Spooler" style="font-size:13px;padding:8px" oninput="activeModal.data.monitored_processes=this.value"/>
+      <p style="font-size:10px;color:#888;margin-top:4px">Separados por coma. Usa el nombre de servicio (visible en Servicios → Propiedades → Nombre del servicio)</p>
     </div>
 
     <button class="modal-btn" onclick="saveEdit()" style="margin-top:16px">Guardar cambios</button>
@@ -1732,6 +1765,8 @@ async function saveEdit() {
     alert_disk: parseAlert('ed-alert-disk'),
     alert_ping: parseAlert('ed-alert-ping'),
     alert_offline: document.getElementById('ed-alert-offline')?.checked,
+    alert_duration: parseInt(document.getElementById('ed-alert-duration')?.value) || 5,
+    monitored_processes: (document.getElementById('ed-processes')?.value || '').split(',').map(s=>s.trim()).filter(Boolean),
     geo_city: document.getElementById('ed-geo-city')?.value?.trim()||null,
     geo_region: document.getElementById('ed-geo-region')?.value?.trim()||null,
     geo_country: document.getElementById('ed-geo-country')?.value?.trim()||null,
@@ -2059,6 +2094,7 @@ async function loadAgentInfo() {
 }
 async function startDashboard() {
   await Promise.all([loadMachines(),loadAgentInfo(),loadUrlMonitors(true),loadMaintenance(),loadAuditLog(),loadUserNotifs(),loadPlan()]);
+  loadSparklines();
   if(refreshInterval)clearInterval(refreshInterval);
   refreshInterval=setInterval(()=>{ loadMachines(); loadUrlMonitors(true); loadUserNotifs(); },10000);
 }

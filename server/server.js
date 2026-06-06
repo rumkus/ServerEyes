@@ -421,6 +421,16 @@ async function initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMP`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_machines INTEGER DEFAULT 3`).catch(() => {});
 
+  // Alertas inteligentes con duracion
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_duration INTEGER DEFAULT 5`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu_since TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram_since TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_disk_since TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ping_since TIMESTAMP`).catch(() => {});
+
+  // Monitoreo de procesos
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_processes JSONB DEFAULT '[]'`).catch(() => {});
+
   // SLA
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS sla_target NUMERIC(5,2) DEFAULT 99.9`).catch(() => {});
 
@@ -1021,39 +1031,71 @@ app.post('/api/heartbeat', async (req, res) => {
       }
     }
 
-    // Chequear umbrales de alerta (max 1 alerta cada 5 minutos por maquina)
+    // Alertas inteligentes con duracion
     if (updatedMachine && updatedMachine.user_id) {
       const alertCooldown = updatedMachine.last_alert_at ? (Date.now() - new Date(updatedMachine.last_alert_at).getTime()) > 300000 : true;
+      const durationMin = updatedMachine.alert_duration || 5;
+      const now = new Date();
+
+      // Trackear cuando empezo cada umbral excedido
+      const cpuOver = updatedMachine.alert_cpu && cpu_usage !== undefined && cpu_usage >= updatedMachine.alert_cpu;
+      const ramPct = ram_usage && ram_total ? Math.round((ram_usage / ram_total) * 100) : 0;
+      const ramOver = updatedMachine.alert_ram && ramPct >= updatedMachine.alert_ram;
+      const pingOver = updatedMachine.alert_ping && ping_ms && ping_ms >= updatedMachine.alert_ping;
+      let diskOver = false;
+      if (disks && Array.isArray(disks) && disks.length > 0) {
+        const perDisk = updatedMachine.alert_disks || {};
+        const globalDisk = updatedMachine.alert_disk;
+        for (const disk of disks) {
+          if (disk.total > 0) {
+            const threshold = perDisk[disk.drive] || globalDisk;
+            if (threshold && Math.round((disk.used / disk.total) * 100) >= threshold) diskOver = true;
+          }
+        }
+      } else if (updatedMachine.alert_disk && disk_usage && disk_total && Math.round((disk_usage / disk_total) * 100) >= updatedMachine.alert_disk) {
+        diskOver = true;
+      }
+
+      // Actualizar timestamps de inicio de exceso
+      await pool.query(
+        `UPDATE machines SET
+          alert_cpu_since = CASE WHEN $1 THEN COALESCE(alert_cpu_since, NOW()) ELSE NULL END,
+          alert_ram_since = CASE WHEN $2 THEN COALESCE(alert_ram_since, NOW()) ELSE NULL END,
+          alert_disk_since = CASE WHEN $3 THEN COALESCE(alert_disk_since, NOW()) ELSE NULL END,
+          alert_ping_since = CASE WHEN $4 THEN COALESCE(alert_ping_since, NOW()) ELSE NULL END
+        WHERE id = $5`,
+        [cpuOver, ramOver, diskOver, pingOver, updatedMachine.id]
+      );
+
+      // Solo alertar si el umbral lleva excedido >= alert_duration minutos
       if (alertCooldown) {
         const alerts = [];
-        if (updatedMachine.alert_cpu && cpu_usage !== undefined && cpu_usage >= updatedMachine.alert_cpu) {
-          alerts.push(`CPU al ${cpu_usage}% (umbral: ${updatedMachine.alert_cpu}%)`);
+        const durMs = durationMin * 60000;
+        if (cpuOver && updatedMachine.alert_cpu_since && (now - new Date(updatedMachine.alert_cpu_since)) >= durMs) {
+          alerts.push(`CPU al ${cpu_usage}% por ${durationMin}+ min (umbral: ${updatedMachine.alert_cpu}%)`);
         }
-        if (updatedMachine.alert_ram && ram_usage !== undefined && ram_total) {
-          const ramPct = Math.round((ram_usage / ram_total) * 100);
-          if (ramPct >= updatedMachine.alert_ram) alerts.push(`RAM al ${ramPct}% (umbral: ${updatedMachine.alert_ram}%)`);
+        if (ramOver && updatedMachine.alert_ram_since && (now - new Date(updatedMachine.alert_ram_since)) >= durMs) {
+          alerts.push(`RAM al ${ramPct}% por ${durationMin}+ min (umbral: ${updatedMachine.alert_ram}%)`);
         }
-        if (disks && Array.isArray(disks) && disks.length > 0) {
-          const perDisk = updatedMachine.alert_disks || {};
-          const globalDisk = updatedMachine.alert_disk;
-          for (const disk of disks) {
-            if (disk.total > 0) {
-              const threshold = perDisk[disk.drive] || globalDisk;
-              if (threshold) {
-                const diskPct = Math.round((disk.used / disk.total) * 100);
-                if (diskPct >= threshold) alerts.push(`Disco ${disk.drive} al ${diskPct}% (umbral: ${threshold}%)`);
-              }
-            }
-          }
-        } else if (updatedMachine.alert_disk && disk_usage !== undefined && disk_total) {
-          const diskPct = Math.round((disk_usage / disk_total) * 100);
-          if (diskPct >= updatedMachine.alert_disk) alerts.push(`Disco al ${diskPct}% (umbral: ${updatedMachine.alert_disk}%)`);
+        if (diskOver && updatedMachine.alert_disk_since && (now - new Date(updatedMachine.alert_disk_since)) >= durMs) {
+          alerts.push(`Disco excedido por ${durationMin}+ min`);
         }
-        if (updatedMachine.alert_ping && ping_ms && ping_ms >= updatedMachine.alert_ping) {
-          alerts.push(`Ping ${ping_ms}ms (umbral: ${updatedMachine.alert_ping}ms)`);
+        if (pingOver && updatedMachine.alert_ping_since && (now - new Date(updatedMachine.alert_ping_since)) >= durMs) {
+          alerts.push(`Ping ${ping_ms}ms por ${durationMin}+ min (umbral: ${updatedMachine.alert_ping}ms)`);
         }
         if (alerts.length > 0) {
           sendPush(updatedMachine.user_id, `⚠️ Alerta: ${updatedMachine.machine_name}`, alerts.join(' | '), { type: 'threshold_alert', machineId: String(updatedMachine.id) });
+          await pool.query('UPDATE machines SET last_alert_at = NOW() WHERE id = $1', [updatedMachine.id]);
+        }
+      }
+
+      // Monitoreo de procesos
+      const monProcs = updatedMachine.monitored_processes || [];
+      if (monProcs.length > 0 && services && Array.isArray(services)) {
+        const runningNames = services.filter(s => s.state === 'RUNNING').map(s => (s.name || '').toLowerCase());
+        const downProcs = monProcs.filter(p => !runningNames.includes(p.toLowerCase()));
+        if (downProcs.length > 0 && alertCooldown) {
+          sendPush(updatedMachine.user_id, `🔴 Proceso caido: ${updatedMachine.machine_name}`, downProcs.join(', ') + ' no esta corriendo', { type: 'process_alert', machineId: String(updatedMachine.id) });
           await pool.query('UPDATE machines SET last_alert_at = NOW() WHERE id = $1', [updatedMachine.id]);
         }
       }
@@ -1257,6 +1299,8 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (req.body.geo_country !== undefined) { fields.push(`geo_country = $${idx++}`); values.push(req.body.geo_country || null); }
     if (req.body.geo_lat !== undefined) { fields.push(`geo_lat = $${idx++}`); values.push(req.body.geo_lat); }
     if (req.body.geo_lon !== undefined) { fields.push(`geo_lon = $${idx++}`); values.push(req.body.geo_lon); }
+    if (req.body.alert_duration !== undefined) { fields.push(`alert_duration = $${idx++}`); values.push(req.body.alert_duration || 5); }
+    if (req.body.monitored_processes !== undefined) { fields.push(`monitored_processes = $${idx++}`); values.push(JSON.stringify(req.body.monitored_processes || [])); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
@@ -1363,6 +1407,27 @@ app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
 });
 
 // Obtener historial de IPs de una maquina
+// Sparkline data: ultimos 12 puntos de CPU/RAM por maquina del usuario
+app.get('/api/machines/sparklines', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT m.id, (
+        SELECT json_agg(json_build_object('cpu', h.cpu, 'ram', h.ram, 'ping', h.ping) ORDER BY h.time)
+        FROM (SELECT cpu, ram, ping, time FROM metrics_history WHERE machine_id = m.id ORDER BY time DESC LIMIT 12) h
+      ) as points
+      FROM machines m WHERE m.user_id = $1 AND m.is_online = true`,
+      [req.user.id]
+    );
+    const data = {};
+    for (const row of result.rows) {
+      if (row.points) data[row.id] = row.points.reverse();
+    }
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 app.get('/api/machines/:id/ip-history', authenticateToken, async (req, res) => {
   try {
     const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);

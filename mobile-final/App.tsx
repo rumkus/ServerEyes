@@ -5,7 +5,9 @@ import RNFS from 'react-native-fs';
 import RNShare from 'react-native-share';
 import messaging from '@react-native-firebase/messaging';
 import { Platform, PermissionsAndroid, NativeModules, BackHandler } from 'react-native';
+import ReactNativeBiometrics from 'react-native-biometrics';
 const { WidgetBridge } = NativeModules;
+const rnBiometrics = new ReactNativeBiometrics();
 
 const API_URL = 'https://servereyes-production.up.railway.app';
 
@@ -74,6 +76,8 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [appReady, setAppReady] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [hasSavedCreds, setHasSavedCreds] = useState(false);
   const [lang, setLang] = useState('es');
   const changeLang = async (l: string) => { _currentLang = l; setLang(l); await AsyncStorage.setItem('se_lang', l); };
   const [menuOpen, setMenuOpen] = useState(false);
@@ -103,6 +107,8 @@ export default function App() {
   const [editAlertDisk, setEditAlertDisk] = useState('');
   const [editAlertPing, setEditAlertPing] = useState('');
   const [editAlertOffline, setEditAlertOffline] = useState(true);
+  const [editAlertDuration, setEditAlertDuration] = useState('5');
+  const [editMonitoredProcs, setEditMonitoredProcs] = useState('');
   const [dnsUpdating, setDnsUpdating] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logText, setLogText] = useState('');
@@ -302,7 +308,14 @@ export default function App() {
     AsyncStorage.getItem('se_lang').then(saved => { if (saved && LANGS[saved]) { _currentLang = saved; setLang(saved); } });
     loadLogs().then(() => {
       log.info('Logs cargados');
-      AsyncStorage.getItem('servereyes_token').then(saved => {
+      // Check biometrics
+      rnBiometrics.isSensorAvailable().then(({ available }) => {
+        setBiometricAvailable(available);
+      }).catch(() => {});
+
+      AsyncStorage.getItem('servereyes_token').then(async (saved) => {
+        const bioToken = await AsyncStorage.getItem('se_bio_token').catch(() => null);
+        setHasSavedCreds(!!bioToken);
         if (saved) {
           log.info('Token encontrado en storage');
           setToken(saved);
@@ -325,9 +338,36 @@ export default function App() {
       try { WidgetBridge?.setToken(t); } catch {}
     } else {
       await AsyncStorage.removeItem('servereyes_token');
+      await AsyncStorage.removeItem('se_bio_token');
       try { WidgetBridge?.clearToken(); } catch {}
+      setHasSavedCreds(false);
     }
     setToken(t);
+  };
+
+  const saveBiometricToken = async (t: string) => {
+    await AsyncStorage.setItem('se_bio_token', t);
+    setHasSavedCreds(true);
+  };
+
+  const tryBiometricLogin = async () => {
+    try {
+      const savedToken = await AsyncStorage.getItem('se_bio_token');
+      if (!savedToken) return;
+      const result = await rnBiometrics.simplePrompt({ promptMessage: 'Desbloquear ServerEyes', cancelButtonText: 'Cancelar' });
+      if (result.success) {
+        const check = await apiRequest('/api/machines', {}, savedToken);
+        if (check.ok || check.status !== 401) {
+          setToken(savedToken);
+          await AsyncStorage.setItem('servereyes_token', savedToken);
+          try { WidgetBridge?.setToken(savedToken); } catch {}
+        } else {
+          await AsyncStorage.removeItem('se_bio_token');
+          setHasSavedCreds(false);
+          Alert.alert('Sesion expirada', 'Ingresa con tu email y contraseña');
+        }
+      }
+    } catch {}
   };
 
   const handleAuth = async () => {
@@ -340,6 +380,7 @@ export default function App() {
       if (res.ok && res.data.token) {
         log.info('Auth exitoso');
         await setAndSaveToken(res.data.token);
+        if (biometricAvailable) await saveBiometricToken(res.data.token);
       } else if (res.status === 401) {
         log.warn('Auth fallido: credenciales incorrectas');
         setError('Email o contraseña incorrectos');
@@ -524,6 +565,8 @@ export default function App() {
       alert_disk: editAlertDisk ? parseInt(editAlertDisk) : null,
       alert_ping: editAlertPing ? parseInt(editAlertPing) : null,
       alert_offline: editAlertOffline,
+      alert_duration: parseInt(editAlertDuration) || 5,
+      monitored_processes: editMonitoredProcs.split(',').map(s => s.trim()).filter(Boolean),
       mac_address: editMac || null,
       wol_broadcast: editWolBroadcast || '255.255.255.255',
       geo_city: editGeoCity || null,
@@ -1634,6 +1677,12 @@ export default function App() {
         <TouchableOpacity onPress={() => { setIsSignUp(!isSignUp); setError(''); }}>
           <Text style={s.link}>{isSignUp ? t('have_account') : t('new_account')}</Text>
         </TouchableOpacity>
+        {biometricAvailable && hasSavedCreds && !isSignUp && (
+          <TouchableOpacity style={{marginTop: 20, backgroundColor: '#16213e', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#00d4ff'}} onPress={tryBiometricLogin}>
+            <Text style={{fontSize: 28, marginBottom: 6}}>{'🔓'}</Text>
+            <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700'}}>Ingresar con huella / rostro</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
@@ -1711,7 +1760,7 @@ export default function App() {
     const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
     const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
     const expanded = expandedCards.has(item.id);
-    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); setGeoSearchAddr(''); setGeoSearchResult(''); };
+    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); setGeoSearchAddr(''); setGeoSearchResult(''); setEditAlertDuration(item.alert_duration ? String(item.alert_duration) : '5'); setEditMonitoredProcs((item.monitored_processes || []).join(', ')); };
 
     const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
 
@@ -2589,6 +2638,13 @@ export default function App() {
           </View>
           <Text style={{color: '#ddd', fontSize: 14}}>Notificar cuando se desconecte</Text>
         </TouchableOpacity>
+        <Text style={{color: '#607d8b', fontSize: 12, marginTop: 8, marginBottom: 4}}>Duracion minima (min) — solo alerta si supera por este tiempo:</Text>
+        <TextInput style={s.input} value={editAlertDuration} onChangeText={setEditAlertDuration} placeholder="5" placeholderTextColor="#555" keyboardType="number-pad" />
+
+        <Text style={{color: '#2196F3', fontSize: 14, fontWeight: '700', marginTop: 16, marginBottom: 6}}>Monitoreo de Procesos</Text>
+        <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 6}}>Nombres de servicios Windows separados por coma. Alerta si alguno deja de correr.</Text>
+        <TextInput style={s.input} value={editMonitoredProcs} onChangeText={setEditMonitoredProcs} placeholder="ej: MSSQLSERVER, Spooler" placeholderTextColor="#555" />
+
         <TouchableOpacity style={s.btn} onPress={saveEdit}>
           <Text style={s.btnTxt}>Guardar</Text>
         </TouchableOpacity>
