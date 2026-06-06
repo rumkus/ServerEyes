@@ -421,8 +421,11 @@ async function initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMP`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_machines INTEGER DEFAULT 3`).catch(() => {});
 
-  // Session duration
+  // Session duration + bloqueo
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS session_duration VARCHAR(10) DEFAULT '30d'`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS block_reason VARCHAR(255)`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMP`).catch(() => {});
 
   // Alertas inteligentes con duracion
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_duration INTEGER DEFAULT 5`).catch(() => {});
@@ -545,6 +548,7 @@ app.post('/api/auth/login', async (req, res) => {
     const user = result.rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
+    if (user.is_blocked) return res.status(403).json({ error: `Cuenta bloqueada: ${user.block_reason || 'Contacta al administrador'}` });
 
     const sessionDur = user.session_duration || '30d';
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: sessionDur });
@@ -942,8 +946,9 @@ async function authenticateToken(req, res, next) {
   try {
     const token = authHeader.split(' ')[1];
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = await pool.query('SELECT id, email, nombre FROM users WHERE id = $1', [payload.id]);
+    const user = await pool.query('SELECT id, email, nombre, is_blocked, block_reason FROM users WHERE id = $1', [payload.id]);
     if (user.rows.length === 0) return res.status(401).json({ error: 'Usuario no encontrado' });
+    if (user.rows[0].is_blocked) return res.status(403).json({ error: `Cuenta bloqueada: ${user.rows[0].block_reason || 'Contacta al administrador'}` });
     req.user = user.rows[0];
     next();
   } catch (error) {
@@ -1658,7 +1663,7 @@ async function requireAdmin(req, res, next) {
 // Dashboard admin: todos los usuarios y maquinas
 app.get('/api/admin/overview', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const users = await pool.query('SELECT id, email, nombre, is_admin, plan, max_machines, created_at, fcm_token IS NOT NULL as has_push FROM users ORDER BY id');
+    const users = await pool.query('SELECT id, email, nombre, is_admin, plan, max_machines, created_at, fcm_token IS NOT NULL as has_push, is_blocked, block_reason, blocked_at FROM users ORDER BY id');
     const machines = await pool.query(`SELECT m.*, u.email as owner_email FROM machines m LEFT JOIN users u ON m.user_id = u.id ORDER BY m.id`);
     const totalUsers = users.rows.length;
     const totalMachines = machines.rows.length;
@@ -1737,6 +1742,22 @@ app.post('/api/admin/reset-password', authenticateToken, requireAdmin, async (re
     const hash = await bcrypt.hash(new_password, 10);
     await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, user_id]);
     res.json({ message: 'Contraseña reseteada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Bloquear/desbloquear usuario
+app.post('/api/admin/block-user', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { user_id, is_blocked, block_reason } = req.body;
+    if (is_blocked) {
+      await pool.query('UPDATE users SET is_blocked = true, block_reason = $1, blocked_at = NOW() WHERE id = $2', [block_reason || 'Bloqueado por administrador', user_id]);
+    } else {
+      await pool.query('UPDATE users SET is_blocked = false, block_reason = NULL, blocked_at = NULL WHERE id = $1', [user_id]);
+    }
+    logAudit(req.user.id, is_blocked ? 'block_user' : 'unblock_user', 'user', user_id, JSON.stringify({ reason: block_reason }), req.ip);
+    res.json({ message: is_blocked ? 'Usuario bloqueado' : 'Usuario desbloqueado' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
