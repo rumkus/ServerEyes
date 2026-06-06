@@ -463,12 +463,106 @@ async function deleteNotif(id) {
   loadNotifs();
 }
 
+// ── SUPPORT ADMIN ──
+let adminSupportTickets = [];
+let adminSupportActive = null;
+let adminSupportMessages = [];
+
+function renderSupportAdmin() {
+  if (adminSupportActive) return renderSupportChat();
+  return `
+    <div class="section">
+      <h2>&#128172; Tickets de Soporte (${adminSupportTickets.length})</h2>
+      ${adminSupportTickets.length === 0 ? '<p style="color:#888">Sin tickets de soporte</p>' :
+        `<table><tr><th>ID</th><th>Usuario</th><th>Asunto</th><th>Estado</th><th>Mensajes</th><th>Ultimo</th><th></th></tr>
+        ${adminSupportTickets.map(t => `<tr style="cursor:pointer" onclick="openAdminTicket(${t.id})">
+          <td>${t.id}</td>
+          <td><strong>${t.email}</strong><br><span style="color:#888;font-size:11px">${t.nombre || ''}</span></td>
+          <td>${t.subject}</td>
+          <td><span class="badge ${t.status==='open'?'badge-on':'badge-off'}">${t.status==='open'?'ABIERTO':'CERRADO'}</span></td>
+          <td style="text-align:center">${t.msg_count || 0}</td>
+          <td style="font-size:11px;color:#888;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.last_message || '---'}</td>
+          <td>
+            ${t.status==='open'?`<button class="badge badge-off" style="cursor:pointer;border:none" onclick="event.stopPropagation();closeAdminTicket(${t.id})">Cerrar</button>`:''}
+          </td>
+        </tr>`).join('')}
+        </table>`}
+    </div>`;
+}
+
+function renderSupportChat() {
+  const t = adminSupportTickets.find(x => x.id === adminSupportActive);
+  return `
+    <div class="section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div>
+          <button class="badge badge-version" style="cursor:pointer;border:none;margin-right:8px" onclick="adminSupportActive=null;render()">&#8592; Volver</button>
+          <strong style="font-size:16px">${t?.subject||'Ticket'}</strong>
+          <span style="color:#888;font-size:12px;margin-left:8px">${t?.email||''}</span>
+        </div>
+        ${t?.status==='open'?`<button class="badge badge-off" style="cursor:pointer;border:none" onclick="closeAdminTicket(${adminSupportActive})">Cerrar ticket</button>`:''}
+      </div>
+      <div style="max-height:350px;overflow-y:auto;border:1px solid #2a2a4a;border-radius:10px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px" id="admin-chat-msgs">
+        ${adminSupportMessages.length === 0 ? '<p style="color:#888;text-align:center;padding:20px">Sin mensajes</p>' :
+          adminSupportMessages.map(m => {
+            const isUser = m.sender_type === 'user';
+            const attachs = m.attachments || [];
+            return `<div style="align-self:${isUser?'flex-start':'flex-end'};max-width:75%;padding:10px 14px;border-radius:14px;${isUser?'border-bottom-left-radius:4px;background:#1a2a3a':'border-bottom-right-radius:4px;background:#7B1FA2;color:#fff'}">
+              <div style="font-size:10px;font-weight:600;margin-bottom:2px;${isUser?'color:#888':'color:#e1bee7'}">${isUser ? (m.sender_email || 'Usuario') : 'Tu (Admin)'}</div>
+              <div style="font-size:13px;line-height:1.5">${m.message || ''}</div>
+              ${attachs.length > 0 ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${attachs.map(a => `<a href="data:${a.type};base64,${a.data}" download="${a.name}" style="font-size:11px;background:rgba(255,255,255,.15);padding:2px 8px;border-radius:4px;color:inherit;text-decoration:none">&#128206; ${a.name}</a>`).join('')}</div>` : ''}
+              <div style="font-size:10px;opacity:.6;margin-top:4px">${fmtDate(m.created_at)}</div>
+            </div>`;
+          }).join('')}
+      </div>
+      <div style="display:flex;gap:8px">
+        <textarea id="admin-reply-msg" rows="2" style="flex:1;background:#0f0f23;border:1px solid #2a2a4a;border-radius:8px;padding:10px;color:#eee;font-size:13px;resize:none;font-family:inherit" placeholder="Escribi tu respuesta..."></textarea>
+        <button class="btn-upload" style="width:auto;padding:10px 20px" onclick="sendAdminReply()">Enviar</button>
+      </div>
+    </div>`;
+}
+
+async function loadAdminSupport() {
+  const r = await api('/api/admin/support/tickets');
+  if (r.ok) { adminSupportTickets = r.data; if (tab === 'support' && !adminSupportActive) render(); }
+}
+
+async function openAdminTicket(id) {
+  adminSupportActive = id;
+  const r = await api('/api/admin/support/tickets/' + id + '/messages');
+  if (r.ok) { adminSupportMessages = r.data; render(); }
+  setTimeout(() => {
+    const el = document.getElementById('admin-chat-msgs');
+    if (el) el.scrollTop = el.scrollHeight;
+  }, 100);
+}
+
+async function sendAdminReply() {
+  const msg = document.getElementById('admin-reply-msg')?.value?.trim();
+  if (!msg) return;
+  const formData = new FormData();
+  formData.append('message', msg);
+  await fetch('/api/admin/support/tickets/' + adminSupportActive + '/reply', {
+    method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: formData
+  });
+  document.getElementById('admin-reply-msg').value = '';
+  openAdminTicket(adminSupportActive);
+}
+
+async function closeAdminTicket(id) {
+  if (!confirm('Cerrar este ticket?')) return;
+  await api('/api/admin/support/tickets/' + id + '/close', { method: 'POST' });
+  adminSupportActive = null;
+  loadAdminSupport();
+}
+
 function render() {
   if (!data) return;
   let content = '';
   if (tab === 'overview') content = renderOverview() + renderMachines();
   else if (tab === 'agent') content = renderAgent();
   else if (tab === 'notifs') content = renderNotifs();
+  else if (tab === 'support') content = renderSupportAdmin();
   else if (tab === 'system') content = renderSystem();
 
   document.getElementById('app').innerHTML = `
@@ -478,6 +572,7 @@ function render() {
         <button class="btn-sm ${tab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">&#128202; Overview</button>
         <button class="btn-sm ${tab === 'agent' ? 'active' : ''}" onclick="setTab('agent')">&#128228; Agente</button>
         <button class="btn-sm ${tab === 'notifs' ? 'active' : ''}" onclick="setTab('notifs')">&#128276; Notificaciones</button>
+        <button class="btn-sm ${tab === 'support' ? 'active' : ''}" onclick="setTab('support')">&#128172; Soporte</button>
         <button class="btn-sm ${tab === 'system' ? 'active' : ''}" onclick="setTab('system')">&#9881; Sistema</button>
         <a href="/" class="btn-sm" style="text-decoration:none">&#128065; Dashboard</a>
         <button class="btn-sm" style="color:#ff5252" onclick="logout()">Salir</button>
@@ -487,6 +582,7 @@ function render() {
 
   if (tab === 'agent') loadHistory();
   if (tab === 'notifs') setTimeout(loadNotifs, 50);
+  if (tab === 'support') setTimeout(loadAdminSupport, 50);
 }
 
 function setTab(t) { tab = t; render(); }
@@ -539,7 +635,7 @@ async function resetPassword(userId, email) {
 
 // Init
 if (token) { loadData(); } else { renderLogin(); }
-setInterval(() => { if (token && data && tab !== 'notifs') loadData(); }, 15000);
+setInterval(() => { if (token && data && tab !== 'notifs' && tab !== 'support') loadData(); }, 15000);
 </script>
 </body>
 </html>

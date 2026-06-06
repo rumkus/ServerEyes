@@ -471,6 +471,29 @@ async function initDB() {
     )
   `);
 
+  // Soporte / chat
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      subject VARCHAR(255),
+      status VARCHAR(20) DEFAULT 'open',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS support_messages (
+      id SERIAL PRIMARY KEY,
+      ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE CASCADE,
+      sender_type VARCHAR(10) NOT NULL,
+      sender_id INTEGER,
+      message TEXT,
+      attachments JSONB DEFAULT '[]',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // SSL monitoring
   await pool.query(`
     CREATE TABLE IF NOT EXISTS ssl_monitors (
@@ -2417,6 +2440,129 @@ app.post('/api/ssl-check', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Error: ' + error.message });
   }
+});
+
+// ── SOPORTE / CHAT ──
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 3 * 1024 * 1024, files: 4 } });
+
+// Listar tickets del usuario
+app.get('/api/support/tickets', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id = t.id AND sm.sender_type = 'admin' AND sm.created_at > t.updated_at) as unread
+       FROM support_tickets t WHERE t.user_id = $1 ORDER BY t.updated_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Crear ticket
+app.post('/api/support/tickets', authenticateToken, async (req, res) => {
+  try {
+    const { subject } = req.body;
+    const result = await pool.query(
+      'INSERT INTO support_tickets (user_id, subject) VALUES ($1, $2) RETURNING *',
+      [req.user.id, subject || 'Consulta de soporte']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Mensajes de un ticket
+app.get('/api/support/tickets/:id/messages', authenticateToken, async (req, res) => {
+  try {
+    const ticket = await pool.query('SELECT id FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
+    const messages = await pool.query(
+      `SELECT sm.*, u.email as sender_email, u.nombre as sender_name
+       FROM support_messages sm LEFT JOIN users u ON sm.sender_id = u.id
+       WHERE sm.ticket_id = $1 ORDER BY sm.created_at ASC`,
+      [req.params.id]
+    );
+    await pool.query('UPDATE support_tickets SET updated_at = NOW() WHERE id = $1', [req.params.id]);
+    res.json(messages.rows);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Enviar mensaje (usuario)
+app.post('/api/support/tickets/:id/messages', authenticateToken, upload.array('files', 4), async (req, res) => {
+  try {
+    const ticket = await pool.query('SELECT id FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
+    const message = req.body.message || '';
+    const attachments = (req.files || []).map(f => ({
+      name: f.originalname, size: f.size, type: f.mimetype,
+      data: f.buffer.toString('base64')
+    }));
+    if (attachments.length > 4) return res.status(400).json({ error: 'Maximo 4 adjuntos' });
+    const tooLarge = attachments.find(a => a.size > 3 * 1024 * 1024);
+    if (tooLarge) return res.status(400).json({ error: 'Adjuntos no pueden superar 3MB cada uno' });
+    await pool.query(
+      'INSERT INTO support_messages (ticket_id, sender_type, sender_id, message, attachments) VALUES ($1, $2, $3, $4, $5)',
+      [req.params.id, 'user', req.user.id, message, JSON.stringify(attachments)]
+    );
+    await pool.query('UPDATE support_tickets SET status = $1, updated_at = NOW() WHERE id = $2', ['open', req.params.id]);
+    res.json({ message: 'Mensaje enviado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Admin: listar todos los tickets
+app.get('/api/admin/support/tickets', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.*, u.email, u.nombre,
+       (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id = t.id) as msg_count,
+       (SELECT message FROM support_messages sm WHERE sm.ticket_id = t.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
+       FROM support_tickets t JOIN users u ON t.user_id = u.id
+       ORDER BY t.updated_at DESC`
+    );
+    res.json(result.rows);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Admin: ver mensajes de un ticket
+app.get('/api/admin/support/tickets/:id/messages', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const messages = await pool.query(
+      `SELECT sm.*, u.email as sender_email, u.nombre as sender_name
+       FROM support_messages sm LEFT JOIN users u ON sm.sender_id = u.id
+       WHERE sm.ticket_id = $1 ORDER BY sm.created_at ASC`,
+      [req.params.id]
+    );
+    res.json(messages.rows);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Admin: responder ticket
+app.post('/api/admin/support/tickets/:id/reply', authenticateToken, requireAdmin, upload.array('files', 4), async (req, res) => {
+  try {
+    const message = req.body.message || '';
+    const attachments = (req.files || []).map(f => ({
+      name: f.originalname, size: f.size, type: f.mimetype,
+      data: f.buffer.toString('base64')
+    }));
+    await pool.query(
+      'INSERT INTO support_messages (ticket_id, sender_type, sender_id, message, attachments) VALUES ($1, $2, $3, $4, $5)',
+      [req.params.id, 'admin', req.user.id, message, JSON.stringify(attachments)]
+    );
+    await pool.query('UPDATE support_tickets SET updated_at = NOW() WHERE id = $1', [req.params.id]);
+    // Push al usuario
+    const ticket = await pool.query('SELECT user_id FROM support_tickets WHERE id = $1', [req.params.id]);
+    if (ticket.rows[0]) {
+      sendPush(ticket.rows[0].user_id, '💬 Respuesta de soporte', message.substring(0, 100), { type: 'support' });
+    }
+    res.json({ message: 'Respuesta enviada' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Admin: cerrar ticket
+app.post('/api/admin/support/tickets/:id/close', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    await pool.query('UPDATE support_tickets SET status = $1, updated_at = NOW() WHERE id = $2', ['closed', req.params.id]);
+    res.json({ message: 'Ticket cerrado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 // ── SSL MONITORS CRUD ──
