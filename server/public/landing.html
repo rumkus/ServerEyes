@@ -111,7 +111,7 @@ footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color
 /* RESPONSIVE */
 @media(max-width:768px){
   .hero h1{font-size:32px;}
-  .features-grid{grid-template-columns:1fr;}
+  .features-grid,.pricing-grid{grid-template-columns:1fr !important;}
   .steps{grid-template-columns:1fr 1fr;}
   .download-grid{grid-template-columns:1fr;}
   .nav-links{display:none;}
@@ -130,6 +130,7 @@ footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color
     <div class="nav-links">
       <a href="#features">Funciones</a>
       <a href="#como-funciona">Como funciona</a>
+      <a href="#precios">Precios</a>
       <a href="#registro">Registrarse</a>
       <a href="/index.html" class="btn btn-outline">Iniciar sesion</a>
     </div>
@@ -239,6 +240,65 @@ footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color
   </div>
 </section>
 
+<!-- PRICING -->
+<section class="features" id="precios">
+  <div class="container">
+    <h2 class="section-title">Planes</h2>
+    <p class="section-sub">Comenza gratis con 14 dias de prueba del plan Pro</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:900px;margin:0 auto">
+      <div class="feature-card" style="text-align:center;padding:32px 24px">
+        <div style="font-size:14px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Free</div>
+        <div style="font-size:40px;font-weight:900;color:var(--text);margin-bottom:4px">$0</div>
+        <div style="font-size:13px;color:var(--sub);margin-bottom:20px">por siempre</div>
+        <ul style="text-align:left;list-style:none;padding:0;font-size:13px;color:var(--sub);line-height:2.2">
+          <li>✅ Hasta 3 servidores</li>
+          <li>✅ Monitoreo en tiempo real</li>
+          <li>✅ Alertas push y email</li>
+          <li>✅ App Android</li>
+          <li>✅ Dashboard web</li>
+          <li>❌ URLs ilimitadas</li>
+          <li>❌ Equipos y tecnicos</li>
+          <li>❌ SLA tracking</li>
+        </ul>
+        <a href="#registro" class="btn btn-outline" style="width:100%;justify-content:center;margin-top:16px">Comenzar</a>
+      </div>
+      <div class="feature-card" style="text-align:center;padding:32px 24px;border:2px solid var(--accent);position:relative">
+        <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--bg);font-size:11px;font-weight:700;padding:3px 14px;border-radius:10px">POPULAR</div>
+        <div style="font-size:14px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Pro</div>
+        <div style="font-size:40px;font-weight:900;color:var(--text);margin-bottom:4px">$9<span style="font-size:16px;color:var(--sub)">/mes</span></div>
+        <div style="font-size:13px;color:var(--green);margin-bottom:20px;font-weight:600">14 dias gratis al registrarse</div>
+        <ul style="text-align:left;list-style:none;padding:0;font-size:13px;color:var(--sub);line-height:2.2">
+          <li>✅ <strong style="color:var(--text)">Servidores ilimitados</strong></li>
+          <li>✅ Monitoreo en tiempo real</li>
+          <li>✅ Alertas inteligentes</li>
+          <li>✅ URLs ilimitadas</li>
+          <li>✅ Equipos y tecnicos</li>
+          <li>✅ SLA tracking</li>
+          <li>✅ Monitoreo SSL</li>
+          <li>✅ Soporte prioritario</li>
+        </ul>
+        <a href="#registro" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:16px">Probar 14 dias gratis</a>
+      </div>
+      <div class="feature-card" style="text-align:center;padding:32px 24px">
+        <div style="font-size:14px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Enterprise</div>
+        <div style="font-size:40px;font-weight:900;color:var(--text);margin-bottom:4px">Consultar</div>
+        <div style="font-size:13px;color:var(--sub);margin-bottom:20px">precio personalizado</div>
+        <ul style="text-align:left;list-style:none;padding:0;font-size:13px;color:var(--sub);line-height:2.2">
+          <li>✅ Todo lo de Pro</li>
+          <li>✅ White-label</li>
+          <li>✅ API dedicada</li>
+          <li>✅ SLA 99.99%</li>
+          <li>✅ Soporte 24/7</li>
+          <li>✅ On-premise disponible</li>
+          <li>✅ Integraciones custom</li>
+          <li>✅ Capacitacion</li>
+        </ul>
+        <a href="mailto:maxi.pulla@gmail.com" class="btn btn-outline" style="width:100%;justify-content:center;margin-top:16px">Contactar</a>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- REGISTER -->
 <section class="register-section" id="registro">
   <div class="container">
@@ -246,7 +306,7 @@ footer{border-top:1px solid var(--border);padding:32px 0;text-align:center;color
     <!-- Registration form -->
     <div class="register-box" id="registerForm">
       <h2>Crear cuenta gratis</h2>
-      <p class="sub">Sin tarjeta de credito. Sin limite de tiempo.</p>
+      <p class="sub">14 dias de Pro gratis. Sin tarjeta de credito.</p>
 
       <div id="regError" class="form-error"></div>
 

@@ -80,6 +80,18 @@ export default function App() {
   const [hasSavedCreds, setHasSavedCreds] = useState(false);
   const [lang, setLang] = useState('es');
   const changeLang = async (l: string) => { _currentLang = l; setLang(l); await AsyncStorage.setItem('se_lang', l); };
+  const [darkMode, setDarkMode] = useState(true);
+  const toggleTheme = async () => { const next = !darkMode; setDarkMode(next); await AsyncStorage.setItem('se_dark', next ? '1' : '0'); };
+  const th = {
+    bg: darkMode ? '#0a1628' : '#f0f2f5',
+    card: darkMode ? '#0d1b2a' : '#ffffff',
+    card2: darkMode ? '#111d2e' : '#f8f9fa',
+    text: darkMode ? '#eee' : '#333',
+    sub: darkMode ? '#607d8b' : '#888',
+    border: darkMode ? '#1a2a3a' : '#e0e0e0',
+    input: darkMode ? '#0d1b2a' : '#fff',
+    statusBar: darkMode ? ('light-content' as const) : ('dark-content' as const),
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -308,6 +320,9 @@ export default function App() {
     AsyncStorage.getItem('se_lang').then(saved => { if (saved && LANGS[saved]) { _currentLang = saved; setLang(saved); } });
     loadLogs().then(() => {
       log.info('Logs cargados');
+      // Load theme
+      AsyncStorage.getItem('se_dark').then(v => { if (v === '0') setDarkMode(false); }).catch(() => {});
+
       // Check biometrics
       rnBiometrics.isSensorAvailable().then(({ available }) => {
         setBiometricAvailable(available);
@@ -2664,19 +2679,19 @@ export default function App() {
   const offlineCount = machines.length - onlineCount;
 
   return (
-    <View style={{flex: 1, backgroundColor: '#0a1628'}}>
-      <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+    <View style={{flex: 1, backgroundColor: th.bg}}>
+      <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
       {/* Header */}
-      <View style={{backgroundColor: '#0d1b2a', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 12}}>
+      <View style={{backgroundColor: th.card, paddingTop: 46, paddingHorizontal: 16, paddingBottom: 12}}>
         <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
             <TouchableOpacity onPress={() => setMenuOpen(!menuOpen)} style={{padding: 8, marginRight: 8}}>
-              <Text style={{color: '#607d8b', fontSize: 22}}>{'☰'}</Text>
+              <Text style={{color: th.sub, fontSize: 22}}>{'☰'}</Text>
             </TouchableOpacity>
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
-              <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: '#607d8b', fontSize: 11}}>{machines.length} {t('machines_count')}</Text>
+              <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')}</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -2715,6 +2730,7 @@ export default function App() {
               {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
               {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
               {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
+              {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
               {icon: '🔒', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
               {icon: '📄', label: 'CSV', action: async () => { setMenuOpen(false); try { const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } }); const csv = await res.text(); const now = new Date(); const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`; await RNFS.writeFile(filePath, csv, 'utf8'); await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Export' }); } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export: ${e.message}`); } }},
               {icon: LANGS[lang]?.flag || '🌐', label: `${t('language')}: ${LANGS[lang]?.name}`, action: () => { const langs = Object.keys(LANGS); const idx = langs.indexOf(lang); changeLang(langs[(idx + 1) % langs.length]); }},

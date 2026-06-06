@@ -421,6 +421,9 @@ async function initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMP`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_machines INTEGER DEFAULT 3`).catch(() => {});
 
+  // Session duration
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS session_duration VARCHAR(10) DEFAULT '30d'`).catch(() => {});
+
   // Alertas inteligentes con duracion
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_duration INTEGER DEFAULT 5`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu_since TIMESTAMP`).catch(() => {});
@@ -430,6 +433,10 @@ async function initDB() {
 
   // Monitoreo de procesos
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS monitored_processes JSONB DEFAULT '[]'`).catch(() => {});
+
+  // Alertas compuestas
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS compound_alert JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS compound_alert_since TIMESTAMP`).catch(() => {});
 
   // SLA
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS sla_target NUMERIC(5,2) DEFAULT 99.9`).catch(() => {});
@@ -495,9 +502,14 @@ app.post('/api/auth/register', async (req, res) => {
     );
 
     const user = result.rows[0];
+    // Trial Pro 14 dias
+    await pool.query(
+      `UPDATE users SET plan = 'pro', max_machines = 999, plan_expires_at = NOW() + INTERVAL '14 days' WHERE id = $1`,
+      [user.id]
+    );
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
     logAudit(user.id, 'register', 'user', user.id, null, req.ip);
-    res.status(201).json({ user, token });
+    res.status(201).json({ user, token, trial: true, trial_days: 14 });
   } catch (error) {
     console.error('Error en registro:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -516,9 +528,10 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
 
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    const sessionDur = user.session_duration || '30d';
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: sessionDur });
     logAudit(user.id, 'login', 'user', user.id, null, req.ip);
-    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner' }, token });
+    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner' }, token, session_duration: sessionDur });
   } catch (error) {
     console.error('Error en login:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -576,6 +589,23 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
     console.error('Error al cambiar contraseña:', error);
     res.status(500).json({ error: 'Error interno' });
   }
+});
+
+app.get('/api/auth/session', authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query('SELECT session_duration FROM users WHERE id = $1', [req.user.id]);
+    res.json({ session_duration: user.rows[0]?.session_duration || '30d' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.post('/api/auth/session', authenticateToken, async (req, res) => {
+  try {
+    const { session_duration } = req.body;
+    const valid = ['1h', '8h', '24h', '7d', '14d', '30d', '90d'];
+    if (!valid.includes(session_duration)) return res.status(400).json({ error: 'Duracion invalida. Opciones: ' + valid.join(', ') });
+    await pool.query('UPDATE users SET session_duration = $1 WHERE id = $2', [session_duration, req.user.id]);
+    res.json({ message: 'Duracion de sesion actualizada', session_duration });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 // ============== ORGANIZACION Y EQUIPO ==============
@@ -1099,6 +1129,32 @@ app.post('/api/heartbeat', async (req, res) => {
           await pool.query('UPDATE machines SET last_alert_at = NOW() WHERE id = $1', [updatedMachine.id]);
         }
       }
+
+      // Alertas compuestas (ej: CPU > 90 AND RAM > 85 por X min)
+      const compRule = updatedMachine.compound_alert;
+      if (compRule && compRule.conditions && compRule.conditions.length > 0) {
+        const vals = { cpu: cpu_usage, ram: ramPct, ping: ping_ms || 0 };
+        const allMet = compRule.conditions.every((c) => {
+          const v = vals[c.metric];
+          return v !== undefined && v >= (c.threshold || 0);
+        });
+        if (allMet) {
+          if (!updatedMachine.compound_alert_since) {
+            await pool.query('UPDATE machines SET compound_alert_since = NOW() WHERE id = $1', [updatedMachine.id]);
+          } else {
+            const sinceDur = (now - new Date(updatedMachine.compound_alert_since)) / 60000;
+            if (sinceDur >= (compRule.duration || 5) && alertCooldown) {
+              const desc = compRule.conditions.map(c => `${c.metric.toUpperCase()} >= ${c.threshold}%`).join(' + ');
+              sendPush(updatedMachine.user_id, `🔥 Alerta compuesta: ${updatedMachine.machine_name}`, `${desc} por ${Math.round(sinceDur)} min`, { type: 'compound_alert', machineId: String(updatedMachine.id) });
+              await pool.query('UPDATE machines SET last_alert_at = NOW() WHERE id = $1', [updatedMachine.id]);
+            }
+          }
+        } else {
+          if (updatedMachine.compound_alert_since) {
+            await pool.query('UPDATE machines SET compound_alert_since = NULL WHERE id = $1', [updatedMachine.id]);
+          }
+        }
+      }
     }
 
     // Detectar si la IP realmente cambio en ESTE heartbeat
@@ -1301,6 +1357,7 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (req.body.geo_lon !== undefined) { fields.push(`geo_lon = $${idx++}`); values.push(req.body.geo_lon); }
     if (req.body.alert_duration !== undefined) { fields.push(`alert_duration = $${idx++}`); values.push(req.body.alert_duration || 5); }
     if (req.body.monitored_processes !== undefined) { fields.push(`monitored_processes = $${idx++}`); values.push(JSON.stringify(req.body.monitored_processes || [])); }
+    if (req.body.compound_alert !== undefined) { fields.push(`compound_alert = $${idx++}`); values.push(req.body.compound_alert ? JSON.stringify(req.body.compound_alert) : null); }
 
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
 
@@ -1461,6 +1518,20 @@ app.get('/api/machines/:id/history', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Error interno' });
   }
 });
+
+// ============== TRIAL EXPIRATION CHECK (cada hora) ==============
+setInterval(async () => {
+  try {
+    const expired = await pool.query(
+      `UPDATE users SET plan = 'free', max_machines = 3
+       WHERE plan = 'pro' AND plan_expires_at IS NOT NULL AND plan_expires_at < NOW()
+       RETURNING id, email`
+    );
+    if (expired.rows.length > 0) {
+      console.log(`[TRIAL] ${expired.rows.length} trial(s) expirado(s): ${expired.rows.map(u => u.email).join(', ')}`);
+    }
+  } catch (e) { console.error('Error trial check:', e.message); }
+}, 3600000);
 
 // ============== DETECTOR DE OFFLINE ==============
 
@@ -2211,6 +2282,105 @@ app.post('/api/incidents/:id/resolve', authenticateToken, async (req, res) => {
       [req.params.id, resolution_notes || 'Incidente resuelto manualmente', req.user.id]
     );
     res.json({ message: 'Incidente resuelto' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── UPGRADE/DOWNGRADE PLAN ──
+app.post('/api/plan/upgrade', authenticateToken, async (req, res) => {
+  try {
+    const { plan, payment_id } = req.body;
+    if (!['pro', 'enterprise'].includes(plan)) return res.status(400).json({ error: 'Plan invalido' });
+    // TODO: validar pago con MercadoPago/Stripe usando payment_id
+    const expiresAt = plan === 'pro' ? "NOW() + INTERVAL '30 days'" : "NOW() + INTERVAL '365 days'";
+    const maxM = plan === 'pro' ? 999 : 9999;
+    await pool.query(
+      `UPDATE users SET plan = $1, max_machines = $2, plan_expires_at = ${expiresAt} WHERE id = $3`,
+      [plan, maxM, req.user.id]
+    );
+    logAudit(req.user.id, 'plan_upgrade', 'user', req.user.id, JSON.stringify({ plan, payment_id }), req.ip);
+    res.json({ message: `Plan actualizado a ${plan}`, plan });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── SSL CERTIFICATE MONITORING ──
+app.post('/api/ssl-check', authenticateToken, async (req, res) => {
+  try {
+    const { hostname } = req.body;
+    if (!hostname) return res.status(400).json({ error: 'hostname requerido' });
+    const tls = require('tls');
+    const socket = tls.connect(443, hostname, { servername: hostname, timeout: 10000 }, () => {
+      const cert = socket.getPeerCertificate();
+      socket.destroy();
+      if (!cert || !cert.valid_to) return res.json({ error: 'No se pudo obtener certificado' });
+      const expiresAt = new Date(cert.valid_to);
+      const daysLeft = Math.ceil((expiresAt - Date.now()) / 86400000);
+      res.json({
+        hostname, issuer: cert.issuer?.O || cert.issuer?.CN || 'Desconocido',
+        subject: cert.subject?.CN || hostname,
+        valid_from: cert.valid_from, valid_to: cert.valid_to,
+        expires_at: expiresAt.toISOString(), days_left: daysLeft,
+        status: daysLeft <= 0 ? 'expired' : daysLeft <= 14 ? 'warning' : 'ok'
+      });
+    });
+    socket.on('error', (err) => { res.json({ hostname, error: err.message, status: 'error' }); });
+    socket.on('timeout', () => { socket.destroy(); res.json({ hostname, error: 'Timeout', status: 'error' }); });
+  } catch (error) {
+    res.status(500).json({ error: 'Error: ' + error.message });
+  }
+});
+
+// ── INCIDENTS PDF EXPORT ──
+app.get('/api/incidents/export/pdf', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT i.*, m.machine_name FROM incidents i JOIN machines m ON i.machine_id = m.id WHERE i.user_id = $1 ORDER BY i.created_at DESC LIMIT 100`,
+      [req.user.id]
+    );
+    const incidents = result.rows;
+    const open = incidents.filter(i => i.status === 'open').length;
+    const resolved = incidents.filter(i => i.status === 'resolved').length;
+    const totalDownMin = incidents.reduce((a, i) => a + (i.duration_minutes || 0), 0);
+
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ServerEyes - Reporte de Incidentes</title>
+    <style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#333}
+    h1{color:#1a1a2e;border-bottom:3px solid #00d4ff;padding-bottom:10px}
+    .stats{display:flex;gap:20px;margin:20px 0}
+    .stat{background:#f5f5f5;border-radius:10px;padding:16px;flex:1;text-align:center}
+    .stat .num{font-size:28px;font-weight:800}
+    .stat .label{font-size:12px;color:#888}
+    table{width:100%;border-collapse:collapse;margin-top:20px}
+    th{background:#1a1a2e;color:#fff;padding:10px;text-align:left;font-size:12px}
+    td{padding:8px 10px;border-bottom:1px solid #eee;font-size:12px}
+    .open{color:#f44336;font-weight:700} .resolved{color:#4caf50;font-weight:700}
+    .footer{margin-top:30px;text-align:center;color:#999;font-size:11px}
+    </style></head><body>
+    <h1>👁 ServerEyes — Reporte de Incidentes</h1>
+    <p style="color:#888">Generado: ${new Date().toLocaleString('es')}</p>
+    <div class="stats">
+      <div class="stat"><div class="num">${incidents.length}</div><div class="label">Total</div></div>
+      <div class="stat"><div class="num" style="color:#f44336">${open}</div><div class="label">Abiertos</div></div>
+      <div class="stat"><div class="num" style="color:#4caf50">${resolved}</div><div class="label">Resueltos</div></div>
+      <div class="stat"><div class="num">${Math.round(totalDownMin)}</div><div class="label">Min offline</div></div>
+    </div>
+    <table><thead><tr><th>Maquina</th><th>Titulo</th><th>Estado</th><th>Inicio</th><th>Fin</th><th>Duracion</th><th>Resolucion</th></tr></thead><tbody>
+    ${incidents.map(i => `<tr>
+      <td>${i.machine_name}</td><td>${i.title}</td>
+      <td class="${i.status}">${i.status === 'open' ? 'ABIERTO' : 'RESUELTO'}</td>
+      <td>${new Date(i.started_at).toLocaleString('es')}</td>
+      <td>${i.ended_at ? new Date(i.ended_at).toLocaleString('es') : '—'}</td>
+      <td>${i.duration_minutes ? Math.round(i.duration_minutes) + ' min' : 'En curso'}</td>
+      <td>${i.resolution_notes || '—'}</td>
+    </tr>`).join('')}
+    </tbody></table>
+    <div class="footer">ServerEyes — Monitoreo de servidores en tiempo real</div>
+    </body></html>`;
+
+    res.set({ 'Content-Type': 'text/html', 'Content-Disposition': 'attachment; filename="incidentes-servereyes.html"' });
+    res.send(html);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }

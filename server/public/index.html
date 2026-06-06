@@ -426,6 +426,7 @@ function render() {
   }
   if (activeNav === 'ajustes') {
     setTimeout(loadSmtpConfig, 100);
+    setTimeout(loadSessionDur, 150);
   }
   if (activeNav === 'incidentes' && !incidentsLoaded) {
     incidentsLoaded = true;
@@ -641,6 +642,26 @@ function buildNocView(healthPct, alerts, avgCpu, avgRam, avgDisk, avgPing, filte
         </div>
       </div>
     </div>
+
+    <!-- Salud por Grupo -->
+    ${(() => {
+      const groups = {};
+      filtered.forEach(m => { const g = m.grupo || 'Sin grupo'; if (!groups[g]) groups[g] = { total: 0, online: 0, avgCpu: [], avgRam: [] }; groups[g].total++; if (m.is_online) groups[g].online++; if (m.cpu_usage != null) groups[g].avgCpu.push(m.cpu_usage); if (m.ram_usage && m.ram_total) groups[g].avgRam.push(Math.round(m.ram_usage / m.ram_total * 100)); });
+      const gNames = Object.keys(groups).sort();
+      if (gNames.length <= 1) return '';
+      return `<div class="panel">
+        <div class="panel-title"><span class="dot" style="background:#2196F3"></span>Salud por Grupo</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+          ${gNames.map(g => { const d = groups[g]; const pct = d.total > 0 ? Math.round(d.online / d.total * 100) : 0; const cpu = d.avgCpu.length > 0 ? Math.round(d.avgCpu.reduce((a,b) => a+b, 0) / d.avgCpu.length) : null; const ram = d.avgRam.length > 0 ? Math.round(d.avgRam.reduce((a,b) => a+b, 0) / d.avgRam.length) : null;
+            return `<div style="background:var(--bg);border:1px solid var(--border2);border-radius:10px;padding:12px;border-left:3px solid ${pct >= 80 ? '#4CAF50' : pct >= 50 ? '#FF9800' : '#F44336'}">
+              <div style="font-weight:700;font-size:13px;color:var(--text);margin-bottom:6px">${g}</div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:4px"><span>${d.online}/${d.total} online</span><span style="font-weight:700;color:${pct >= 80 ? '#4CAF50' : pct >= 50 ? '#FF9800' : '#F44336'}">${pct}%</span></div>
+              ${cpu != null ? `<div style="font-size:11px;color:#888">CPU: <span style="color:${colorPct(cpu)};font-weight:600">${cpu}%</span> · RAM: <span style="color:${colorPct(ram||0,75,90)};font-weight:600">${ram||0}%</span></div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    })()}
 
     <!-- Tabla servidores -->
     <div class="panel" style="overflow-x:auto;">
@@ -903,9 +924,56 @@ function buildAjustesView() {
     </div>
     <div class="panel">
       <div class="panel-title"><span class="dot" style="background:#F44336"></span>Sesión</div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;color:#999">Duracion de sesion (se aplica en el proximo login)</label>
+        <select class="modal-input" id="session-dur" style="font-size:13px;padding:8px;margin-top:4px" onchange="saveSessionDur(this.value)">
+          ${['1h','8h','24h','7d','14d','30d','90d'].map(v => `<option value="${v}">${v === '1h' ? '1 hora' : v === '8h' ? '8 horas' : v === '24h' ? '24 horas' : v === '7d' ? '7 dias' : v === '14d' ? '14 dias' : v === '30d' ? '30 dias' : '90 dias'}</option>`).join('')}
+        </select>
+        <span id="session-status" style="font-size:11px;margin-left:8px"></span>
+      </div>
       <button class="modal-btn danger sm" onclick="logout()">Cerrar sesión</button>
     </div>
   </div>`;
+}
+
+function addCompRule() {
+  const cont = document.getElementById('compound-rules');
+  if (!cont) return;
+  const i = cont.children.length;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+  div.innerHTML = `<select class="modal-input comp-metric" style="width:80px;font-size:12px;padding:6px" data-i="${i}"><option value="cpu">CPU</option><option value="ram">RAM</option><option value="ping">Ping</option></select><span style="color:#888;font-size:12px">>=</span><input class="modal-input comp-threshold" type="number" placeholder="90" style="width:70px;font-size:12px;padding:6px" data-i="${i}"/><span style="color:#888;font-size:12px">%</span><button style="background:none;border:none;color:#ff5252;cursor:pointer;font-size:14px" onclick="this.parentElement.remove()">✕</button>`;
+  cont.appendChild(div);
+}
+function removeCompRule(i) {
+  const cont = document.getElementById('compound-rules');
+  if (cont && cont.children[i]) cont.children[i].remove();
+}
+function getCompoundAlert() {
+  const metrics = document.querySelectorAll('.comp-metric');
+  const thresholds = document.querySelectorAll('.comp-threshold');
+  const conditions = [];
+  metrics.forEach((sel, i) => {
+    const th = thresholds[i]?.value;
+    if (th) conditions.push({ metric: sel.value, threshold: parseInt(th) });
+  });
+  if (conditions.length === 0) return null;
+  return { conditions, duration: parseInt(document.getElementById('ed-comp-duration')?.value) || 5 };
+}
+
+async function saveSessionDur(val) {
+  const st = document.getElementById('session-status');
+  const res = await api('/api/auth/session', { method: 'POST', body: JSON.stringify({ session_duration: val }) });
+  if (st) st.innerHTML = res.ok ? '<span style="color:#4CAF50">✅ Guardado</span>' : '<span style="color:#F44336">Error</span>';
+  setTimeout(() => { if (st) st.innerHTML = ''; }, 3000);
+}
+
+async function loadSessionDur() {
+  const res = await api('/api/auth/session');
+  if (res.ok) {
+    const el = document.getElementById('session-dur');
+    if (el) el.value = res.data.session_duration || '30d';
+  }
 }
 
 let smtpLoaded = false;
@@ -1176,6 +1244,7 @@ function buildIncidentesContent() {
   return `<div style="display:flex;flex-direction:column;gap:16px">
     <div class="panel">
       <div class="panel-title"><span class="dot" style="background:#ff5252"></span>Incidentes Abiertos (${open.length})<button class="help-btn" onclick="event.stopPropagation();showHelp('incidents',this)">?</button></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px"><button class="modal-btn sm" onclick="incidentsLoaded=false;loadIncidents()">🔄 Actualizar</button><a href="#" class="modal-btn sm" style="text-decoration:none;display:inline-block" onclick="event.preventDefault();window.open('/api/incidents/export/pdf','_blank').document.write('<p>Cargando...</p>');fetch('/api/incidents/export/pdf',{headers:{Authorization:'Bearer '+token}}).then(r=>r.text()).then(h=>{const w=window.open();w.document.write(h);w.document.close()})">📄 Exportar</a></div>
       ${open.length === 0 ? '<div style="text-align:center;padding:30px;color:#888"><div style="font-size:36px;margin-bottom:8px">🎉</div>Sin incidentes abiertos</div>' :
         open.map(i => `<div style="background:var(--bg);border-left:3px solid #ff5252;border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:12px" onclick="openIncident(${i.id})">
           <span style="font-size:20px">🔴</span>
@@ -1242,6 +1311,17 @@ function buildSlaModal() {
     </div>`}
   </div></div>`;
 }
+async function checkSSL(hostname) {
+  const h = hostname.replace(/^https?:\/\//, '').split('/')[0];
+  const res = await api('/api/ssl-check', { method: 'POST', body: JSON.stringify({ hostname: h }) });
+  if (res.ok && res.data) {
+    const d = res.data;
+    if (d.error) { alert('SSL Error: ' + d.error); return; }
+    const color = d.status === 'ok' ? '🟢' : d.status === 'warning' ? '🟡' : '🔴';
+    alert(`${color} SSL: ${d.subject}\n\nEmisor: ${d.issuer}\nVence: ${new Date(d.expires_at).toLocaleDateString('es')}\nDias restantes: ${d.days_left}\nEstado: ${d.status === 'ok' ? 'Valido' : d.status === 'warning' ? 'Vence pronto!' : 'Expirado!'}`);
+  } else { alert('Error al verificar SSL'); }
+}
+
 async function updateSla(id) {
   const val = document.getElementById('sla-select')?.value;
   await api('/api/machines/'+id+'/sla', {method:'PUT', body:JSON.stringify({sla_target:parseFloat(val)})});
@@ -1310,6 +1390,7 @@ const helpContent = {
   wol: { title: 'Wake-on-LAN', body: `<p>Enciende un servidor apagado remotamente enviando un "magic packet" a su placa de red.</p><p><strong>Requisitos:</strong></p><ol><li>La BIOS del servidor debe tener WOL activado</li><li>El adaptador de red en Windows debe tener "Wake on Magic Packet" habilitado</li><li>El servidor debe estar conectado por cable Ethernet (no WiFi)</li><li>Debe tener la MAC Address cargada en ServerEyes</li><li>Otro agente en la misma red debe estar corriendo para enviar el paquete</li></ol><div class="help-tip">💡 El boton WOL solo aparece cuando la maquina esta offline y tiene MAC configurada.</div>` },
   language: { title: 'Idioma', body: `<p>Cambia el idioma de la interfaz del dashboard.</p><p>El cambio se aplica inmediatamente a todos los textos del sistema.</p>` },
   incidents: { title: 'Incidentes', body: `<p>Registro automatico de cada vez que un servidor se cae.</p><ul><li>Los incidentes se <strong>crean automaticamente</strong> cuando una maquina deja de responder</li><li>Se <strong>resuelven automaticamente</strong> cuando la maquina vuelve a estar online</li><li>Podes agregar <strong>notas</strong> para documentar que paso y como se resolvio</li><li>El <strong>timeline</strong> muestra la secuencia de eventos de cada incidente</li></ul><p>Tambien podes resolver un incidente manualmente con notas de resolucion.</p><div class="help-tip">💡 Util para llevar un historial de problemas y sus soluciones, especialmente para equipos.</div>` },
+  compound: { title: 'Alerta Compuesta', body: `<p>Permite configurar alertas que se activan solo cuando <strong>varias condiciones se cumplen al mismo tiempo</strong>.</p><p>Por ejemplo: "avisar si CPU > 90% <strong>Y</strong> RAM > 85% por mas de 10 minutos". Esto evita alertas por picos momentaneos de un solo recurso.</p><p><strong>Como usarlo:</strong></p><ol><li>Agrega condiciones con el boton "+"</li><li>Selecciona la metrica (CPU, RAM, Ping)</li><li>Configura el umbral</li><li>Defini cuantos minutos deben cumplirse TODAS a la vez</li></ol>` },
   sla: { title: 'SLA Tracking', body: `<p>Muestra el cumplimiento del <strong>SLA (Service Level Agreement)</strong> mensual de cada maquina.</p><ul><li>El porcentaje de uptime se calcula automaticamente por mes</li><li>Se compara contra el objetivo configurado (por defecto 99.9%)</li><li>Verde = cumple el SLA, Rojo = no cumple</li></ul><p>Podes cambiar el objetivo SLA editando la maquina.</p>` },
 };
 
@@ -1473,6 +1554,7 @@ function buildDetailModal() {
       <button class="modal-btn sm" style="border-radius:8px;background:#E3F2FD;color:#2196F3" onclick="downloadRDP(${m.id})">🖥️ RDP</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#FFF3E0;color:#FF9800" onclick="requestSpeedTest(${m.id})">⚡ Speed</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#F3E5F5;color:#9C27B0" onclick="openSla(${m.id})">📋 SLA</button>
+      ${m.dns_host?`<button class="modal-btn sm" style="border-radius:8px;background:#E0F7FA;color:#00838F" onclick="checkSSL('${m.dns_host}')">🔒 SSL</button>`:''}
       <button class="modal-btn sm" style="border-radius:8px;background:#E8F5E9;color:#4CAF50" onclick="openEditModal(${m.id})">✏️ Editar</button>
       ${!m.is_online?`<button class="modal-btn sm" style="border-radius:8px;background:#E1F5FE;color:#0288D1" onclick="sendWol(${m.id})">⚡ WOL</button>`:''}
     </div>
@@ -1742,6 +1824,22 @@ function buildEditModal() {
       <p style="font-size:10px;color:#888;margin-top:4px">Separados por coma. Usa el nombre de servicio (visible en Servicios → Propiedades → Nombre del servicio)</p>
     </div>
 
+    <div style="background:var(--bg);border-radius:12px;padding:16px;margin-top:16px">
+      <div class="panel-title" style="margin-bottom:12px"><span class="dot" style="background:#FF9800"></span>Alerta Compuesta<button class="help-btn" onclick="event.stopPropagation();showHelp('compound',this)">?</button></div>
+      <p style="font-size:11px;color:#999;margin-bottom:8px">Alerta cuando TODAS las condiciones se cumplen al mismo tiempo por X minutos.</p>
+      <div id="compound-rules">
+        ${(d.compound_alert?.conditions||[]).map((c,i)=>`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+          <select class="modal-input comp-metric" style="width:80px;font-size:12px;padding:6px" data-i="${i}"><option value="cpu" ${c.metric==='cpu'?'selected':''}>CPU</option><option value="ram" ${c.metric==='ram'?'selected':''}>RAM</option><option value="ping" ${c.metric==='ping'?'selected':''}>Ping</option></select>
+          <span style="color:#888;font-size:12px">>=</span>
+          <input class="modal-input comp-threshold" type="number" value="${c.threshold||''}" placeholder="90" style="width:70px;font-size:12px;padding:6px" data-i="${i}"/>
+          <span style="color:#888;font-size:12px">%</span>
+          <button style="background:none;border:none;color:#ff5252;cursor:pointer;font-size:14px" onclick="removeCompRule(${i})">✕</button>
+        </div>`).join('')}
+      </div>
+      <button class="modal-btn sm" onclick="addCompRule()" style="font-size:11px;margin-bottom:8px">+ Agregar condicion</button>
+      <div><label style="font-size:11px;color:#999">Duracion (min):</label><input class="modal-input" id="ed-comp-duration" type="number" value="${d.compound_alert?.duration||5}" style="width:80px;font-size:12px;padding:6px"/></div>
+    </div>
+
     <button class="modal-btn" onclick="saveEdit()" style="margin-top:16px">Guardar cambios</button>
     <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
     <button class="modal-btn danger" onclick="deleteMachine(${d.id})" style="margin-top:20px">Eliminar máquina</button>
@@ -1767,6 +1865,7 @@ async function saveEdit() {
     alert_offline: document.getElementById('ed-alert-offline')?.checked,
     alert_duration: parseInt(document.getElementById('ed-alert-duration')?.value) || 5,
     monitored_processes: (document.getElementById('ed-processes')?.value || '').split(',').map(s=>s.trim()).filter(Boolean),
+    compound_alert: getCompoundAlert(),
     geo_city: document.getElementById('ed-geo-city')?.value?.trim()||null,
     geo_region: document.getElementById('ed-geo-region')?.value?.trim()||null,
     geo_country: document.getElementById('ed-geo-country')?.value?.trim()||null,
@@ -2262,6 +2361,7 @@ function buildUrlsView() {
         <td onclick="event.stopPropagation()">
           <div style="display:flex;gap:4px">
             <button class="modal-btn sm" style="background:${u.is_active?'#FFF3E0':'#E8F5E9'};color:${u.is_active?'#FF9800':'#4CAF50'};padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="toggleUrlMonitor(${u.id},${u.is_active})">${u.is_active?'Pausar':'Activar'}</button>
+            ${u.url.startsWith('https')?`<button class="modal-btn sm" style="background:#E0F7FA;color:#00838F;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="checkSSL('${new URL(u.url).hostname}')">🔒 SSL</button>`:''}
             <button class="modal-btn sm" style="background:#FFEBEE;color:#F44336;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="deleteUrlMonitor(${u.id})">Eliminar</button>
           </div>
         </td>
