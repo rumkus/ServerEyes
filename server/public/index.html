@@ -416,6 +416,7 @@ function logout() {
 function pauseRefresh() { if(refreshInterval){clearInterval(refreshInterval);refreshInterval=null;} }
 function resumeRefresh() { if(!refreshInterval){refreshInterval=setInterval(()=>{loadMachines();loadUrlMonitors(true);},10000);} }
 function render() {
+  if (notifDropdownOpen) return;
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
   el.innerHTML = buildLayout();
@@ -429,9 +430,6 @@ function render() {
   if (activeNav === 'incidentes' && !incidentsLoaded) {
     incidentsLoaded = true;
     loadIncidents();
-  }
-  if (notifDropdownOpen) {
-    renderNotifDropdown();
   }
 }
 
@@ -1326,9 +1324,13 @@ function getUnreadCount() {
 
 function toggleNotifDropdown() {
   notifDropdownOpen = !notifDropdownOpen;
-  const dd = document.getElementById('notif-dropdown');
-  if (dd) { dd.style.display = notifDropdownOpen ? 'block' : 'none'; }
-  if (notifDropdownOpen) renderNotifDropdown();
+  if (notifDropdownOpen) {
+    const dd = document.getElementById('notif-dropdown');
+    if (dd) { dd.style.display = 'block'; }
+    renderNotifDropdown();
+  } else {
+    render();
+  }
 }
 
 function renderNotifDropdown() {
@@ -1360,8 +1362,7 @@ async function markNotifRead(id, el) {
 document.addEventListener('click', (e) => {
   if (notifDropdownOpen && !e.target.closest('.notif-wrap')) {
     notifDropdownOpen = false;
-    const dd = document.getElementById('notif-dropdown');
-    if (dd) dd.style.display = 'none';
+    render();
   }
 });
 
