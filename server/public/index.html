@@ -2028,7 +2028,7 @@ async function loadMachines() {
     const changed = newJson !== _lastMachinesJson;
     _lastMachinesJson = newJson;
     machines=r.data;
-    if (activeModal) { if (changed) updateHeaderBadge(); }
+    if (activeModal || notifDropdownOpen) { if (changed) updateHeaderBadge(); }
     else if (changed) render();
   }
   else if(r.status===401){logout();}
@@ -2186,7 +2186,7 @@ async function loadUrlMonitors(silent) {
     const changed = newJson !== _lastUrlMonitorsJson;
     _lastUrlMonitorsJson = newJson;
     urlMonitors = r.data;
-    if (!silent && changed && !activeModal) render();
+    if (!silent && changed && !activeModal && !notifDropdownOpen) render();
   }
 }
 function buildUrlsView() {
