@@ -431,7 +431,7 @@ function render() {
     loadIncidents();
   }
   if (notifDropdownOpen) {
-    setTimeout(renderNotifDropdown, 50);
+    renderNotifDropdown();
   }
 }
 
@@ -1054,7 +1054,11 @@ let incidentsLoaded = false;
 
 async function loadIncidents() {
   const res = await api('/api/incidents');
-  if (res.ok) { incidentsList = res.data; incidentsLoaded = true; render(); }
+  if (res.ok) {
+    incidentsList = res.data;
+    incidentsLoaded = true;
+    if (!notifDropdownOpen) render();
+  }
 }
 
 async function openIncident(id) {
@@ -1074,6 +1078,7 @@ async function resolveIncident(id) {
   const notes = prompt('Notas de resolucion (opcional):');
   await api('/api/incidents/' + id + '/resolve', { method: 'POST', body: JSON.stringify({ resolution_notes: notes || '' }) });
   incidentDetail = null;
+  notifDropdownOpen = false;
   loadIncidents();
 }
 
