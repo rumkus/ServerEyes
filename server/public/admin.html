@@ -470,24 +470,50 @@ let adminSupportMessages = [];
 
 function renderSupportAdmin() {
   if (adminSupportActive) return renderSupportChat();
+  const open = adminSupportTickets.filter(t => t.status === 'open');
+  const closed = adminSupportTickets.filter(t => t.status === 'closed');
   return `
-    <div class="section">
-      <h2>&#128172; Tickets de Soporte (${adminSupportTickets.length})</h2>
-      ${adminSupportTickets.length === 0 ? '<p style="color:#888">Sin tickets de soporte</p>' :
-        `<table><tr><th>ID</th><th>Usuario</th><th>Asunto</th><th>Estado</th><th>Mensajes</th><th>Ultimo</th><th></th></tr>
-        ${adminSupportTickets.map(t => `<tr style="cursor:pointer" onclick="openAdminTicket(${t.id})">
-          <td>${t.id}</td>
-          <td><strong>${t.email}</strong><br><span style="color:#888;font-size:11px">${t.nombre || ''}</span></td>
-          <td>${t.subject}</td>
-          <td><span class="badge ${t.status==='open'?'badge-on':'badge-off'}">${t.status==='open'?'ABIERTO':'CERRADO'}</span></td>
-          <td style="text-align:center">${t.msg_count || 0}</td>
-          <td style="font-size:11px;color:#888;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.last_message || '---'}</td>
-          <td>
-            ${t.status==='open'?`<button class="badge badge-off" style="cursor:pointer;border:none" onclick="event.stopPropagation();closeAdminTicket(${t.id})">Cerrar</button>`:''}
-          </td>
-        </tr>`).join('')}
-        </table>`}
-    </div>`;
+    <div class="stats" style="margin-bottom:20px">
+      <div class="stat"><div class="num" style="color:#ff9800">${adminSupportTickets.length}</div><div class="label">Total tickets</div></div>
+      <div class="stat"><div class="num" style="color:#00e676">${open.length}</div><div class="label">Abiertos</div></div>
+      <div class="stat"><div class="num" style="color:#888">${closed.length}</div><div class="label">Cerrados</div></div>
+    </div>
+
+    ${open.length > 0 ? `<div class="section">
+      <h2 style="color:#ff9800">&#128308; Tickets Abiertos (${open.length})</h2>
+      ${open.map(t => `<div style="background:#0f0f23;border-radius:12px;padding:16px;margin-bottom:10px;border-left:4px solid #ff9800;cursor:pointer;display:flex;gap:14px;align-items:start" onclick="openAdminTicket(${t.id})">
+        <div style="flex-shrink:0;width:40px;height:40px;border-radius:50%;background:#3d2e00;display:flex;align-items:center;justify-content:center;font-size:18px">&#128100;</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <strong style="color:#ff9800;font-size:14px">${t.email}</strong>
+            <span style="color:#555;font-size:11px">${timeSince(t.updated_at)}</span>
+          </div>
+          ${t.nombre ? '<div style="color:#888;font-size:11px;margin-bottom:4px">' + t.nombre + '</div>' : ''}
+          <div style="color:#eee;font-size:13px;font-weight:600">${t.subject}</div>
+          <div style="color:#666;font-size:12px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.last_message || 'Sin mensajes'}</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <span style="font-size:11px;color:#888">&#128172; ${t.msg_count || 0} mensajes</span>
+            <span class="badge badge-on" style="font-size:10px">ABIERTO</span>
+            <button class="badge badge-off" style="cursor:pointer;border:none;font-size:10px;margin-left:auto" onclick="event.stopPropagation();closeAdminTicket(${t.id})">Cerrar</button>
+          </div>
+        </div>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${closed.length > 0 ? `<div class="section">
+      <h2 style="color:#888">&#9989; Cerrados (${closed.length})</h2>
+      ${closed.slice(0, 20).map(t => `<div style="background:#0f0f23;border-radius:10px;padding:12px 16px;margin-bottom:6px;border-left:3px solid #333;cursor:pointer;opacity:.7;display:flex;gap:12px;align-items:center" onclick="openAdminTicket(${t.id})">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;gap:8px;align-items:center">
+            <strong style="color:#888;font-size:12px">${t.email}</strong>
+            <span style="color:#555;font-size:11px">· ${t.subject}</span>
+            <span style="color:#555;font-size:10px;margin-left:auto">${timeSince(t.updated_at)} · ${t.msg_count || 0} msgs</span>
+          </div>
+        </div>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${adminSupportTickets.length === 0 ? '<div class="section"><p style="color:#888;text-align:center;padding:30px">&#128172; Sin tickets de soporte</p></div>' : ''}`;
 }
 
 function renderSupportChat() {
@@ -495,12 +521,16 @@ function renderSupportChat() {
   return `
     <div class="section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div>
-          <button class="badge badge-version" style="cursor:pointer;border:none;margin-right:8px" onclick="adminSupportActive=null;render()">&#8592; Volver</button>
-          <strong style="font-size:16px">${t?.subject||'Ticket'}</strong>
-          <span style="color:#888;font-size:12px;margin-left:8px">${t?.email||''}</span>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="badge badge-version" style="cursor:pointer;border:none" onclick="adminSupportActive=null;render()">&#8592; Volver</button>
+          <div style="width:36px;height:36px;border-radius:50%;background:#3d2e00;display:flex;align-items:center;justify-content:center;font-size:16px">&#128100;</div>
+          <div>
+            <strong style="font-size:15px;color:#ff9800">${t?.email||'Usuario'}</strong>
+            ${t?.nombre ? '<span style="color:#666;font-size:12px;margin-left:6px">' + t.nombre + '</span>' : ''}
+            <div style="font-size:12px;color:#888">${t?.subject||'Ticket'} · <span class="badge ${t?.status==='open'?'badge-on':'badge-off'}" style="font-size:10px">${t?.status==='open'?'ABIERTO':'CERRADO'}</span></div>
+          </div>
         </div>
-        ${t?.status==='open'?`<button class="badge badge-off" style="cursor:pointer;border:none" onclick="closeAdminTicket(${adminSupportActive})">Cerrar ticket</button>`:''}
+        ${t?.status==='open'?`<button class="badge badge-off" style="cursor:pointer;border:none" onclick="closeAdminTicket(${adminSupportActive})">Cerrar</button>`:''}
       </div>
       <div style="max-height:350px;overflow-y:auto;border:1px solid #2a2a4a;border-radius:10px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px" id="admin-chat-msgs">
         ${adminSupportMessages.length === 0 ? '<p style="color:#888;text-align:center;padding:20px">Sin mensajes</p>' :

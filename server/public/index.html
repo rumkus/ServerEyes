@@ -1527,13 +1527,26 @@ async function loadSupportTickets() {
   if (r.ok) { supportTickets = r.data; renderSupportPanel(); }
 }
 
+let supportNewMode = false;
+
 function renderSupportPanel() {
   const panel = document.getElementById('support-panel');
   if (!panel) return;
   if (supportActiveTicket) { renderSupportChat(); return; }
   panel.innerHTML = `
-    <div class="support-header"><h4>💬 Soporte</h4><button style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer" onclick="toggleSupport()">✕</button></div>
-    <div style="padding:10px"><button style="width:100%;padding:10px;background:#9C27B0;color:#fff;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:13px" onclick="newSupportTicket()">+ Nueva consulta</button></div>
+    <div class="support-header"><h4>🎧 Soporte</h4><button style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer" onclick="toggleSupport()">✕</button></div>
+    ${supportNewMode ? `
+      <div style="padding:12px">
+        <input class="modal-input" id="support-new-subject" placeholder="Asunto de tu consulta..." style="font-size:13px;padding:10px;margin-bottom:8px;width:100%;box-sizing:border-box;background:var(--input-bg);color:var(--text);border:1px solid var(--border2);border-radius:10px;outline:none"/>
+        <textarea class="modal-input" id="support-new-msg" placeholder="Describe tu problema o consulta..." rows="3" style="font-size:13px;padding:10px;width:100%;box-sizing:border-box;resize:none;background:var(--input-bg);color:var(--text);border:1px solid var(--border2);border-radius:10px;outline:none;font-family:inherit"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button style="flex:1;padding:10px;background:#9C27B0;color:#fff;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:13px" onclick="submitNewTicket()">Enviar</button>
+          <button style="padding:10px 16px;background:var(--border2);color:var(--text);border:none;border-radius:10px;cursor:pointer;font-size:13px" onclick="supportNewMode=false;renderSupportPanel()">Cancelar</button>
+        </div>
+      </div>
+    ` : `
+      <div style="padding:10px"><button style="width:100%;padding:10px;background:#9C27B0;color:#fff;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:13px" onclick="supportNewMode=true;renderSupportPanel();setTimeout(()=>document.getElementById('support-new-subject')?.focus(),50)">+ Nueva consulta</button></div>
+    `}
     <div class="support-tickets-list">
       ${supportTickets.length === 0 ? '<p style="text-align:center;color:#888;padding:30px 0">Sin conversaciones.<br>Crea una nueva consulta.</p>' :
         supportTickets.map(t => `<div class="support-ticket-item" onclick="openSupportTicket(${t.id})">
@@ -1546,11 +1559,21 @@ function renderSupportPanel() {
     </div>`;
 }
 
-async function newSupportTicket() {
-  const subject = prompt('Asunto de tu consulta:');
-  if (!subject) return;
+async function submitNewTicket() {
+  const subject = document.getElementById('support-new-subject')?.value?.trim();
+  const msg = document.getElementById('support-new-msg')?.value?.trim();
+  if (!subject) { alert('Ingresa el asunto'); return; }
   const r = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject }) });
-  if (r.ok) { supportActiveTicket = r.data.id; loadSupportMessages(); }
+  if (r.ok) {
+    supportNewMode = false;
+    supportActiveTicket = r.data.id;
+    supportMessages = [];
+    if (msg) {
+      await api('/api/support/tickets/' + r.data.id + '/messages', { method: 'POST', body: JSON.stringify({ message: msg }) });
+    }
+    loadSupportMessages();
+    loadSupportTickets();
+  }
 }
 
 async function openSupportTicket(id) {
@@ -1560,7 +1583,29 @@ async function openSupportTicket(id) {
 
 async function loadSupportMessages() {
   const r = await api('/api/support/tickets/' + supportActiveTicket + '/messages');
-  if (r.ok) { supportMessages = r.data; renderSupportChat(); }
+  if (!r.ok) return;
+  supportMessages = r.data;
+  const msgsEl = document.getElementById('support-msgs');
+  if (msgsEl) {
+    msgsEl.innerHTML = buildSupportMsgsHtml();
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  } else {
+    renderSupportChat();
+  }
+}
+
+function buildSupportMsgsHtml() {
+  if (supportMessages.length === 0) return '<p style="text-align:center;color:#888;padding:20px;font-size:13px">Envia tu primer mensaje</p>';
+  return supportMessages.map(m => {
+    const isUser = m.sender_type === 'user';
+    const attachs = m.attachments || [];
+    return `<div class="support-msg ${isUser ? 'user' : 'admin'}">
+      ${!isUser ? '<div style="font-size:10px;font-weight:600;margin-bottom:2px">Soporte</div>' : ''}
+      ${m.message || ''}
+      ${attachs.length > 0 ? `<div class="msg-attach">${attachs.map(a => `<a href="data:${a.type};base64,${a.data}" download="${a.name}">📎 ${a.name}</a>`).join('')}</div>` : ''}
+      <div class="msg-time">${new Date(m.created_at).toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+    </div>`;
+  }).join('');
 }
 
 function renderSupportChat() {
@@ -1575,19 +1620,7 @@ function renderSupportChat() {
       </div>
       <button style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer" onclick="toggleSupport()">✕</button>
     </div>
-    <div class="support-messages" id="support-msgs">
-      ${supportMessages.length === 0 ? '<p style="text-align:center;color:#888;padding:20px;font-size:13px">Envia tu primer mensaje</p>' :
-        supportMessages.map(m => {
-          const isUser = m.sender_type === 'user';
-          const attachs = m.attachments || [];
-          return `<div class="support-msg ${isUser ? 'user' : 'admin'}">
-            ${!isUser ? '<div style="font-size:10px;font-weight:600;margin-bottom:2px">Soporte</div>' : ''}
-            ${m.message || ''}
-            ${attachs.length > 0 ? `<div class="msg-attach">${attachs.map(a => `<a href="data:${a.type};base64,${a.data}" download="${a.name}">📎 ${a.name}</a>`).join('')}</div>` : ''}
-            <div class="msg-time">${new Date(m.created_at).toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
-          </div>`;
-        }).join('')}
-    </div>
+    <div class="support-messages" id="support-msgs">${buildSupportMsgsHtml()}</div>
     <div class="support-input-area">
       <label style="cursor:pointer;font-size:18px;padding:4px" title="Adjuntar archivo">📎<input type="file" id="support-files" multiple accept="image/*,.pdf,.txt" style="display:none" onchange="updateFileLabel()"/></label>
       <textarea id="support-msg-input" placeholder="Escribe tu mensaje..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSupportMsg()}"></textarea>
