@@ -299,6 +299,7 @@ select.modal-input{appearance:auto;cursor:pointer;}
 </head>
 <body>
 <div id="app"></div>
+<button class="support-fab" id="support-fab" style="display:none" onclick="toggleSupport()" title="Soporte">🎧</button>
 
 <script src="/i18n.js"></script>
 <script>
@@ -1504,7 +1505,7 @@ let supportMessages = [];
 function toggleSupport() {
   supportOpen = !supportOpen;
   let panel = document.getElementById('support-panel');
-  let fab = document.getElementById('support-fab');
+  const fab = document.getElementById('support-fab');
   if (supportOpen) {
     if (!panel) {
       panel = document.createElement('div');
@@ -2356,16 +2357,9 @@ async function loadAgentInfo() {
 async function startDashboard() {
   await Promise.all([loadMachines(),loadAgentInfo(),loadUrlMonitors(true),loadMaintenance(),loadAuditLog(),loadUserNotifs(),loadPlan()]);
   loadSparklines();
-  // Create support FAB (persistent, outside render cycle)
-  if (!document.getElementById('support-fab')) {
-    const fab = document.createElement('button');
-    fab.id = 'support-fab';
-    fab.className = 'support-fab';
-    fab.onclick = toggleSupport;
-    fab.title = 'Soporte';
-    fab.textContent = '🎧';
-    document.body.appendChild(fab);
-  }
+  // Show support FAB
+  const sfab = document.getElementById('support-fab');
+  if (sfab) sfab.style.display = 'flex';
   if(refreshInterval)clearInterval(refreshInterval);
   refreshInterval=setInterval(()=>{ loadMachines(); loadUrlMonitors(true); loadUserNotifs(); },10000);
 }
@@ -2808,16 +2802,9 @@ function buildAddMaintenanceModal() {
 if(token){
   render();
   startDashboard();
+  const sfab2 = document.getElementById('support-fab');
+  if (sfab2) sfab2.style.display = 'flex';
 }else{renderLogin();}
-// Support FAB - siempre crear despues de todo
-setTimeout(() => {
-  if (token && !document.getElementById('support-fab')) {
-    const fab = document.createElement('button');
-    fab.id = 'support-fab'; fab.className = 'support-fab';
-    fab.onclick = toggleSupport; fab.title = 'Soporte'; fab.textContent = '🎧';
-    document.body.appendChild(fab);
-  }
-}, 2000);
 </script>
 </body>
 </html>
