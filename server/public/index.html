@@ -2363,7 +2363,7 @@ async function startDashboard() {
     fab.className = 'support-fab';
     fab.onclick = toggleSupport;
     fab.title = 'Soporte';
-    fab.textContent = '💬';
+    fab.textContent = '🎧';
     document.body.appendChild(fab);
   }
   if(refreshInterval)clearInterval(refreshInterval);
@@ -2806,15 +2806,18 @@ function buildAddMaintenanceModal() {
 }
 
 if(token){
+  render();
   startDashboard();
-  // Support FAB
-  if (!document.getElementById('support-fab')) {
+}else{renderLogin();}
+// Support FAB - siempre crear despues de todo
+setTimeout(() => {
+  if (token && !document.getElementById('support-fab')) {
     const fab = document.createElement('button');
     fab.id = 'support-fab'; fab.className = 'support-fab';
-    fab.onclick = toggleSupport; fab.title = 'Soporte'; fab.textContent = '💬';
+    fab.onclick = toggleSupport; fab.title = 'Soporte'; fab.textContent = '🎧';
     document.body.appendChild(fab);
   }
-}else{renderLogin();}
+}, 2000);
 </script>
 </body>
 </html>
