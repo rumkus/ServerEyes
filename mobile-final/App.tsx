@@ -1024,11 +1024,9 @@ export default function App() {
   };
   const sendSupportMessage = async () => {
     if (!supportMsg.trim() || !supportTicketId) return;
-    const formData = new FormData();
-    formData.append('message', supportMsg.trim());
-    const res = await fetch(`${API_URL}/api/support/tickets/${supportTicketId}/messages`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData
-    });
+    const res = await apiRequest(`/api/support/tickets/${supportTicketId}/messages`, {
+      method: 'POST', body: JSON.stringify({ message: supportMsg.trim() })
+    }, token);
     if (res.ok) { setSupportMsg(''); loadSupportMessages(supportTicketId); }
   };
 

@@ -2805,7 +2805,16 @@ function buildAddMaintenanceModal() {
   </div></div>`;
 }
 
-if(token){startDashboard();}else{renderLogin();}
+if(token){
+  startDashboard();
+  // Support FAB
+  if (!document.getElementById('support-fab')) {
+    const fab = document.createElement('button');
+    fab.id = 'support-fab'; fab.className = 'support-fab';
+    fab.onclick = toggleSupport; fab.title = 'Soporte'; fab.textContent = '💬';
+    document.body.appendChild(fab);
+  }
+}else{renderLogin();}
 </script>
 </body>
 </html>

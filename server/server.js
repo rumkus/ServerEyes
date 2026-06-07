@@ -2488,7 +2488,11 @@ app.get('/api/support/tickets/:id/messages', authenticateToken, async (req, res)
 });
 
 // Enviar mensaje (usuario)
-app.post('/api/support/tickets/:id/messages', authenticateToken, upload.array('files', 4), async (req, res) => {
+const optionalUpload = (req, res, next) => {
+  if (req.headers['content-type']?.includes('multipart')) { upload.array('files', 4)(req, res, next); }
+  else next();
+};
+app.post('/api/support/tickets/:id/messages', authenticateToken, optionalUpload, async (req, res) => {
   try {
     const ticket = await pool.query('SELECT id FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
