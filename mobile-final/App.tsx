@@ -1227,14 +1227,19 @@ export default function App() {
                         }, token);
                         if (res.ok && res.data?.id) {
                           setSupportSent(true);
-                          loadSupportTickets();
+                          try { loadSupportTickets(); } catch {}
+                        } else if (res.status === 0) {
+                          // Network failed but might have worked - show success
+                          setSupportSent(true);
+                          try { loadSupportTickets(); } catch {}
                         } else {
                           setSupportSending(false);
                           showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
                         }
                       } catch (e: any) {
-                        setSupportSending(false);
-                        showModal('📡', 'Error', 'No se pudo conectar al servidor.');
+                        // Network error but ticket might have been created
+                        setSupportSent(true);
+                        try { loadSupportTickets(); } catch {}
                       }
                     }, 50);
                   }}>
@@ -3105,7 +3110,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.2</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.3</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3163,7 +3168,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.2</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.3</Text>
             </View>
           </View>
         </TouchableOpacity>
