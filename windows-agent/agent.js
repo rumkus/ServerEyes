@@ -261,6 +261,45 @@ function getOpenPorts() {
   });
 }
 
+// Windows Update info
+function getWindowsUpdateInfo() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    const cmd = `powershell -NoProfile -Command "try { $s = New-Object -ComObject Microsoft.Update.AutoUpdate; $r = $s.Results; $last = $r.LastInstallationSuccessDate; $pending = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search('IsInstalled=0').Updates.Count; @{last_install = if($last){$last.ToString('yyyy-MM-dd HH:mm')}else{'never'}; pending = $pending} | ConvertTo-Json } catch { @{error=$_.Exception.Message} | ConvertTo-Json }"`;
+    exec(cmd, { timeout: 30000, windowsHide: true }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      try { resolve(JSON.parse(stdout.trim())); } catch { resolve(null); }
+    });
+  });
+}
+
+// Office info
+function getOfficeInfo() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    const cmd = `powershell -NoProfile -Command "try { $paths = @('HKLM:\\SOFTWARE\\Microsoft\\Office\\ClickToRun\\Configuration','HKLM:\\SOFTWARE\\Microsoft\\Office\\16.0\\Common\\InstallRoot'); $ver = $null; $prod = $null; try { $c2r = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Office\\ClickToRun\\Configuration' -EA Stop; $ver = $c2r.VersionToReport; $prod = $c2r.ProductReleaseIds } catch {}; if(!$ver){ try { $ver = (Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Office\\16.0\\Common\\InstallRoot' -EA Stop).Path } catch {} }; @{version=$ver;product=$prod;installed=($ver -ne $null)} | ConvertTo-Json } catch { @{installed=$false} | ConvertTo-Json }"`;
+    exec(cmd, { timeout: 15000, windowsHide: true }, (err, stdout) => {
+      if (err) { resolve({ installed: false }); return; }
+      try { resolve(JSON.parse(stdout.trim())); } catch { resolve({ installed: false }); }
+    });
+  });
+}
+
+// Antivirus info
+function getAntivirusInfo() {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    const cmd = `powershell -NoProfile -Command "try { $av = Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct -EA Stop | Select displayName,productState,timestamp | ForEach-Object { $state = $_.productState; $enabled = (($state -band 0x1000) -ne 0); $upToDate = (($state -band 0x10) -eq 0); @{name=$_.displayName;enabled=$enabled;up_to_date=$upToDate;raw_state=$state;timestamp=$_.timestamp} }; $av | ConvertTo-Json } catch { @{error=$_.Exception.Message} | ConvertTo-Json }"`;
+    exec(cmd, { timeout: 15000, windowsHide: true }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      try {
+        const data = JSON.parse(stdout.trim());
+        resolve(Array.isArray(data) ? data : [data]);
+      } catch { resolve(null); }
+    });
+  });
+}
+
 // Ping a google.com
 function measurePing() {
   return new Promise((resolve) => {
@@ -364,6 +403,9 @@ async function selfUpdate(url, newVersion, config) {
   }
 }
 
+let heartbeatCount = 0;
+let cachedSecurityInfo = null;
+
 // Heartbeat
 async function sendHeartbeat(config) {
   if (!config.serverUrl || !config.machineKey) return;
@@ -371,13 +413,31 @@ async function sendHeartbeat(config) {
     const publicIP = await getPublicIP();
     const pingMs = await measurePing();
     const metrics = await getSystemMetrics();
+
+    // Recolectar info de seguridad cada 10 heartbeats (~5 min)
+    heartbeatCount++;
+    if (heartbeatCount >= 10 || !cachedSecurityInfo) {
+      heartbeatCount = 0;
+      try {
+        const [wu, office, av] = await Promise.all([
+          getWindowsUpdateInfo(),
+          getOfficeInfo(),
+          getAntivirusInfo()
+        ]);
+        cachedSecurityInfo = { windows_update: wu, office: office, antivirus: av };
+        log(`Security info: WU=${wu?.last_install || '?'} pending=${wu?.pending || 0} Office=${office?.version || 'N/A'} AV=${av?.[0]?.name || 'N/A'}`);
+      } catch (e) {
+        log(`Security info error: ${e.message}`);
+      }
+    }
+
     const res = await httpRequest(`${config.serverUrl}/api/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), backup_status: await getBackupStatus(false), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), backup_status: await getBackupStatus(false), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, security_info: cachedSecurityInfo || null, ...metrics
       })
     });
     if (res.ok) {

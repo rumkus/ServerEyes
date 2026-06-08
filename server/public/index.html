@@ -1335,6 +1335,45 @@ function buildSlaModal() {
     </div>`}
   </div></div>`;
 }
+function showSecurityInfo(id) {
+  const m = machines.find(x => x.id === id);
+  if (!m) return;
+  const s = m.security_info;
+  if (!s) { alert('Sin datos de seguridad. El agente aun no reporto esta informacion.'); return; }
+  const wu = s.windows_update;
+  const of = s.office;
+  const av = s.antivirus;
+  let html = `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()"><div class="modal-box">
+    <div class="modal-header"><h2>🛡 Seguridad — ${m.machine_name}</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="background:var(--bg);border-radius:10px;padding:14px">
+        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:8px">🪟 Windows Update</div>
+        ${wu ? `<div style="font-size:13px;color:#888">Ultima actualizacion: <strong style="color:var(--text)">${wu.last_install || 'Desconocido'}</strong></div>
+        <div style="font-size:13px;color:#888;margin-top:4px">Actualizaciones pendientes: <strong style="color:${wu.pending > 0 ? '#FF9800' : '#4CAF50'}">${wu.pending || 0}</strong></div>`
+        : '<div style="color:#888;font-size:13px">Sin datos</div>'}
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:14px">
+        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:8px">📎 Microsoft Office</div>
+        ${of && of.installed ? `<div style="font-size:13px;color:#888">Version: <strong style="color:var(--text)">${of.version || '?'}</strong></div>
+        ${of.product ? '<div style="font-size:13px;color:#888;margin-top:4px">Producto: <strong style="color:var(--text)">' + of.product + '</strong></div>' : ''}`
+        : '<div style="color:#888;font-size:13px">No instalado</div>'}
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:14px">
+        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:8px">🦠 Antivirus</div>
+        ${av && av.length > 0 ? av.map(a => `<div style="margin-bottom:8px;padding:8px;background:var(--card-bg);border-radius:8px;border-left:3px solid ${a.up_to_date ? '#4CAF50' : '#FF9800'}">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${a.name || 'Desconocido'}</div>
+          <div style="font-size:12px;color:#888;margin-top:2px">Estado: <span style="color:${a.enabled ? '#4CAF50' : '#F44336'}">${a.enabled ? 'Activo' : 'Inactivo'}</span> · Actualizado: <span style="color:${a.up_to_date ? '#4CAF50' : '#FF9800'}">${a.up_to_date ? 'Si' : 'No'}</span></div>
+        </div>`).join('')
+        : '<div style="color:#F44336;font-size:13px;font-weight:600">⚠ Sin antivirus detectado</div>'}
+      </div>
+    </div>
+  </div></div>`;
+  activeModal = { type: 'custom_html' };
+  pauseRefresh();
+  document.querySelector('.modal-overlay')?.remove();
+  document.getElementById('app').insertAdjacentHTML('beforeend', html);
+}
+
 async function checkSSL(hostname) {
   const h = hostname.replace(/^https?:\/\//, '').split('/')[0];
   const res = await api('/api/ssl-check', { method: 'POST', body: JSON.stringify({ hostname: h }) });
@@ -1797,6 +1836,7 @@ function buildDetailModal() {
       <button class="modal-btn sm" style="border-radius:8px;background:#E3F2FD;color:#2196F3" onclick="downloadRDP(${m.id})">🖥️ RDP</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#FFF3E0;color:#FF9800" onclick="requestSpeedTest(${m.id})">⚡ Speed</button>
       <button class="modal-btn sm" style="border-radius:8px;background:#F3E5F5;color:#9C27B0" onclick="openSla(${m.id})">📋 SLA</button>
+      <button class="modal-btn sm" style="border-radius:8px;background:#FFF8E1;color:#F57F17" onclick="showSecurityInfo(${m.id})">🛡 Seguridad</button>
       ${m.dns_host?`<button class="modal-btn sm" style="border-radius:8px;background:#E0F7FA;color:#00838F" onclick="checkSSL('${m.dns_host}')">🔒 SSL</button>`:''}
       <button class="modal-btn sm" style="border-radius:8px;background:#E8F5E9;color:#4CAF50" onclick="openEditModal(${m.id})">✏️ Editar</button>
       ${!m.is_online?`<button class="modal-btn sm" style="border-radius:8px;background:#E1F5FE;color:#0288D1" onclick="sendWol(${m.id})">⚡ WOL</button>`:''}

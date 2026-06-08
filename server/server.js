@@ -522,6 +522,9 @@ async function initDB() {
     )
   `);
 
+  // Security info
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS security_info JSONB`).catch(() => {});
+
   // Wake-on-LAN
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
@@ -997,7 +1000,7 @@ const pendingSpeedTests = new Set();
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs, agent_type, services, open_ports, agent_config, backup_status } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs, agent_type, services, open_ports, agent_config, backup_status, security_info } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
@@ -1038,12 +1041,13 @@ app.post('/api/heartbeat', async (req, res) => {
         open_ports = COALESCE($15, open_ports),
         agent_config = COALESCE($16, agent_config),
         backup_status = COALESCE($17, backup_status),
+        security_info = COALESCE($18, security_info),
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
       WHERE machine_key = $5
       RETURNING *`,
-      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion, disks ? JSON.stringify(disks) : null, agent_logs || null, services ? JSON.stringify(services) : null, open_ports ? JSON.stringify(open_ports) : null, agent_config ? JSON.stringify(agent_config) : null, backup_status ? JSON.stringify(backup_status) : null]
+      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion, disks ? JSON.stringify(disks) : null, agent_logs || null, services ? JSON.stringify(services) : null, open_ports ? JSON.stringify(open_ports) : null, agent_config ? JSON.stringify(agent_config) : null, backup_status ? JSON.stringify(backup_status) : null, security_info ? JSON.stringify(security_info) : null]
     );
 
     if (result.rows.length === 0) {
