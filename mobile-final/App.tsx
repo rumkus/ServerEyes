@@ -1069,7 +1069,7 @@ export default function App() {
         </ScrollView>
         {supportTickets.find(t => t.id === supportTicketId)?.status === 'closed' ? (
           <View style={{padding: 14, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center'}}>
-            <Text style={{color: '#888', fontSize: 12, marginBottom: 10}}>Este ticket fue cerrado por soporte</Text>
+            <Text style={{color: '#888', fontSize: 12, marginBottom: 10}}>Este ticket fue cerrado</Text>
             <View style={{flexDirection: 'row', gap: 8}}>
               <TouchableOpacity style={{flex: 1, backgroundColor: '#9C27B0', borderRadius: 10, padding: 10, alignItems: 'center'}}
                 onPress={async () => {
@@ -1091,12 +1091,19 @@ export default function App() {
               <TouchableOpacity onPress={sendSupportMessage} style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12}}>
                 <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>Enviar</Text>
               </TouchableOpacity>
+              <TouchableOpacity onPress={async () => {
+                await apiRequest(`/api/support/tickets/${supportTicketId}/close`, { method: 'POST' }, token);
+                loadSupportTickets(); loadSupportMessages(supportTicketId!);
+              }} style={{backgroundColor: '#607d8b', borderRadius: 10, padding: 12}}>
+                <Text style={{color: '#fff', fontSize: 12}}>✕</Text>
+              </TouchableOpacity>
             </View>
-            {supportMsg.trim().split(/\s+/).length > 800 && (
-              <Text style={{color: supportMsg.trim().split(/\s+/).length > 1000 ? '#ff5252' : '#ff9800', fontSize: 10, paddingHorizontal: 14, paddingBottom: 4}}>
-                {supportMsg.trim().split(/\s+/).length}/1000 palabras
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 4}}>
+              <View />
+              <Text style={{color: (() => { const w = supportMsg.trim() ? supportMsg.trim().split(/\s+/).length : 0; return (1000 - w) < 0 ? '#ff5252' : (1000 - w) < 200 ? '#ff9800' : '#888'; })(), fontSize: 10}}>
+                {1000 - (supportMsg.trim() ? supportMsg.trim().split(/\s+/).length : 0)}
               </Text>
-            )}
+            </View>
           </View>
         )}
       </View>

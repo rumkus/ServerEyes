@@ -1632,7 +1632,7 @@ function renderSupportChat() {
     <div class="support-messages" id="support-msgs">${buildSupportMsgsHtml()}</div>
     ${ticket?.status === 'closed' ? `
       <div style="padding:14px;text-align:center;border-top:1px solid var(--border2)">
-        <p style="color:#888;font-size:12px;margin-bottom:10px">Este ticket fue cerrado por soporte</p>
+        <p style="color:#888;font-size:12px;margin-bottom:10px">Este ticket fue cerrado</p>
         <div style="display:flex;gap:8px;justify-content:center">
           <button style="padding:8px 16px;background:#9C27B0;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600" onclick="reopenTicket(${ticket.id})">Reabrir ticket</button>
           <button style="padding:8px 16px;background:var(--border2);color:var(--text);border:none;border-radius:8px;cursor:pointer;font-size:12px" onclick="supportActiveTicket=null;supportNewMode=true;renderSupportPanel()">Nuevo ticket</button>
@@ -1641,12 +1641,13 @@ function renderSupportChat() {
     ` : `
       <div class="support-input-area">
         <label style="cursor:pointer;font-size:18px;padding:4px" title="Adjuntar archivo">📎<input type="file" id="support-files" multiple accept="image/*,.pdf,.txt" style="display:none" onchange="updateFileLabel()"/></label>
-        <textarea id="support-msg-input" placeholder="Escribe tu mensaje... (max 1000 palabras)" rows="1" oninput="updateWordCount()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSupportMsg()}"></textarea>
+        <textarea id="support-msg-input" placeholder="Escribe tu mensaje..." rows="1" oninput="updateWordCount()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSupportMsg()}"></textarea>
         <button onclick="sendSupportMsg()">Enviar</button>
+        <button onclick="userCloseTicket()" style="background:#607d8b;color:#fff;border:none;border-radius:10px;padding:8px 10px;cursor:pointer;font-size:11px" title="Cerrar ticket">✕</button>
       </div>
       <div style="padding:0 10px 4px;display:flex;justify-content:space-between">
         <span id="support-file-label" style="font-size:11px;color:#888"></span>
-        <span id="support-word-count" style="font-size:10px;color:#888"></span>
+        <span id="support-word-count" style="font-size:10px;color:#888">1000</span>
       </div>
     `}`;
   const msgs = document.getElementById('support-msgs');
@@ -1702,13 +1703,20 @@ async function reopenTicket(id) {
   if (r.ok) { loadSupportTickets(); loadSupportMessages(); }
 }
 
+async function userCloseTicket() {
+  if (!supportActiveTicket) return;
+  const r = await api('/api/support/tickets/' + supportActiveTicket + '/close', { method: 'POST' });
+  if (r.ok) { loadSupportTickets(); loadSupportMessages(); }
+}
+
 function updateWordCount() {
   const el = document.getElementById('support-msg-input');
   const counter = document.getElementById('support-word-count');
   if (!el || !counter) return;
   const words = el.value.trim() ? el.value.trim().split(/\s+/).length : 0;
-  counter.textContent = words + '/1000';
-  counter.style.color = words > 1000 ? '#F44336' : words > 800 ? '#FF9800' : '#888';
+  const remaining = 1000 - words;
+  counter.textContent = remaining;
+  counter.style.color = remaining < 0 ? '#F44336' : remaining < 200 ? '#FF9800' : '#888';
 }
 
 setInterval(() => { if (supportOpen && supportActiveTicket) loadSupportMessages(); }, 5000);

@@ -2623,6 +2623,20 @@ app.post('/api/support/tickets/:id/reopen', authenticateToken, async (req, res) 
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
+// User: cerrar ticket
+app.post('/api/support/tickets/:id/close', authenticateToken, async (req, res) => {
+  try {
+    const ticket = await pool.query('SELECT id FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
+    await pool.query('UPDATE support_tickets SET status = $1, updated_at = NOW(), closed_at = NOW() WHERE id = $2', ['closed', req.params.id]);
+    await pool.query(
+      `INSERT INTO support_messages (ticket_id, sender_type, sender_id, message) VALUES ($1, 'system', $2, 'Ticket cerrado por el usuario')`,
+      [req.params.id, req.user.id]
+    );
+    res.json({ message: 'Ticket cerrado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
 // Metrics de soporte
 app.get('/api/admin/support/metrics', authenticateToken, requireAdmin, async (req, res) => {
   try {
