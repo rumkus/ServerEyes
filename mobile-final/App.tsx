@@ -73,6 +73,27 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
   }
 }
 
+const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) => {
+  if (!visible) return null;
+  return (
+    <View style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: 30}}>
+      <View style={{backgroundColor: '#16213e', borderRadius: 20, padding: 28, maxWidth: 340, width: '100%', alignItems: 'center'}}>
+        {icon && <Text style={{fontSize: 48, marginBottom: 12}}>{icon}</Text>}
+        <Text style={{color: '#eee', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 8}}>{title}</Text>
+        {message && <Text style={{color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 20}}>{message}</Text>}
+        <View style={{flexDirection: 'row', gap: 10, width: '100%'}}>
+          {(buttons || [{ text: 'OK', onPress: onClose }]).map((b: any, i: number) => (
+            <TouchableOpacity key={i} onPress={() => { if (b.onPress) b.onPress(); if (onClose) onClose(); }}
+              style={{flex: 1, backgroundColor: b.style === 'cancel' ? '#1a2a3a' : b.style === 'danger' ? '#ff5252' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center'}}>
+              <Text style={{color: '#fff', fontWeight: '700', fontSize: 14}}>{b.text}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+};
+
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [appReady, setAppReady] = useState(false);
@@ -222,6 +243,10 @@ export default function App() {
   const [supportTicketId, setSupportTicketId] = useState<number | null>(null);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [supportMsg, setSupportMsg] = useState('');
+  const [supportNewSubject, setSupportNewSubject] = useState('');
+  const [supportNewMsg, setSupportNewMsg] = useState('');
+  const [supportNewMode, setSupportNewMode] = useState(false);
+  const [customModal, setCustomModal] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
@@ -680,7 +705,7 @@ export default function App() {
       const res = await apiRequest(`/api/machines/${machineId}/update-dns`, { method: 'POST' }, token);
       if (res.ok) Alert.alert('DNS Actualizado', `${res.data.host || 'Host'} apunta a ${res.data.ip}`);
       else Alert.alert('Error', res.data.error || 'No se pudo actualizar');
-    } catch { Alert.alert('Error', 'Error de conexion'); }
+    } catch { showModal('📡', 'Error de conexion', 'No se pudo conectar con el servidor. Verifica tu conexion a internet.'); }
     setDnsUpdating(false);
   };
 
@@ -1013,6 +1038,10 @@ export default function App() {
     );
   }
 
+  const showModal = (icon: string, title: string, message?: string, buttons?: any[]) => {
+    setCustomModal({ icon, title, message, buttons });
+  };
+
   // SUPPORT CHAT
   const loadSupportTickets = async () => {
     const res = await apiRequest('/api/support/tickets', {}, token);
@@ -1029,12 +1058,12 @@ export default function App() {
   const sendSupportMessage = async () => {
     if (!supportMsg.trim() || !supportTicketId) return;
     const words = supportMsg.trim().split(/\s+/).length;
-    if (words > 1000) { Alert.alert('Limite excedido', 'El mensaje supera las 1000 palabras. Envia un email a soporte.'); return; }
+    if (words > 1000) { showModal('📝', 'Limite excedido', 'El mensaje supera las 1000 palabras. Envia un email a soporte.'); return; }
     const res = await apiRequest(`/api/support/tickets/${supportTicketId}/messages`, {
       method: 'POST', body: JSON.stringify({ message: supportMsg.trim() })
     }, token);
     if (res.ok) { setSupportMsg(''); loadSupportMessages(supportTicketId); }
-    else if (res.data?.error) Alert.alert('Error', res.data.error);
+    else if (res.data?.error) showModal('⚠️', 'Error', res.data.error);
   };
 
   if (supportTicketId) {
@@ -1111,41 +1140,69 @@ export default function App() {
   }
 
   if (showSupport) {
+    const newMsgWords = supportNewMsg.trim() ? supportNewMsg.trim().split(/\s+/).length : 0;
     return (
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor="#9C27B0" />
         <View style={{backgroundColor: '#9C27B0', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 14, flexDirection: 'row', alignItems: 'center'}}>
-          <TouchableOpacity onPress={() => setShowSupport(false)} style={{marginRight: 12}}><Text style={{color: '#fff', fontSize: 18}}>←</Text></TouchableOpacity>
-          <Text style={{color: '#fff', fontSize: 16, fontWeight: '700', flex: 1}}>💬 Soporte</Text>
+          <TouchableOpacity onPress={() => { setShowSupport(false); setSupportNewMode(false); }} style={{marginRight: 12}}><Text style={{color: '#fff', fontSize: 18}}>←</Text></TouchableOpacity>
+          <Text style={{color: '#fff', fontSize: 16, fontWeight: '700', flex: 1}}>🎧 Soporte</Text>
         </View>
-        <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12, margin: 16, marginBottom: 8, alignItems: 'center'}}
-          onPress={async () => {
-            const subject = 'Consulta desde la app';
-            const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject }) }, token);
-            if (res.ok) { setSupportTicketId(res.data.id); setSupportMessages([]); loadSupportTickets(); }
-          }}>
-          <Text style={{color: '#fff', fontSize: 14, fontWeight: '700'}}>+ Nueva consulta</Text>
-        </TouchableOpacity>
-        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
-          {supportTickets.length === 0 ? (
-            <View style={{alignItems: 'center', paddingVertical: 50}}>
-              <Text style={{fontSize: 48, marginBottom: 12}}>💬</Text>
-              <Text style={{color: th.sub, fontSize: 16}}>Sin conversaciones</Text>
-              <Text style={{color: '#888', fontSize: 13, marginTop: 4}}>Crea una nueva consulta</Text>
-            </View>
-          ) : supportTickets.map((t: any) => (
-            <TouchableOpacity key={t.id} onPress={() => { setSupportTicketId(t.id); loadSupportMessages(t.id); }}
-              style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: t.status === 'open' ? '#9C27B0' : '#607d8b'}}>
-              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-                <Text style={{color: th.text, fontSize: 14, fontWeight: '700', flex: 1}} numberOfLines={1}>{t.subject}</Text>
-                <View style={{backgroundColor: t.status === 'open' ? '#9C27B020' : '#60606020', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6}}>
-                  <Text style={{color: t.status === 'open' ? '#9C27B0' : '#888', fontSize: 10, fontWeight: '700'}}>{t.status === 'open' ? 'Abierto' : 'Cerrado'}</Text>
-                </View>
-              </View>
-              <Text style={{color: th.sub, fontSize: 11, marginTop: 4}}>{new Date(t.updated_at).toLocaleString('es')}</Text>
+
+        {supportNewMode ? (
+          <ScrollView contentContainerStyle={{padding: 16}}>
+            <Text style={{color: th.text, fontSize: 16, fontWeight: '700', marginBottom: 12}}>Nueva consulta</Text>
+            <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Asunto</Text>
+            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 14, color: th.text, marginBottom: 12}} value={supportNewSubject} onChangeText={setSupportNewSubject} placeholder="Ej: Problema con el monitoreo" placeholderTextColor="#555" />
+            <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Mensaje</Text>
+            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 13, color: th.text, minHeight: 100, textAlignVertical: 'top', marginBottom: 4}} value={supportNewMsg} onChangeText={setSupportNewMsg} placeholder="Describe tu problema o consulta..." placeholderTextColor="#555" multiline maxLength={6000} />
+            <Text style={{color: (1000 - newMsgWords) < 0 ? '#ff5252' : (1000 - newMsgWords) < 200 ? '#ff9800' : '#888', fontSize: 10, textAlign: 'right', marginBottom: 16}}>{1000 - newMsgWords}</Text>
+            <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10}}
+              onPress={async () => {
+                if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
+                const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: supportNewSubject.trim() }) }, token);
+                if (res.ok) {
+                  if (supportNewMsg.trim()) {
+                    await apiRequest(`/api/support/tickets/${res.data.id}/messages`, { method: 'POST', body: JSON.stringify({ message: supportNewMsg.trim() }) }, token);
+                  }
+                  setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
+                  setSupportTicketId(res.data.id); loadSupportMessages(res.data.id); loadSupportTickets();
+                }
+              }}>
+              <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>Enviar consulta</Text>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSupportNewMode(false)} style={{alignItems: 'center', padding: 10}}>
+              <Text style={{color: th.sub, fontSize: 13}}>Cancelar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        ) : (
+          <>
+            <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12, margin: 16, marginBottom: 8, alignItems: 'center'}}
+              onPress={() => { setSupportNewMode(true); setSupportNewSubject(''); setSupportNewMsg(''); }}>
+              <Text style={{color: '#fff', fontSize: 14, fontWeight: '700'}}>+ Nueva consulta</Text>
+            </TouchableOpacity>
+            <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
+              {supportTickets.length === 0 ? (
+                <View style={{alignItems: 'center', paddingVertical: 50}}>
+                  <Text style={{fontSize: 48, marginBottom: 12}}>🎧</Text>
+                  <Text style={{color: th.sub, fontSize: 16}}>Sin conversaciones</Text>
+                  <Text style={{color: '#888', fontSize: 13, marginTop: 4}}>Crea una nueva consulta</Text>
+                </View>
+              ) : supportTickets.map((t: any) => (
+                <TouchableOpacity key={t.id} onPress={() => { setSupportTicketId(t.id); loadSupportMessages(t.id); }}
+                  style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: t.status === 'open' ? '#9C27B0' : '#607d8b'}}>
+                  <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                    <Text style={{color: th.text, fontSize: 14, fontWeight: '700', flex: 1}} numberOfLines={1}>{t.subject}</Text>
+                    <View style={{backgroundColor: t.status === 'open' ? '#9C27B020' : '#60606020', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6}}>
+                      <Text style={{color: t.status === 'open' ? '#9C27B0' : '#888', fontSize: 10, fontWeight: '700'}}>{t.status === 'open' ? 'Abierto' : 'Cerrado'}</Text>
+                    </View>
+                  </View>
+                  <Text style={{color: th.sub, fontSize: 11, marginTop: 4}}>{new Date(t.updated_at).toLocaleString('es')}</Text>
+                </TouchableOpacity>
           ))}
-        </ScrollView>
+            </ScrollView>
+          </>
+        )}
       </View>
     );
   }
@@ -1549,7 +1606,7 @@ export default function App() {
               smtp_user: smtpUser || null, smtp_pass: smtpPass || null, smtp_from: smtpFrom || null,
               email_notifications: smtpEnabled
             }) }, token);
-            if (res.ok) Alert.alert('Guardado', 'Configuracion SMTP guardada');
+            if (res.ok) showModal('✅', 'Guardado', 'Configuracion SMTP guardada correctamente');
             else Alert.alert('Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Guardar</Text>
@@ -2155,8 +2212,8 @@ export default function App() {
                 }},
                 ...(!item.is_online && item.mac_address ? [{icon: '⚡', label: 'WOL', action: async () => {
                   const res = await apiRequest(`/api/machines/${item.id}/wol`, { method: 'POST' }, token);
-                  if (res.ok) Alert.alert('WOL', res.data.message || 'Magic packet enviado');
-                  else Alert.alert('Error', res.data?.error || 'Error al enviar WOL');
+                  if (res.ok) showModal('⚡', 'Wake-on-LAN', res.data.message || 'Magic packet enviado al servidor');
+                  else showModal('⚠️', 'Error', res.data?.error || 'Error al enviar WOL');
                 }}] : []),
                 {icon: '🛡', label: t('backup'), action: async () => {
                   setBackupMachine(item); setBackupData(null);
@@ -2475,7 +2532,7 @@ export default function App() {
           )}
           <TouchableOpacity style={[s.btn, {marginTop: 20, backgroundColor: '#1a2a3a'}]} onPress={async () => {
             const r = await apiRequest(`/api/machines/${backupMachine.id}/check-backup`, { method: 'POST' }, token);
-            if (r.ok) Alert.alert('Solicitado', 'El resultado aparece en ~30 segundos');
+            if (r.ok) showModal('🔄', 'Solicitado', 'El resultado aparece en ~30 segundos');
           }}>
             <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700'}}>🔄 Forzar chequeo</Text>
           </TouchableOpacity>
@@ -3070,6 +3127,7 @@ export default function App() {
       <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 90, width: 56, height: 56, borderRadius: 28, backgroundColor: '#1a2a3a', alignItems: 'center', justifyContent: 'center', elevation: 8}} onPress={() => setShowPairing(true)}>
         <Text style={{fontSize: 22}}>{'🔗'}</Text>
       </TouchableOpacity>
+      <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
     </View>
   );
 }
