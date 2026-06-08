@@ -586,7 +586,7 @@ app.post('/api/auth/login', async (req, res) => {
     const sessionDur = user.session_duration || '30d';
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: sessionDur });
     logAudit(user.id, 'login', 'user', user.id, null, req.ip);
-    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner' }, token, session_duration: sessionDur });
+    res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner', is_admin: user.is_admin || false }, token, session_duration: sessionDur });
   } catch (error) {
     console.error('Error en login:', error);
     res.status(500).json({ error: 'Error interno' });

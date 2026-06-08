@@ -103,6 +103,7 @@ const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) =
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [appReady, setAppReady] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [hasSavedCreds, setHasSavedCreds] = useState(false);
@@ -302,15 +303,22 @@ export default function App() {
 
   // Header con flecha de volver
   const BackHeader = ({title, subtitle}: {title: string, subtitle?: string}) => (
-    <View style={{backgroundColor: '#0d1b2a', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 14, flexDirection: 'row', alignItems: 'center'}}>
+    <View style={{backgroundColor: th.card, paddingTop: 46, paddingHorizontal: 16, paddingBottom: 14, flexDirection: 'row', alignItems: 'center'}}>
       <TouchableOpacity onPress={() => goBack()} style={{padding: 8, marginRight: 8}}>
-        <Text style={{color: '#607d8b', fontSize: 24}}>{'←'}</Text>
+        <Text style={{color: th.sub, fontSize: 24}}>{'←'}</Text>
       </TouchableOpacity>
       <View style={{flex: 1}}>
         <Text style={{fontSize: 18, fontWeight: '700', color: '#00d4ff'}}>{title}</Text>
-        {subtitle ? <Text style={{color: '#607d8b', fontSize: 12}}>{subtitle}</Text> : null}
+        {subtitle ? <Text style={{color: th.sub, fontSize: 12}}>{subtitle}</Text> : null}
       </View>
     </View>
+  );
+
+  const FloatingBackButton = () => (
+    <TouchableOpacity onPress={() => goBack()}
+      style={{position: 'absolute', bottom: 30, left: 24, width: 48, height: 48, borderRadius: 24, backgroundColor: '#9C27B0', alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.3, shadowRadius: 4}}>
+      <Text style={{color: '#fff', fontSize: 20, fontWeight: '700'}}>{'←'}</Text>
+    </TouchableOpacity>
   );
 
   // Registrar token FCM para push notifications
@@ -376,8 +384,9 @@ export default function App() {
     AsyncStorage.getItem('se_lang').then(saved => { if (saved && LANGS[saved]) { _currentLang = saved; setLang(saved); } });
     loadLogs().then(() => {
       log.info('Logs cargados');
-      // Load theme
+      // Load theme + admin
       AsyncStorage.getItem('se_dark').then(v => { if (v === '0') setDarkMode(false); }).catch(() => {});
+      AsyncStorage.getItem('se_is_admin').then(v => { if (v === '1') setIsAdmin(true); }).catch(() => {});
 
       // Check biometrics
       rnBiometrics.isSensorAvailable().then(({ available }) => {
@@ -450,6 +459,8 @@ export default function App() {
       const res = await apiRequest(path, { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) });
       if (res.ok && res.data.token) {
         log.info('Auth exitoso');
+        setIsAdmin(res.data.user?.is_admin || false);
+        await AsyncStorage.setItem('se_is_admin', res.data.user?.is_admin ? '1' : '0');
         await setAndSaveToken(res.data.token);
         if (biometricAvailable) await saveBiometricToken(res.data.token);
       } else if (res.status === 401) {
@@ -908,6 +919,7 @@ export default function App() {
           onPress={() => { setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1051,6 +1063,7 @@ export default function App() {
           }}>
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1433,6 +1446,7 @@ export default function App() {
             );
           })}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1563,6 +1577,7 @@ export default function App() {
             </>
           )}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1616,6 +1631,7 @@ export default function App() {
             </>
           )}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1687,6 +1703,7 @@ export default function App() {
             );
           })}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -3129,7 +3146,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.6.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.7.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3169,7 +3186,7 @@ export default function App() {
                 {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
                 {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
-                {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
+                ...(isAdmin ? [{icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}] : []),
                 {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
                 {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
                 {icon: '🔑', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
@@ -3187,7 +3204,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.6.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.7.0</Text>
             </View>
           </View>
         </TouchableOpacity>
