@@ -246,7 +246,8 @@ export default function App() {
   const [supportNewSubject, setSupportNewSubject] = useState('');
   const [supportNewMsg, setSupportNewMsg] = useState('');
   const [supportNewMode, setSupportNewMode] = useState(false);
-  const pendingSupportMsg = useRef<{ticketId: number, msg: string} | null>(null);
+  const [supportSending, setSupportSending] = useState(false);
+  const [supportSent, setSupportSent] = useState(false);
   const [customModal, setCustomModal] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
@@ -1177,41 +1178,57 @@ export default function App() {
 
         {supportNewMode ? (
           <ScrollView contentContainerStyle={{padding: 16}}>
-            <Text style={{color: th.text, fontSize: 16, fontWeight: '700', marginBottom: 12}}>Nueva consulta</Text>
-            <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Asunto</Text>
-            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 14, color: th.text, marginBottom: 12}} value={supportNewSubject} onChangeText={setSupportNewSubject} placeholder="Ej: Problema con el monitoreo" placeholderTextColor="#555" />
-            <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Mensaje</Text>
-            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 13, color: th.text, minHeight: 100, textAlignVertical: 'top', marginBottom: 4}} value={supportNewMsg} onChangeText={setSupportNewMsg} placeholder="Describe tu problema o consulta..." placeholderTextColor="#555" multiline maxLength={6000} />
-            <Text style={{color: (1000 - newMsgChars) < 0 ? '#ff5252' : (1000 - newMsgChars) < 100 ? '#ff9800' : '#888', fontSize: 10, textAlign: 'right', marginBottom: 16}}>{1000 - newMsgChars}</Text>
-            <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10}}
-              onPress={async () => {
-                if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
-                const subj = supportNewSubject.trim();
-                const msg = supportNewMsg.trim();
-                const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: subj }) }, token);
-                if (!res.ok || !res.data?.id) {
-                  showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
-                  return;
-                }
-                const ticketId = res.data.id;
-                if (msg) {
-                  pendingSupportMsg.current = null;
-                  await apiRequest(`/api/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message: msg }) }, token);
-                }
-                setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
-                setShowSupport(false); setSupportMessages([]); setSupportTicketId(ticketId);
-                loadSupportTickets(); loadSupportMessages(ticketId);
-              }}>
-              <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>Enviar consulta</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setSupportNewMode(false)} style={{alignItems: 'center', padding: 10}}>
-              <Text style={{color: th.sub, fontSize: 13}}>Cancelar</Text>
-            </TouchableOpacity>
+            {supportSent ? (
+              <View style={{alignItems: 'center', paddingVertical: 60}}>
+                <Text style={{fontSize: 60, marginBottom: 16}}>✅</Text>
+                <Text style={{color: th.text, fontSize: 20, fontWeight: '800', textAlign: 'center', marginBottom: 8}}>Mensaje enviado con exito</Text>
+                <Text style={{color: th.sub, fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 30}}>En breve tendra respuesta por parte de nuestro soporte. Gracias.</Text>
+                <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, paddingHorizontal: 40, alignItems: 'center'}}
+                  onPress={() => { setSupportSent(false); setSupportNewMode(false); loadSupportTickets(); }}>
+                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>Ver mis consultas</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={{color: th.text, fontSize: 16, fontWeight: '700', marginBottom: 12}}>Nueva consulta</Text>
+                <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Asunto</Text>
+                <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 14, color: th.text, marginBottom: 12}} value={supportNewSubject} onChangeText={setSupportNewSubject} placeholder="Ej: Problema con el monitoreo" placeholderTextColor="#555" editable={!supportSending} />
+                <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Mensaje</Text>
+                <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 13, color: th.text, minHeight: 100, textAlignVertical: 'top', marginBottom: 4}} value={supportNewMsg} onChangeText={setSupportNewMsg} placeholder="Describe tu problema o consulta..." placeholderTextColor="#555" multiline maxLength={1000} editable={!supportSending} />
+                <Text style={{color: (1000 - newMsgChars) < 0 ? '#ff5252' : (1000 - newMsgChars) < 100 ? '#ff9800' : '#888', fontSize: 10, textAlign: 'right', marginBottom: 16}}>{1000 - newMsgChars}</Text>
+                <TouchableOpacity
+                  disabled={supportSending}
+                  style={{backgroundColor: supportSending ? '#6a3a7a' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, opacity: supportSending ? 0.7 : 1}}
+                  onPress={async () => {
+                    if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
+                    setSupportSending(true);
+                    const subj = supportNewSubject.trim();
+                    const msg = supportNewMsg.trim();
+                    const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: subj }) }, token);
+                    if (!res.ok || !res.data?.id) {
+                      setSupportSending(false);
+                      showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
+                      return;
+                    }
+                    if (msg) {
+                      await apiRequest(`/api/support/tickets/${res.data.id}/messages`, { method: 'POST', body: JSON.stringify({ message: msg }) }, token);
+                    }
+                    setSupportSending(false);
+                    setSupportSent(true);
+                    loadSupportTickets();
+                  }}>
+                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>{supportSending ? 'Enviando...' : 'Enviar consulta'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setSupportNewMode(false); setSupportSending(false); }} style={{alignItems: 'center', padding: 10}}>
+                  <Text style={{color: th.sub, fontSize: 13}}>Cancelar</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </ScrollView>
         ) : (
           <>
             <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12, margin: 16, marginBottom: 8, alignItems: 'center'}}
-              onPress={() => { setSupportNewMode(true); setSupportNewSubject(''); setSupportNewMsg(''); }}>
+              onPress={() => { setSupportNewMode(true); setSupportNewSubject(''); setSupportNewMsg(''); setSupportSent(false); setSupportSending(false); }}>
               <Text style={{color: '#fff', fontSize: 14, fontWeight: '700'}}>+ Nueva consulta</Text>
             </TouchableOpacity>
             <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 30}}>
@@ -3095,7 +3112,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.2.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.3.0</Text>
             </View>
           </View>
         </TouchableOpacity>
