@@ -339,12 +339,21 @@ export default function App() {
   // Push notification banner state
   const [pushBanner, setPushBanner] = useState<{title: string, body: string, type?: string} | null>(null);
 
-  // Listener de mensajes en primer plano - no renderizar nada, solo log
+  // Listener de mensajes en primer plano
   useEffect(() => {
     const unsubscribe = messaging().onMessage(async (remoteMessage) => {
       try {
         log.info(`Push: ${remoteMessage?.notification?.title || '?'}`);
-      } catch {}
+        const title = String(remoteMessage?.notification?.title || 'ServerEyes');
+        const body = String(remoteMessage?.notification?.body || '');
+        const type = String(remoteMessage?.data?.type || '');
+        try { Vibration.vibrate([0, 200, 100, 200]); } catch {}
+        setPushBanner({ title, body, type });
+        const timer = setTimeout(() => setPushBanner(null), 8000);
+        return () => clearTimeout(timer);
+      } catch (e: any) {
+        log.error(`Push error: ${e?.message || 'unknown'}`);
+      }
     });
     return unsubscribe;
   }, []);
@@ -3120,7 +3129,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.4</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.6.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3178,7 +3187,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.4</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.6.0</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -3248,7 +3257,30 @@ export default function App() {
       <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 90, width: 56, height: 56, borderRadius: 28, backgroundColor: '#1a2a3a', alignItems: 'center', justifyContent: 'center', elevation: 8}} onPress={() => setShowPairing(true)}>
         <Text style={{fontSize: 22}}>{'🔗'}</Text>
       </TouchableOpacity>
-      {/* Push notifications are handled by Firebase natively */}
+      {/* Push notification banner */}
+      {pushBanner ? (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => {
+            const t = pushBanner?.type;
+            setPushBanner(null);
+            if (t === 'support') {
+              try { loadSupportTickets().then(() => setShowSupport(true)); } catch {}
+            }
+          }}
+          style={{position: 'absolute', top: 50, left: 16, right: 16, backgroundColor: '#9C27B0', borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', zIndex: 9999, elevation: 20, shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3, shadowRadius: 8}}>
+          <Text style={{fontSize: 28, marginRight: 12}}>
+            {pushBanner?.type === 'support' ? '🎧' : pushBanner?.type === 'offline' ? '🔴' : '🔔'}
+          </Text>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#fff', fontSize: 14, fontWeight: '700'}}>{pushBanner?.title || ''}</Text>
+            <Text style={{color: '#e1bee7', fontSize: 12, marginTop: 2}} numberOfLines={2}>{pushBanner?.body || ''}</Text>
+          </View>
+          <TouchableOpacity onPress={() => setPushBanner(null)} style={{padding: 4, marginLeft: 8}}>
+            <Text style={{color: '#e1bee7', fontSize: 16}}>✕</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
       <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
     </View>
   );
