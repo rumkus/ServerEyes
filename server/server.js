@@ -2466,16 +2466,25 @@ app.get('/api/support/tickets', authenticateToken, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
-// Crear ticket
+// Crear ticket (con mensaje opcional)
 app.post('/api/support/tickets', authenticateToken, async (req, res) => {
   try {
-    const { subject } = req.body;
+    const { subject, message } = req.body;
     const result = await pool.query(
       'INSERT INTO support_tickets (user_id, subject) VALUES ($1, $2) RETURNING *',
       [req.user.id, subject || 'Consulta de soporte']
     );
-    res.status(201).json(result.rows[0]);
-  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+    const ticket = result.rows[0];
+    if (message && message.trim()) {
+      const validation = validateMessage(message.trim());
+      const msg = validation.ok ? validation.message : message.trim();
+      await pool.query(
+        'INSERT INTO support_messages (ticket_id, sender_type, sender_id, message) VALUES ($1, $2, $3, $4)',
+        [ticket.id, 'user', req.user.id, msg]
+      );
+    }
+    res.status(201).json(ticket);
+  } catch (error) { console.error('Error crear ticket:', error); res.status(500).json({ error: 'Error interno' }); }
 });
 
 // Mensajes de un ticket

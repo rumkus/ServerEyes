@@ -1563,14 +1563,11 @@ async function submitNewTicket() {
   const subject = document.getElementById('support-new-subject')?.value?.trim();
   const msg = document.getElementById('support-new-msg')?.value?.trim();
   if (!subject) { alert('Ingresa el asunto'); return; }
-  const r = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject }) });
+  const r = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject, message: msg || undefined }) });
   if (r.ok) {
     supportNewMode = false;
     supportActiveTicket = r.data.id;
     supportMessages = [];
-    if (msg) {
-      await api('/api/support/tickets/' + r.data.id + '/messages', { method: 'POST', body: JSON.stringify({ message: msg }) });
-    }
     loadSupportMessages();
     loadSupportTickets();
   }

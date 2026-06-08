@@ -1202,18 +1202,15 @@ export default function App() {
                   onPress={async () => {
                     if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
                     setSupportSending(true);
-                    const subj = supportNewSubject.trim();
-                    const msg = supportNewMsg.trim();
-                    const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: subj }) }, token);
+                    const res = await apiRequest('/api/support/tickets', {
+                      method: 'POST',
+                      body: JSON.stringify({ subject: supportNewSubject.trim(), message: supportNewMsg.trim() || undefined })
+                    }, token);
+                    setSupportSending(false);
                     if (!res.ok || !res.data?.id) {
-                      setSupportSending(false);
                       showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
                       return;
                     }
-                    if (msg) {
-                      await apiRequest(`/api/support/tickets/${res.data.id}/messages`, { method: 'POST', body: JSON.stringify({ message: msg }) }, token);
-                    }
-                    setSupportSending(false);
                     setSupportSent(true);
                     loadSupportTickets();
                   }}>
@@ -3112,7 +3109,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.3.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.3.1</Text>
             </View>
           </View>
         </TouchableOpacity>
