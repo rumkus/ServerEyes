@@ -1165,7 +1165,7 @@ export default function App() {
   }
 
   if (showSupport) {
-    const newMsgWords = supportNewMsg.trim() ? supportNewMsg.trim().split(/\s+/).length : 0;
+    const newMsgChars = supportNewMsg.length;
     return (
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor="#9C27B0" />
@@ -1181,7 +1181,7 @@ export default function App() {
             <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 14, color: th.text, marginBottom: 12}} value={supportNewSubject} onChangeText={setSupportNewSubject} placeholder="Ej: Problema con el monitoreo" placeholderTextColor="#555" />
             <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Mensaje</Text>
             <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 12, fontSize: 13, color: th.text, minHeight: 100, textAlignVertical: 'top', marginBottom: 4}} value={supportNewMsg} onChangeText={setSupportNewMsg} placeholder="Describe tu problema o consulta..." placeholderTextColor="#555" multiline maxLength={6000} />
-            <Text style={{color: (1000 - newMsgWords) < 0 ? '#ff5252' : (1000 - newMsgWords) < 200 ? '#ff9800' : '#888', fontSize: 10, textAlign: 'right', marginBottom: 16}}>{1000 - newMsgWords}</Text>
+            <Text style={{color: (1000 - newMsgChars) < 0 ? '#ff5252' : (1000 - newMsgChars) < 100 ? '#ff9800' : '#888', fontSize: 10, textAlign: 'right', marginBottom: 16}}>{1000 - newMsgChars}</Text>
             <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10}}
               onPress={async () => {
                 if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
@@ -1191,6 +1191,7 @@ export default function App() {
                     const ticketId = res.data.id;
                     const msgToSend = supportNewMsg.trim();
                     setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
+                    setShowSupport(false);
                     setSupportTicketId(ticketId);
                     setSupportMessages([]);
                     loadSupportTickets();
@@ -3098,7 +3099,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.1.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.1.2</Text>
             </View>
           </View>
         </TouchableOpacity>
