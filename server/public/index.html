@@ -1674,14 +1674,12 @@ async function sendSupportMsg() {
   if (files.length > 4) { alert('Maximo 4 adjuntos'); return; }
   if (files.find(f => f.size > 3 * 1024 * 1024)) { alert('Cada adjunto no puede superar 3MB'); return; }
 
-  // Word limit: convert to TXT attachment if too long
-  const wordCount = msg ? msg.split(/\s+/).length : 0;
   const formData = new FormData();
-  if (wordCount > 1000) {
+  if (msg && msg.length > 1000) {
     const blob = new Blob([msg], { type: 'text/plain' });
     if (blob.size > 1024 * 1024) { alert('El texto supera 1MB. Envia un email a soporte.'); return; }
     formData.append('files', blob, 'mensaje-completo.txt');
-    formData.append('message', msg.split(/\s+/).slice(0, 50).join(' ') + '... (ver adjunto)');
+    formData.append('message', msg.substring(0, 100) + '... (ver adjunto)');
   } else {
     formData.append('message', msg || '');
   }
@@ -1713,10 +1711,9 @@ function updateWordCount() {
   const el = document.getElementById('support-msg-input');
   const counter = document.getElementById('support-word-count');
   if (!el || !counter) return;
-  const words = el.value.trim() ? el.value.trim().split(/\s+/).length : 0;
-  const remaining = 1000 - words;
+  const remaining = 1000 - el.value.length;
   counter.textContent = remaining;
-  counter.style.color = remaining < 0 ? '#F44336' : remaining < 200 ? '#FF9800' : '#888';
+  counter.style.color = remaining < 0 ? '#F44336' : remaining < 100 ? '#FF9800' : '#888';
 }
 
 setInterval(() => { if (supportOpen && supportActiveTicket) loadSupportMessages(); }, 5000);

@@ -2509,8 +2509,7 @@ function filterBadWords(text) {
 
 function validateMessage(message) {
   if (!message) return { ok: true, message: '' };
-  const wordCount = message.trim().split(/\s+/).length;
-  if (wordCount > 1000) return { ok: false, error: 'El mensaje supera las 1000 palabras. Adjuntalo como archivo TXT.' };
+  if (message.length > 1000) return { ok: false, error: 'El mensaje supera los 1000 caracteres. Adjuntalo como archivo TXT.' };
   const filtered = filterBadWords(message);
   return { ok: true, message: filtered.clean, warned: filtered.hasBadWords };
 }

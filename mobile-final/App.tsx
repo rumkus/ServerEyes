@@ -1057,8 +1057,7 @@ export default function App() {
   };
   const sendSupportMessage = async () => {
     if (!supportMsg.trim() || !supportTicketId) return;
-    const words = supportMsg.trim().split(/\s+/).length;
-    if (words > 1000) { showModal('📝', 'Limite excedido', 'El mensaje supera las 1000 palabras. Envia un email a soporte.'); return; }
+    if (supportMsg.length > 1000) { showModal('📝', 'Limite excedido', 'El mensaje supera los 1000 caracteres.'); return; }
     const res = await apiRequest(`/api/support/tickets/${supportTicketId}/messages`, {
       method: 'POST', body: JSON.stringify({ message: supportMsg.trim() })
     }, token);
@@ -1066,38 +1065,64 @@ export default function App() {
     else if (res.data?.error) showModal('⚠️', 'Error', res.data.error);
   };
 
+  const scrollRef = useRef<any>(null);
+
   if (supportTicketId) {
+    const isClosed = supportTickets.find(t => t.id === supportTicketId)?.status === 'closed';
+    const remaining = 1000 - supportMsg.length;
     return (
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor="#9C27B0" />
+        {/* Header */}
         <View style={{backgroundColor: '#9C27B0', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 14, flexDirection: 'row', alignItems: 'center'}}>
           <TouchableOpacity onPress={() => setSupportTicketId(null)} style={{marginRight: 12}}><Text style={{color: '#fff', fontSize: 18}}>←</Text></TouchableOpacity>
-          <Text style={{color: '#fff', fontSize: 16, fontWeight: '700', flex: 1}} numberOfLines={1}>{supportTickets.find(t => t.id === supportTicketId)?.subject || 'Soporte'}</Text>
-          <TouchableOpacity onPress={() => loadSupportMessages(supportTicketId)}><Text style={{color: '#fff', fontSize: 14}}>🔄</Text></TouchableOpacity>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#fff', fontSize: 15, fontWeight: '700'}} numberOfLines={1}>{supportTickets.find(t => t.id === supportTicketId)?.subject || 'Soporte'}</Text>
+            <Text style={{color: '#e1bee7', fontSize: 11}}>{isClosed ? 'Cerrado' : 'Abierto'}</Text>
+          </View>
+          {!isClosed && (
+            <TouchableOpacity onPress={async () => {
+              await apiRequest(`/api/support/tickets/${supportTicketId}/close`, { method: 'POST' }, token);
+              loadSupportTickets(); loadSupportMessages(supportTicketId!);
+            }} style={{backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6}}>
+              <Text style={{color: '#fff', fontSize: 11}}>Cerrar</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        <ScrollView style={{flex: 1, padding: 12}} contentContainerStyle={{paddingBottom: 10}}
-          ref={ref => { if (ref) setTimeout(() => ref.scrollToEnd({animated: false}), 100); }}>
+
+        {/* Messages */}
+        <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 12, paddingBottom: 10}}
+          ref={scrollRef}
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({animated: false})}>
           {supportMessages.length === 0 ? (
-            <Text style={{color: th.sub, fontSize: 13, textAlign: 'center', paddingVertical: 40}}>Envia tu primer mensaje</Text>
+            <Text style={{color: th.sub, fontSize: 13, textAlign: 'center', paddingVertical: 60}}>Envia tu primer mensaje</Text>
           ) : supportMessages.map((m: any, i: number) => {
             const isUser = m.sender_type === 'user';
+            const isSystem = m.sender_type === 'system';
             const attachs = m.attachments || [];
+            if (isSystem) return (
+              <View key={i} style={{alignItems: 'center', marginVertical: 8}}>
+                <Text style={{color: '#607d8b', fontSize: 11, backgroundColor: th.card, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10}}>{m.message}</Text>
+              </View>
+            );
             return (
-              <View key={i} style={{alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '80%', backgroundColor: isUser ? '#9C27B0' : th.card, borderRadius: 14, borderBottomRightRadius: isUser ? 4 : 14, borderBottomLeftRadius: isUser ? 14 : 4, padding: 12, marginBottom: 8}}>
+              <View key={i} style={{alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '80%', backgroundColor: isUser ? '#9C27B0' : th.card, borderRadius: 16, borderBottomRightRadius: isUser ? 4 : 16, borderBottomLeftRadius: isUser ? 16 : 4, padding: 12, marginBottom: 6}}>
                 {!isUser && <Text style={{color: '#9C27B0', fontSize: 10, fontWeight: '700', marginBottom: 2}}>Soporte</Text>}
-                {m.message ? <Text style={{color: isUser ? '#fff' : th.text, fontSize: 13, lineHeight: 20}}>{m.message}</Text> : null}
+                {m.message ? <Text style={{color: isUser ? '#fff' : th.text, fontSize: 14, lineHeight: 20}}>{m.message}</Text> : null}
                 {attachs.length > 0 && (
                   <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6}}>
                     {attachs.map((a: any, j: number) => <Text key={j} style={{color: isUser ? '#e1bee7' : '#9C27B0', fontSize: 11}}>📎 {a.name}</Text>)}
                   </View>
                 )}
-                <Text style={{color: isUser ? '#e1bee7' : th.sub, fontSize: 10, marginTop: 4}}>{new Date(m.created_at).toLocaleString('es', {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'})}</Text>
+                <Text style={{color: isUser ? '#e1bee7' : th.sub, fontSize: 10, marginTop: 4, textAlign: 'right'}}>{new Date(m.created_at).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit'})}</Text>
               </View>
             );
           })}
         </ScrollView>
-        {supportTickets.find(t => t.id === supportTicketId)?.status === 'closed' ? (
-          <View style={{padding: 14, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center'}}>
+
+        {/* Input area - fixed at bottom */}
+        {isClosed ? (
+          <View style={{padding: 14, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center', backgroundColor: th.bg}}>
             <Text style={{color: '#888', fontSize: 12, marginBottom: 10}}>Este ticket fue cerrado</Text>
             <View style={{flexDirection: 'row', gap: 8}}>
               <TouchableOpacity style={{flex: 1, backgroundColor: '#9C27B0', borderRadius: 10, padding: 10, alignItems: 'center'}}
@@ -1105,7 +1130,7 @@ export default function App() {
                   await apiRequest(`/api/support/tickets/${supportTicketId}/reopen`, { method: 'POST' }, token);
                   loadSupportTickets(); loadSupportMessages(supportTicketId);
                 }}>
-                <Text style={{color: '#fff', fontSize: 12, fontWeight: '700'}}>Reabrir ticket</Text>
+                <Text style={{color: '#fff', fontSize: 12, fontWeight: '700'}}>Reabrir</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{flex: 1, backgroundColor: th.border, borderRadius: 10, padding: 10, alignItems: 'center'}}
                 onPress={() => { setSupportTicketId(null); }}>
@@ -1114,25 +1139,21 @@ export default function App() {
             </View>
           </View>
         ) : (
-          <View>
-            <View style={{flexDirection: 'row', padding: 10, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center', gap: 8}}>
-              <TextInput style={{flex: 1, backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 13, color: th.text}} value={supportMsg} onChangeText={setSupportMsg} placeholder="Escribe tu mensaje..." placeholderTextColor="#888" multiline maxLength={6000} />
-              <TouchableOpacity onPress={sendSupportMessage} style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12}}>
-                <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>Enviar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={async () => {
-                await apiRequest(`/api/support/tickets/${supportTicketId}/close`, { method: 'POST' }, token);
-                loadSupportTickets(); loadSupportMessages(supportTicketId!);
-              }} style={{backgroundColor: '#607d8b', borderRadius: 10, padding: 12}}>
-                <Text style={{color: '#fff', fontSize: 12}}>✕</Text>
+          <View style={{borderTopWidth: 1, borderTopColor: th.border, backgroundColor: th.bg, paddingBottom: 4}}>
+            <View style={{flexDirection: 'row', padding: 8, alignItems: 'flex-end', gap: 8}}>
+              <TextInput
+                style={{flex: 1, backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, fontSize: 14, color: th.text, maxHeight: 100}}
+                value={supportMsg} onChangeText={setSupportMsg}
+                placeholder="Mensaje..." placeholderTextColor="#888"
+                multiline maxLength={1000} />
+              <TouchableOpacity onPress={sendSupportMessage}
+                style={{width: 44, height: 44, borderRadius: 22, backgroundColor: supportMsg.trim() ? '#9C27B0' : '#3a3a5a', alignItems: 'center', justifyContent: 'center'}}>
+                <Text style={{color: '#fff', fontSize: 18}}>{'➤'}</Text>
               </TouchableOpacity>
             </View>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 4}}>
-              <View />
-              <Text style={{color: (() => { const w = supportMsg.trim() ? supportMsg.trim().split(/\s+/).length : 0; return (1000 - w) < 0 ? '#ff5252' : (1000 - w) < 200 ? '#ff9800' : '#888'; })(), fontSize: 10}}>
-                {1000 - (supportMsg.trim() ? supportMsg.trim().split(/\s+/).length : 0)}
-              </Text>
-            </View>
+            {supportMsg.length > 0 && (
+              <Text style={{color: remaining < 0 ? '#ff5252' : remaining < 100 ? '#ff9800' : '#555', fontSize: 10, textAlign: 'right', paddingRight: 60}}>{remaining}</Text>
+            )}
           </View>
         )}
       </View>
