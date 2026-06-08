@@ -807,7 +807,7 @@ function render() {
         <button class="btn-sm ${tab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">&#128202; Overview</button>
         <button class="btn-sm ${tab === 'agent' ? 'active' : ''}" onclick="setTab('agent')">&#128228; Agente</button>
         <button class="btn-sm ${tab === 'notifs' ? 'active' : ''}" onclick="setTab('notifs')">&#128276; Notificaciones</button>
-        <button class="btn-sm ${tab === 'support' ? 'active' : ''}" onclick="setTab('support')">&#128172; Soporte<span class="support-tab-badge" id="support-badge" style="background:#ff5252;color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 4px;margin-left:4px">${adminSupportTickets.filter(t=>t.status==='open').length || ''}</span></button>
+        <button class="btn-sm ${tab === 'support' ? 'active' : ''}" onclick="setTab('support')">&#128172; Soporte${(()=>{const c=adminSupportTickets.filter(t=>t.status==='open').length;return c>0?`<span class="support-tab-badge" id="support-badge" style="background:#ff5252;color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;margin-left:4px">${c}</span>`:'<span id="support-badge" style="display:none"></span>';})()}</button>
         <button class="btn-sm ${tab === 'system' ? 'active' : ''}" onclick="setTab('system')">&#9881; Sistema</button>
         <a href="/" class="btn-sm" style="text-decoration:none">&#128065; Dashboard</a>
         <button class="btn-sm" style="color:#ff5252" onclick="logout()">Salir</button>
