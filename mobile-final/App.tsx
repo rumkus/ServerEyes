@@ -246,6 +246,7 @@ export default function App() {
   const [supportNewSubject, setSupportNewSubject] = useState('');
   const [supportNewMsg, setSupportNewMsg] = useState('');
   const [supportNewMode, setSupportNewMode] = useState(false);
+  const pendingSupportMsg = useRef<{ticketId: number, msg: string} | null>(null);
   const [customModal, setCustomModal] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
@@ -1185,26 +1186,21 @@ export default function App() {
             <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10}}
               onPress={async () => {
                 if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
-                try {
-                  const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: supportNewSubject.trim() }) }, token);
-                  if (res.ok && res.data?.id) {
-                    const ticketId = res.data.id;
-                    const msgToSend = supportNewMsg.trim();
-                    setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
-                    setShowSupport(false);
-                    setSupportTicketId(ticketId);
-                    setSupportMessages([]);
-                    loadSupportTickets();
-                    if (msgToSend) {
-                      const msgRes = await apiRequest(`/api/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message: msgToSend }) }, token);
-                      if (msgRes.ok) loadSupportMessages(ticketId);
-                    }
-                  } else {
-                    showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
-                  }
-                } catch (e: any) {
-                  showModal('📡', 'Error de conexion', 'No se pudo conectar. Verifica tu internet.');
+                const subj = supportNewSubject.trim();
+                const msg = supportNewMsg.trim();
+                const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: subj }) }, token);
+                if (!res.ok || !res.data?.id) {
+                  showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
+                  return;
                 }
+                const ticketId = res.data.id;
+                if (msg) {
+                  pendingSupportMsg.current = null;
+                  await apiRequest(`/api/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message: msg }) }, token);
+                }
+                setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
+                setShowSupport(false); setSupportMessages([]); setSupportTicketId(ticketId);
+                loadSupportTickets(); loadSupportMessages(ticketId);
               }}>
               <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>Enviar consulta</Text>
             </TouchableOpacity>
@@ -3099,7 +3095,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.1.2</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.2.0</Text>
             </View>
           </View>
         </TouchableOpacity>
