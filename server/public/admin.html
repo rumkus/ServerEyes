@@ -607,9 +607,7 @@ async function loadAdminSupport() {
   }
   lastSupportMsgCount = newTotal;
   adminSupportTickets = r.data;
-  // Actualizar badge del tab
   updateSupportBadge(openCount);
-  if (tab === 'support' && !adminSupportActive) render();
 }
 
 function updateSupportBadge(count) {
@@ -763,10 +761,14 @@ function render() {
 
   if (tab === 'agent') loadHistory();
   if (tab === 'notifs') setTimeout(loadNotifs, 50);
-  if (tab === 'support') { setTimeout(loadAdminSupport, 50); setTimeout(loadSupportMetrics, 100); setTimeout(loadSupportEmail, 150); }
+  if (tab === 'support') { setTimeout(loadAdminSupport, 50); }
 }
 
-function setTab(t) { tab = t; render(); }
+function setTab(t) {
+  tab = t;
+  render();
+  if (t === 'support') { setTimeout(loadSupportMetrics, 100); setTimeout(loadSupportEmail, 150); }
+}
 
 async function toggleAdmin(userId, makeAdmin) {
   if (!confirm(makeAdmin ? 'Hacer admin a este usuario?' : 'Quitar admin a este usuario?')) return;
