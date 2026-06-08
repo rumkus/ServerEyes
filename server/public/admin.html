@@ -885,7 +885,7 @@ async function resetPassword(userId, email) {
 
 // Init
 if (token) { loadData(); } else { renderLogin(); }
-setInterval(() => { if (token && data && tab !== 'notifs' && tab !== 'support') loadData(); }, 15000);
+setInterval(() => { if (token && data && tab !== 'notifs' && tab !== 'support' && tab !== 'agent') loadData(); }, 15000);
 setInterval(() => {
   if (!token) return;
   if (tab === 'support' && adminSupportActive) {
