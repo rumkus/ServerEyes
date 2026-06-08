@@ -86,8 +86,10 @@ const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) =
           {btns.map((b: any, i: number) => (
             <TouchableOpacity key={i} onPress={async () => {
               if (onClose) onClose();
-              await new Promise(r => setTimeout(r, 100));
-              if (b.onPress) await b.onPress();
+              if (b.onPress) {
+                await new Promise(r => setTimeout(r, 50));
+                await b.onPress();
+              }
             }}
               style={{flex: 1, backgroundColor: b.style === 'cancel' ? '#1a2a3a' : b.style === 'danger' ? '#ff5252' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginLeft: i > 0 ? 10 : 0}}>
               <Text style={{color: '#fff', fontWeight: '700', fontSize: 14}}>{b.text}</Text>
@@ -1077,6 +1079,15 @@ export default function App() {
 
   const scrollRef = useRef<any>(null);
 
+  // Auto-refresh chat de soporte cada 5 segundos
+  useEffect(() => {
+    if (!supportTicketId || !token) return;
+    const interval = setInterval(() => {
+      loadSupportMessages(supportTicketId);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [supportTicketId, token]);
+
   if (supportTicketId) {
     const isClosed = supportTickets.find(t => t.id === supportTicketId)?.status === 'closed';
     const remaining = 1000 - supportMsg.length;
@@ -1166,6 +1177,7 @@ export default function App() {
             )}
           </View>
         )}
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -1291,6 +1303,7 @@ export default function App() {
             </ScrollView>
           </>
         )}
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -3092,7 +3105,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.1</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.2</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3150,7 +3163,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.2</Text>
             </View>
           </View>
         </TouchableOpacity>
