@@ -1182,12 +1182,15 @@ export default function App() {
               onPress={async () => {
                 if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
                 const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: supportNewSubject.trim() }) }, token);
-                if (res.ok) {
+                if (res.ok && res.data?.id) {
+                  const ticketId = res.data.id;
                   if (supportNewMsg.trim()) {
-                    await apiRequest(`/api/support/tickets/${res.data.id}/messages`, { method: 'POST', body: JSON.stringify({ message: supportNewMsg.trim() }) }, token);
+                    await apiRequest(`/api/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message: supportNewMsg.trim() }) }, token);
                   }
                   setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
-                  setSupportTicketId(res.data.id); loadSupportMessages(res.data.id); loadSupportTickets();
+                  setSupportTicketId(ticketId); loadSupportMessages(ticketId); loadSupportTickets();
+                } else {
+                  showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta. Verifica tu conexion.');
                 }
               }}>
               <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>Enviar consulta</Text>
@@ -3076,10 +3079,13 @@ export default function App() {
                 <Text style={{color: '#ccc', fontSize: 15}}>{item.label}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity onPress={() => { setMenuOpen(false); log.info('Logout'); setAndSaveToken(null); }} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, marginTop: 'auto', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
-              <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
-              <Text style={{color: '#ff5252', fontSize: 15, fontWeight: '600'}}>{t('logout')}</Text>
-            </TouchableOpacity>
+            <View style={{marginTop: 'auto', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
+              <TouchableOpacity onPress={() => { setMenuOpen(false); log.info('Logout'); setAndSaveToken(null); }} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20}}>
+                <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
+                <Text style={{color: '#ff5252', fontSize: 15, fontWeight: '600'}}>{t('logout')}</Text>
+              </TouchableOpacity>
+              <Text style={{color: '#333', fontSize: 10, textAlign: 'center', paddingBottom: 10}}>ServerEyes v2.0.0</Text>
+            </View>
           </View>
         </TouchableOpacity>
       )}
