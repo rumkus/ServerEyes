@@ -2631,6 +2631,14 @@ app.post('/api/support/tickets/:id/reopen', authenticateToken, async (req, res) 
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
+// User: eliminar ticket
+app.delete('/api/support/tickets/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ message: 'Ticket eliminado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
 // User: cerrar ticket
 app.post('/api/support/tickets/:id/close', authenticateToken, async (req, res) => {
   try {

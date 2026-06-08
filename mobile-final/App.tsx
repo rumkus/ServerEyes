@@ -75,16 +75,17 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
 
 const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) => {
   if (!visible) return null;
+  const btns = buttons || [{ text: 'OK' }];
   return (
     <View style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: 30}}>
       <View style={{backgroundColor: '#16213e', borderRadius: 20, padding: 28, maxWidth: 340, width: '100%', alignItems: 'center'}}>
-        {icon && <Text style={{fontSize: 48, marginBottom: 12}}>{icon}</Text>}
-        <Text style={{color: '#eee', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 8}}>{title}</Text>
-        {message && <Text style={{color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 20}}>{message}</Text>}
-        <View style={{flexDirection: 'row', gap: 10, width: '100%'}}>
-          {(buttons || [{ text: 'OK', onPress: onClose }]).map((b: any, i: number) => (
-            <TouchableOpacity key={i} onPress={() => { if (b.onPress) b.onPress(); if (onClose) onClose(); }}
-              style={{flex: 1, backgroundColor: b.style === 'cancel' ? '#1a2a3a' : b.style === 'danger' ? '#ff5252' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center'}}>
+        {icon ? <Text style={{fontSize: 48, marginBottom: 12}}>{icon}</Text> : null}
+        <Text style={{color: '#eee', fontSize: 18, fontWeight: '800', textAlign: 'center', marginBottom: 8}}>{title || ''}</Text>
+        {message ? <Text style={{color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 20}}>{message}</Text> : null}
+        <View style={{flexDirection: 'row', width: '100%'}}>
+          {btns.map((b: any, i: number) => (
+            <TouchableOpacity key={i} onPress={() => { if (onClose) onClose(); if (b.onPress) b.onPress(); }}
+              style={{flex: 1, backgroundColor: b.style === 'cancel' ? '#1a2a3a' : b.style === 'danger' ? '#ff5252' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginLeft: i > 0 ? 10 : 0}}>
               <Text style={{color: '#fff', fontWeight: '700', fontSize: 14}}>{b.text}</Text>
             </TouchableOpacity>
           ))}
@@ -332,20 +333,12 @@ export default function App() {
   // Push notification banner state
   const [pushBanner, setPushBanner] = useState<{title: string, body: string, type?: string} | null>(null);
 
-  // Listener de mensajes en primer plano
+  // Listener de mensajes en primer plano - no renderizar nada, solo log
   useEffect(() => {
     const unsubscribe = messaging().onMessage(async (remoteMessage) => {
       try {
-        log.info(`Push recibido: ${remoteMessage?.notification?.title || 'sin titulo'}`);
-        const title = remoteMessage?.notification?.title || 'ServerEyes';
-        const body = remoteMessage?.notification?.body || '';
-        const type = String(remoteMessage?.data?.type || '');
-        try { Vibration.vibrate(200); } catch {}
-        setPushBanner({ title, body, type });
-        setTimeout(() => { try { setPushBanner(null); } catch {} }, 6000);
-      } catch (e: any) {
-        log.error(`Push handler error: ${e.message}`);
-      }
+        log.info(`Push: ${remoteMessage?.notification?.title || '?'}`);
+      } catch {}
     });
     return unsubscribe;
   }, []);
@@ -1208,18 +1201,23 @@ export default function App() {
                   style={{backgroundColor: supportSending ? '#6a3a7a' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, opacity: supportSending ? 0.7 : 1}}
                   onPress={async () => {
                     if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
+                    if (supportSending) return;
                     setSupportSending(true);
-                    const res = await apiRequest('/api/support/tickets', {
-                      method: 'POST',
-                      body: JSON.stringify({ subject: supportNewSubject.trim(), message: supportNewMsg.trim() || undefined })
-                    }, token);
-                    setSupportSending(false);
-                    if (!res.ok || !res.data?.id) {
-                      showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
-                      return;
+                    try {
+                      const res = await apiRequest('/api/support/tickets', {
+                        method: 'POST',
+                        body: JSON.stringify({ subject: supportNewSubject.trim(), message: supportNewMsg.trim() || undefined })
+                      }, token);
+                      if (res.ok && res.data?.id) {
+                        setSupportSent(true);
+                        loadSupportTickets();
+                      } else {
+                        showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
+                      }
+                    } catch (e: any) {
+                      showModal('📡', 'Error', 'No se pudo conectar al servidor.');
                     }
-                    setSupportSent(true);
-                    loadSupportTickets();
+                    setSupportSending(false);
                   }}>
                   <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>{supportSending ? 'Enviando...' : 'Enviar consulta'}</Text>
                 </TouchableOpacity>
@@ -1242,18 +1240,47 @@ export default function App() {
                   <Text style={{color: th.sub, fontSize: 16}}>Sin conversaciones</Text>
                   <Text style={{color: '#888', fontSize: 13, marginTop: 4}}>Crea una nueva consulta</Text>
                 </View>
-              ) : supportTickets.map((t: any) => (
-                <TouchableOpacity key={t.id} onPress={() => { setSupportTicketId(t.id); loadSupportMessages(t.id); }}
-                  style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: t.status === 'open' ? '#9C27B0' : '#607d8b'}}>
-                  <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <Text style={{color: th.text, fontSize: 14, fontWeight: '700', flex: 1}} numberOfLines={1}>{t.subject}</Text>
-                    <View style={{backgroundColor: t.status === 'open' ? '#9C27B020' : '#60606020', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6}}>
-                      <Text style={{color: t.status === 'open' ? '#9C27B0' : '#888', fontSize: 10, fontWeight: '700'}}>{t.status === 'open' ? 'Abierto' : 'Cerrado'}</Text>
+              ) : (
+                <>
+                  {supportTickets.length > 1 && (
+                    <TouchableOpacity onPress={() => {
+                      showModal('🗑', 'Eliminar todos los tickets?', `Se eliminaran ${supportTickets.length} tickets permanentemente.`, [
+                        { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                        { text: 'Eliminar todos', style: 'danger', onPress: async () => {
+                          for (const t of supportTickets) { await apiRequest(`/api/support/tickets/${t.id}`, { method: 'DELETE' }, token); }
+                          loadSupportTickets();
+                        }}
+                      ]);
+                    }} style={{alignItems: 'flex-end', marginBottom: 8}}>
+                      <Text style={{color: '#ff5252', fontSize: 12}}>Eliminar todos</Text>
+                    </TouchableOpacity>
+                  )}
+                  {supportTickets.map((t: any) => (
+                    <View key={t.id} style={{backgroundColor: th.card, borderRadius: 12, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: t.status === 'open' ? '#9C27B0' : '#607d8b', flexDirection: 'row', overflow: 'hidden'}}>
+                      <TouchableOpacity onPress={() => { setSupportTicketId(t.id); loadSupportMessages(t.id); }} style={{flex: 1, padding: 14}}>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                          <Text style={{color: th.text, fontSize: 14, fontWeight: '700', flex: 1}} numberOfLines={1}>{t.subject}</Text>
+                          <View style={{backgroundColor: t.status === 'open' ? '#9C27B020' : '#60606020', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6}}>
+                            <Text style={{color: t.status === 'open' ? '#9C27B0' : '#888', fontSize: 10, fontWeight: '700'}}>{t.status === 'open' ? 'Abierto' : 'Cerrado'}</Text>
+                          </View>
+                        </View>
+                        <Text style={{color: th.sub, fontSize: 11, marginTop: 4}}>{new Date(t.updated_at).toLocaleString('es')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => {
+                        showModal('🗑', 'Eliminar ticket?', `"${t.subject}" se eliminara permanentemente.`, [
+                          { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                          { text: 'Eliminar', style: 'danger', onPress: async () => {
+                            await apiRequest(`/api/support/tickets/${t.id}`, { method: 'DELETE' }, token);
+                            loadSupportTickets();
+                          }}
+                        ]);
+                      }} style={{justifyContent: 'center', paddingHorizontal: 14, backgroundColor: '#ff525215'}}>
+                        <Text style={{color: '#ff5252', fontSize: 16}}>🗑</Text>
+                      </TouchableOpacity>
                     </View>
-                  </View>
-                  <Text style={{color: th.sub, fontSize: 11, marginTop: 4}}>{new Date(t.updated_at).toLocaleString('es')}</Text>
-                </TouchableOpacity>
-          ))}
+                  ))}
+                </>
+              )}
             </ScrollView>
           </>
         )}
@@ -3058,7 +3085,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.4.1</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3116,7 +3143,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.4.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.0</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -3186,29 +3213,7 @@ export default function App() {
       <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 90, width: 56, height: 56, borderRadius: 28, backgroundColor: '#1a2a3a', alignItems: 'center', justifyContent: 'center', elevation: 8}} onPress={() => setShowPairing(true)}>
         <Text style={{fontSize: 22}}>{'🔗'}</Text>
       </TouchableOpacity>
-      {/* Push notification banner */}
-      {pushBanner ? (
-        <TouchableOpacity
-          onPress={() => {
-            const t = pushBanner?.type;
-            setPushBanner(null);
-            if (t === 'support') {
-              try { loadSupportTickets().then(() => setShowSupport(true)); } catch {}
-            }
-          }}
-          style={{position: 'absolute', top: 50, left: 16, right: 16, backgroundColor: '#9C27B0', borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, zIndex: 9999, elevation: 20, shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3, shadowRadius: 8}}>
-          <Text style={{fontSize: 28}}>
-            {pushBanner?.type === 'support' ? '🎧' : pushBanner?.type === 'offline' ? '🔴' : '🔔'}
-          </Text>
-          <View style={{flex: 1}}>
-            <Text style={{color: '#fff', fontSize: 14, fontWeight: '700'}}>{pushBanner?.title || ''}</Text>
-            <Text style={{color: '#e1bee7', fontSize: 12, marginTop: 2}} numberOfLines={2}>{pushBanner?.body || ''}</Text>
-          </View>
-          <TouchableOpacity onPress={() => setPushBanner(null)} style={{padding: 4}}>
-            <Text style={{color: '#e1bee7', fontSize: 16}}>✕</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      ) : null}
+      {/* Push notifications are handled by Firebase natively */}
       <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
     </View>
   );
