@@ -91,6 +91,8 @@ tr:hover { background: #1a1a3e; }
 
 @keyframes toastIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes scaleIn{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -699,16 +701,31 @@ async function sendAdminReply() {
 }
 
 function closeAdminTicket(id) {
+  const t = adminSupportTickets.find(x => x.id === id);
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn .2s';
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `<div style="background:#16213e;border-radius:16px;padding:28px;max-width:400px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4)">
-    <div style="font-size:40px;margin-bottom:12px">✅</div>
-    <h3 style="color:#eee;margin-bottom:8px">Cerrar ticket</h3>
-    <p style="color:#888;font-size:13px;margin-bottom:20px">El usuario no podra enviar mas mensajes en este ticket. Podra reabrirlo o crear uno nuevo.</p>
-    <div style="display:flex;gap:10px;justify-content:center">
-      <button style="padding:10px 24px;background:#4CAF50;color:#fff;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:14px" onclick="doCloseTicket(${id});this.closest('div[style*=fixed]').remove()">Cerrar ticket</button>
-      <button style="padding:10px 24px;background:#2a2a4a;color:#888;border:none;border-radius:10px;cursor:pointer;font-size:14px" onclick="this.closest('div[style*=fixed]').remove()">Cancelar</button>
+  overlay.innerHTML = `<div style="background:#16213e;border-radius:20px;padding:32px;max-width:420px;width:90%;box-shadow:0 12px 48px rgba(0,0,0,.5);animation:scaleIn .25s ease-out">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
+      <div style="width:48px;height:48px;border-radius:50%;background:#0d2818;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span style="font-size:24px">✅</span>
+      </div>
+      <div>
+        <h3 style="color:#eee;margin:0 0 4px;font-size:17px">Cerrar ticket #${id}</h3>
+        <p style="color:#607d8b;font-size:12px;margin:0">${t?.email || 'Usuario'} — ${t?.subject || ''}</p>
+      </div>
+    </div>
+    <div style="background:#0d1b2a;border-radius:12px;padding:14px;margin-bottom:20px">
+      <p style="color:#aaa;font-size:13px;margin:0;line-height:1.6">
+        Al cerrar este ticket:<br>
+        <span style="color:#607d8b">•</span> El usuario no podra enviar mas mensajes<br>
+        <span style="color:#607d8b">•</span> Podra reabrir el ticket si lo necesita<br>
+        <span style="color:#607d8b">•</span> O crear uno nuevo por otro tema
+      </p>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button style="flex:1;padding:12px;background:#4CAF50;color:#fff;border:none;border-radius:12px;cursor:pointer;font-weight:700;font-size:14px;transition:background .2s" onmouseover="this.style.background='#43A047'" onmouseout="this.style.background='#4CAF50'" onclick="doCloseTicket(${id});this.closest('div[style*=fixed]').remove()">Cerrar ticket</button>
+      <button style="flex:1;padding:12px;background:#1a2a3a;color:#888;border:1px solid #2a2a4a;border-radius:12px;cursor:pointer;font-size:14px;transition:background .2s" onmouseover="this.style.background='#2a3a4a'" onmouseout="this.style.background='#1a2a3a'" onclick="this.closest('div[style*=fixed]').remove()">Cancelar</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);

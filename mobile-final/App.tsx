@@ -1019,8 +1019,12 @@ export default function App() {
     if (res.ok) setSupportTickets(res.data);
   };
   const loadSupportMessages = async (ticketId: number) => {
-    const res = await apiRequest(`/api/support/tickets/${ticketId}/messages`, {}, token);
+    const [res, tRes] = await Promise.all([
+      apiRequest(`/api/support/tickets/${ticketId}/messages`, {}, token),
+      apiRequest('/api/support/tickets', {}, token)
+    ]);
     if (res.ok) setSupportMessages(res.data);
+    if (tRes.ok) setSupportTickets(tRes.data);
   };
   const sendSupportMessage = async () => {
     if (!supportMsg.trim() || !supportTicketId) return;

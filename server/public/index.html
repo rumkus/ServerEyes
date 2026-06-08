@@ -1582,8 +1582,17 @@ async function openSupportTicket(id) {
 }
 
 async function loadSupportMessages() {
-  const r = await api('/api/support/tickets/' + supportActiveTicket + '/messages');
+  const [r, t] = await Promise.all([
+    api('/api/support/tickets/' + supportActiveTicket + '/messages'),
+    api('/api/support/tickets')
+  ]);
   if (!r.ok) return;
+  if (t.ok) {
+    const oldStatus = supportTickets.find(x => x.id === supportActiveTicket)?.status;
+    supportTickets = t.data;
+    const newStatus = supportTickets.find(x => x.id === supportActiveTicket)?.status;
+    if (oldStatus !== newStatus) { supportMessages = r.data; renderSupportChat(); return; }
+  }
   supportMessages = r.data;
   const msgsEl = document.getElementById('support-msgs');
   if (msgsEl) {
