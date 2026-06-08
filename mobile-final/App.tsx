@@ -3051,40 +3051,42 @@ export default function App() {
       {/* Menu hamburguesa */}
       {menuOpen && (
         <TouchableOpacity activeOpacity={1} onPress={() => setMenuOpen(false)} style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 100}}>
-          <View style={{backgroundColor: '#0d1b2a', width: 280, height: '100%', paddingTop: 50, borderRightWidth: 1, borderRightColor: '#1a2a3a'}}>
-            <View style={{paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#1a2a3a'}}>
+          <View style={{backgroundColor: '#0d1b2a', width: 280, height: '100%', paddingTop: 50, borderRightWidth: 1, borderRightColor: '#1a2a3a', flexDirection: 'column'}}>
+            <View style={{paddingHorizontal: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#1a2a3a'}}>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: '#eee'}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
               <Text style={{color: '#607d8b', fontSize: 12, marginTop: 2}}>{machines.length} {t('machines_count')}</Text>
             </View>
-            {[
-              {icon: '🖥', label: lang === 'en' ? 'Servers' : 'Servidores', action: () => { setViewMode('all'); setMenuOpen(false); }},
-              {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
-              {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
-              {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
-              {icon: '💬', label: 'Soporte', action: async () => { setMenuOpen(false); await loadSupportTickets(); setShowSupport(true); }},
-              {icon: '🔒', label: 'Certificados SSL', action: async () => { setMenuOpen(false); await loadSSLMonitors(); setShowSSL(true); }},
-              {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
-              {icon: '💬', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
-              {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
-              {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
-              {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
-              {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
-              {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
-              {icon: '🔒', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
-              {icon: '📄', label: 'CSV', action: async () => { setMenuOpen(false); try { const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } }); const csv = await res.text(); const now = new Date(); const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`; await RNFS.writeFile(filePath, csv, 'utf8'); await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Export' }); } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export: ${e.message}`); } }},
-              {icon: LANGS[lang]?.flag || '🌐', label: `${t('language')}: ${LANGS[lang]?.name}`, action: () => { const langs = Object.keys(LANGS); const idx = langs.indexOf(lang); changeLang(langs[(idx + 1) % langs.length]); }},
-            ].map((item, i) => (
-              <TouchableOpacity key={i} onPress={item.action} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#111d2e'}}>
-                <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{item.icon}</Text>
-                <Text style={{color: '#ccc', fontSize: 15}}>{item.label}</Text>
-              </TouchableOpacity>
-            ))}
-            <View style={{marginTop: 'auto', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
-              <TouchableOpacity onPress={() => { setMenuOpen(false); log.info('Logout'); setAndSaveToken(null); }} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20}}>
+            <ScrollView style={{flex: 1}} showsVerticalScrollIndicator={false}>
+              {[
+                {icon: '🖥', label: lang === 'en' ? 'Servers' : 'Servidores', action: () => { setViewMode('all'); setMenuOpen(false); }},
+                {icon: '📁', label: lang === 'en' ? 'Groups' : 'Grupos', action: () => { setViewMode('groups'); setMenuOpen(false); }},
+                {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
+                {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
+                {icon: '🎧', label: 'Soporte', action: async () => { setMenuOpen(false); await loadSupportTickets(); setShowSupport(true); }},
+                {icon: '🔒', label: 'Certificados SSL', action: async () => { setMenuOpen(false); await loadSSLMonitors(); setShowSSL(true); }},
+                {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
+                {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
+                {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
+                {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
+                {icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }},
+                {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
+                {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
+                {icon: '🔑', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
+                {icon: '📄', label: 'Exportar CSV', action: async () => { setMenuOpen(false); try { const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } }); const csv = await res.text(); const now = new Date(); const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`; await RNFS.writeFile(filePath, csv, 'utf8'); await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Export' }); } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export: ${e.message}`); } }},
+                {icon: LANGS[lang]?.flag || '🌐', label: `${t('language')}: ${LANGS[lang]?.name}`, action: () => { const langs = Object.keys(LANGS); const idx = langs.indexOf(lang); changeLang(langs[(idx + 1) % langs.length]); }},
+              ].map((item, i) => (
+                <TouchableOpacity key={i} onPress={item.action} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#111d2e'}}>
+                  <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{item.icon}</Text>
+                  <Text style={{color: '#ccc', fontSize: 14}}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={{borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
+              <TouchableOpacity onPress={() => { setMenuOpen(false); log.info('Logout'); setAndSaveToken(null); }} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 20}}>
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
-                <Text style={{color: '#ff5252', fontSize: 15, fontWeight: '600'}}>{t('logout')}</Text>
+                <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#333', fontSize: 10, textAlign: 'center', paddingBottom: 10}}>ServerEyes v2.0.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.1.0</Text>
             </View>
           </View>
         </TouchableOpacity>
