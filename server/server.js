@@ -476,6 +476,8 @@ async function initDB() {
   await pool.query(`INSERT INTO app_settings (key, value) VALUES ('support_email', 'soporte@servereyes.app') ON CONFLICT (key) DO NOTHING`).catch(() => {});
 
   // Soporte / chat
+  await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS hidden_by_user BOOLEAN DEFAULT false`).catch(() => {});
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS support_tickets (
       id SERIAL PRIMARY KEY,
@@ -2459,7 +2461,7 @@ app.get('/api/support/tickets', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT t.*, (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id = t.id AND sm.sender_type = 'admin' AND sm.created_at > t.updated_at) as unread
-       FROM support_tickets t WHERE t.user_id = $1 ORDER BY t.updated_at DESC`,
+       FROM support_tickets t WHERE t.user_id = $1 AND (t.hidden_by_user = false OR t.hidden_by_user IS NULL) ORDER BY t.updated_at DESC`,
       [req.user.id]
     );
     res.json(result.rows);
@@ -2557,7 +2559,7 @@ app.post('/api/support/tickets/:id/messages', authenticateToken, optionalUpload,
 app.get('/api/admin/support/tickets', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT t.*, u.email, u.nombre,
+      `SELECT t.*, u.email, u.nombre, COALESCE(t.hidden_by_user, false) as hidden_by_user,
        (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id = t.id) as msg_count,
        (SELECT message FROM support_messages sm WHERE sm.ticket_id = t.id ORDER BY sm.created_at DESC LIMIT 1) as last_message
        FROM support_tickets t JOIN users u ON t.user_id = u.id
@@ -2631,10 +2633,10 @@ app.post('/api/support/tickets/:id/reopen', authenticateToken, async (req, res) 
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
-// User: eliminar ticket
+// User: ocultar ticket (no borra, solo oculta para el usuario)
 app.delete('/api/support/tickets/:id', authenticateToken, async (req, res) => {
   try {
-    await pool.query('DELETE FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    await pool.query('UPDATE support_tickets SET hidden_by_user = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     res.json({ message: 'Ticket eliminado' });
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });

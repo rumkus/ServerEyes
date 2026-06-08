@@ -599,6 +599,7 @@ function renderTicketCard(t, borderColor) {
       <div style="color:#666;font-size:11px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.last_message || 'Sin mensajes'}</div>
     </div>
     <span style="font-size:10px;color:#888">${t.msg_count || 0} msgs</span>
+    ${t.hidden_by_user ? '<span style="font-size:9px;color:#ff9800;background:#3d2e00;padding:1px 6px;border-radius:4px">Eliminado por usuario</span>' : ''}
     ${t.status === 'open' ? '<button class="badge badge-off" style="cursor:pointer;border:none;font-size:9px" onclick="event.stopPropagation();closeAdminTicket(' + t.id + ')">Cerrar</button>' : ''}
   </div>`;
 }
