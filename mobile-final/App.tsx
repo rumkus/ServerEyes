@@ -329,15 +329,21 @@ export default function App() {
     }
   };
 
+  // Push notification banner state
+  const [pushBanner, setPushBanner] = useState<{title: string, body: string, type?: string} | null>(null);
+
   // Listener de mensajes en primer plano
   useEffect(() => {
     const unsubscribe = messaging().onMessage(async (remoteMessage) => {
       log.info(`Push recibido: ${remoteMessage.notification?.title}`);
       if (remoteMessage.notification) {
-        Alert.alert(
-          remoteMessage.notification.title || 'ServerEyes',
-          remoteMessage.notification.body || ''
-        );
+        Vibration.vibrate(200);
+        setPushBanner({
+          title: remoteMessage.notification.title || 'ServerEyes',
+          body: remoteMessage.notification.body || '',
+          type: remoteMessage.data?.type as string || ''
+        });
+        setTimeout(() => setPushBanner(null), 6000);
       }
     });
     return unsubscribe;
@@ -3109,7 +3115,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.3.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.4.0</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -3179,6 +3185,28 @@ export default function App() {
       <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 90, width: 56, height: 56, borderRadius: 28, backgroundColor: '#1a2a3a', alignItems: 'center', justifyContent: 'center', elevation: 8}} onPress={() => setShowPairing(true)}>
         <Text style={{fontSize: 22}}>{'🔗'}</Text>
       </TouchableOpacity>
+      {/* Push notification banner */}
+      {pushBanner && (
+        <TouchableOpacity
+          onPress={() => {
+            setPushBanner(null);
+            if (pushBanner.type === 'support') {
+              loadSupportTickets().then(() => setShowSupport(true));
+            }
+          }}
+          style={{position: 'absolute', top: 50, left: 16, right: 16, backgroundColor: '#9C27B0', borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, zIndex: 9999, elevation: 20, shadowColor: '#000', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3, shadowRadius: 8}}>
+          <Text style={{fontSize: 28}}>
+            {pushBanner.type === 'support' ? '🎧' : pushBanner.type === 'offline' ? '🔴' : pushBanner.type === 'ip_change' ? '🌐' : '🔔'}
+          </Text>
+          <View style={{flex: 1}}>
+            <Text style={{color: '#fff', fontSize: 14, fontWeight: '700'}}>{pushBanner.title}</Text>
+            <Text style={{color: '#e1bee7', fontSize: 12, marginTop: 2}} numberOfLines={2}>{pushBanner.body}</Text>
+          </View>
+          <TouchableOpacity onPress={() => setPushBanner(null)} style={{padding: 4}}>
+            <Text style={{color: '#e1bee7', fontSize: 16}}>✕</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
       <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
     </View>
   );
