@@ -1621,12 +1621,25 @@ function renderSupportChat() {
       <button style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer" onclick="toggleSupport()">✕</button>
     </div>
     <div class="support-messages" id="support-msgs">${buildSupportMsgsHtml()}</div>
-    <div class="support-input-area">
-      <label style="cursor:pointer;font-size:18px;padding:4px" title="Adjuntar archivo">📎<input type="file" id="support-files" multiple accept="image/*,.pdf,.txt" style="display:none" onchange="updateFileLabel()"/></label>
-      <textarea id="support-msg-input" placeholder="Escribe tu mensaje..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSupportMsg()}"></textarea>
-      <button onclick="sendSupportMsg()">Enviar</button>
-    </div>
-    <div id="support-file-label" style="padding:0 10px 6px;font-size:11px;color:#888"></div>`;
+    ${ticket?.status === 'closed' ? `
+      <div style="padding:14px;text-align:center;border-top:1px solid var(--border2)">
+        <p style="color:#888;font-size:12px;margin-bottom:10px">Este ticket fue cerrado por soporte</p>
+        <div style="display:flex;gap:8px;justify-content:center">
+          <button style="padding:8px 16px;background:#9C27B0;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600" onclick="reopenTicket(${ticket.id})">Reabrir ticket</button>
+          <button style="padding:8px 16px;background:var(--border2);color:var(--text);border:none;border-radius:8px;cursor:pointer;font-size:12px" onclick="supportActiveTicket=null;supportNewMode=true;renderSupportPanel()">Nuevo ticket</button>
+        </div>
+      </div>
+    ` : `
+      <div class="support-input-area">
+        <label style="cursor:pointer;font-size:18px;padding:4px" title="Adjuntar archivo">📎<input type="file" id="support-files" multiple accept="image/*,.pdf,.txt" style="display:none" onchange="updateFileLabel()"/></label>
+        <textarea id="support-msg-input" placeholder="Escribe tu mensaje... (max 1000 palabras)" rows="1" oninput="updateWordCount()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSupportMsg()}"></textarea>
+        <button onclick="sendSupportMsg()">Enviar</button>
+      </div>
+      <div style="padding:0 10px 4px;display:flex;justify-content:space-between">
+        <span id="support-file-label" style="font-size:11px;color:#888"></span>
+        <span id="support-word-count" style="font-size:10px;color:#888"></span>
+      </div>
+    `}`;
   const msgs = document.getElementById('support-msgs');
   if (msgs) setTimeout(() => msgs.scrollTop = msgs.scrollHeight, 50);
 }
@@ -1644,15 +1657,24 @@ function updateFileLabel() {
 }
 
 async function sendSupportMsg() {
-  const msg = document.getElementById('support-msg-input')?.value?.trim();
+  let msg = document.getElementById('support-msg-input')?.value?.trim();
   const fileInput = document.getElementById('support-files');
   const files = Array.from(fileInput?.files || []);
   if (!msg && files.length === 0) return;
   if (files.length > 4) { alert('Maximo 4 adjuntos'); return; }
   if (files.find(f => f.size > 3 * 1024 * 1024)) { alert('Cada adjunto no puede superar 3MB'); return; }
 
+  // Word limit: convert to TXT attachment if too long
+  const wordCount = msg ? msg.split(/\s+/).length : 0;
   const formData = new FormData();
-  formData.append('message', msg || '');
+  if (wordCount > 1000) {
+    const blob = new Blob([msg], { type: 'text/plain' });
+    if (blob.size > 1024 * 1024) { alert('El texto supera 1MB. Envia un email a soporte.'); return; }
+    formData.append('files', blob, 'mensaje-completo.txt');
+    formData.append('message', msg.split(/\s+/).slice(0, 50).join(' ') + '... (ver adjunto)');
+  } else {
+    formData.append('message', msg || '');
+  }
   files.forEach(f => formData.append('files', f));
 
   const r = await fetch('/api/support/tickets/' + supportActiveTicket + '/messages', {
@@ -1664,6 +1686,20 @@ async function sendSupportMsg() {
     updateFileLabel();
     loadSupportMessages();
   }
+}
+
+async function reopenTicket(id) {
+  const r = await api('/api/support/tickets/' + id + '/reopen', { method: 'POST' });
+  if (r.ok) { loadSupportTickets(); loadSupportMessages(); }
+}
+
+function updateWordCount() {
+  const el = document.getElementById('support-msg-input');
+  const counter = document.getElementById('support-word-count');
+  if (!el || !counter) return;
+  const words = el.value.trim() ? el.value.trim().split(/\s+/).length : 0;
+  counter.textContent = words + '/1000';
+  counter.style.color = words > 1000 ? '#F44336' : words > 800 ? '#FF9800' : '#888';
 }
 
 setInterval(() => { if (supportOpen && supportActiveTicket) loadSupportMessages(); }, 5000);

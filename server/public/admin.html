@@ -517,7 +517,22 @@ function renderSupportAdmin() {
       </div>`).join('')}
     </div>` : ''}
 
-    ${adminSupportTickets.length === 0 ? '<div class="section"><p style="color:#888;text-align:center;padding:30px">&#128172; Sin tickets de soporte</p></div>' : ''}`;
+    ${adminSupportTickets.length === 0 ? '<div class="section"><p style="color:#888;text-align:center;padding:30px">&#128172; Sin tickets de soporte</p></div>' : ''}
+
+    <div class="section">
+      <h2>&#128200; Metricas de Soporte</h2>
+      <div id="support-metrics"><p style="color:#888">Cargando...</p></div>
+    </div>
+
+    <div class="section">
+      <h2>&#128231; Email de Soporte</h2>
+      <p style="color:#888;font-size:12px;margin-bottom:8px">Si el usuario supera el limite de texto, se le sugiere enviar un email a esta direccion.</p>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="support-email-input" placeholder="soporte@servereyes.app" style="flex:1;background:#0f0f23;border:1px solid #2a2a4a;border-radius:8px;padding:10px;color:#eee;font-size:14px;outline:none"/>
+        <button class="btn-upload" style="width:auto;padding:10px 16px" onclick="saveSupportEmail()">Guardar</button>
+      </div>
+      <div id="support-email-status" style="margin-top:6px;font-size:12px"></div>
+    </div>`;
 }
 
 function renderSupportChat() {
@@ -544,6 +559,38 @@ function renderSupportChat() {
         <button class="btn-upload" style="width:auto;padding:10px 20px" onclick="sendAdminReply()">Enviar</button>
       </div>
     </div>`;
+}
+
+async function loadSupportMetrics() {
+  const r = await api('/api/admin/support/metrics');
+  const el = document.getElementById('support-metrics');
+  if (!r.ok || !el) return;
+  const d = r.data;
+  const fmtMin = (m) => m < 60 ? m + ' min' : Math.round(m / 60) + 'h ' + (m % 60) + 'min';
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px">
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#00d4ff">${d.total}</div><div style="font-size:11px;color:#888">Total tickets</div></div>
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#00e676">${d.open}</div><div style="font-size:11px;color:#888">Abiertos</div></div>
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#888">${d.closed}</div><div style="font-size:11px;color:#888">Cerrados</div></div>
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#ff9800">${d.total_messages}</div><div style="font-size:11px;color:#888">Mensajes</div></div>
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#2196F3">${fmtMin(d.avg_first_response_min)}</div><div style="font-size:11px;color:#888">Tiempo respuesta</div></div>
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#4CAF50">${fmtMin(d.avg_resolution_min)}</div><div style="font-size:11px;color:#888">Tiempo resolucion</div></div>
+    <div style="background:#0f0f23;border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#ff5252">${d.reopened}</div><div style="font-size:11px;color:#888">Reabiertos</div></div>
+  </div>`;
+}
+
+async function loadSupportEmail() {
+  const r = await api('/api/admin/support-email');
+  const el = document.getElementById('support-email-input');
+  if (r.ok && el) el.value = r.data.email || '';
+}
+
+async function saveSupportEmail() {
+  const email = document.getElementById('support-email-input')?.value?.trim();
+  const st = document.getElementById('support-email-status');
+  if (!email) { if (st) st.innerHTML = '<span style="color:#ff5252">Ingresa un email</span>'; return; }
+  const r = await api('/api/admin/support-email', { method: 'POST', body: JSON.stringify({ email }) });
+  if (st) st.innerHTML = r.ok ? '<span style="color:#00e676">&#9989; Guardado</span>' : '<span style="color:#ff5252">Error</span>';
+  setTimeout(() => { if (st) st.innerHTML = ''; }, 3000);
 }
 
 async function loadAdminSupport() {
@@ -651,8 +698,23 @@ async function sendAdminReply() {
   openAdminTicket(adminSupportActive);
 }
 
-async function closeAdminTicket(id) {
-  if (!confirm('Cerrar este ticket?')) return;
+function closeAdminTicket(id) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div style="background:#16213e;border-radius:16px;padding:28px;max-width:400px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4)">
+    <div style="font-size:40px;margin-bottom:12px">✅</div>
+    <h3 style="color:#eee;margin-bottom:8px">Cerrar ticket</h3>
+    <p style="color:#888;font-size:13px;margin-bottom:20px">El usuario no podra enviar mas mensajes en este ticket. Podra reabrirlo o crear uno nuevo.</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button style="padding:10px 24px;background:#4CAF50;color:#fff;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:14px" onclick="doCloseTicket(${id});this.closest('div[style*=fixed]').remove()">Cerrar ticket</button>
+      <button style="padding:10px 24px;background:#2a2a4a;color:#888;border:none;border-radius:10px;cursor:pointer;font-size:14px" onclick="this.closest('div[style*=fixed]').remove()">Cancelar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function doCloseTicket(id) {
   await api('/api/admin/support/tickets/' + id + '/close', { method: 'POST' });
   adminSupportActive = null;
   loadAdminSupport();
@@ -684,7 +746,7 @@ function render() {
 
   if (tab === 'agent') loadHistory();
   if (tab === 'notifs') setTimeout(loadNotifs, 50);
-  if (tab === 'support') setTimeout(loadAdminSupport, 50);
+  if (tab === 'support') { setTimeout(loadAdminSupport, 50); setTimeout(loadSupportMetrics, 100); setTimeout(loadSupportEmail, 150); }
 }
 
 function setTab(t) { tab = t; render(); }

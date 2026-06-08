@@ -1024,10 +1024,13 @@ export default function App() {
   };
   const sendSupportMessage = async () => {
     if (!supportMsg.trim() || !supportTicketId) return;
+    const words = supportMsg.trim().split(/\s+/).length;
+    if (words > 1000) { Alert.alert('Limite excedido', 'El mensaje supera las 1000 palabras. Envia un email a soporte.'); return; }
     const res = await apiRequest(`/api/support/tickets/${supportTicketId}/messages`, {
       method: 'POST', body: JSON.stringify({ message: supportMsg.trim() })
     }, token);
     if (res.ok) { setSupportMsg(''); loadSupportMessages(supportTicketId); }
+    else if (res.data?.error) Alert.alert('Error', res.data.error);
   };
 
   if (supportTicketId) {
@@ -1060,12 +1063,38 @@ export default function App() {
             );
           })}
         </ScrollView>
-        <View style={{flexDirection: 'row', padding: 10, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center', gap: 8}}>
-          <TextInput style={{flex: 1, backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 13, color: th.text}} value={supportMsg} onChangeText={setSupportMsg} placeholder="Escribe tu mensaje..." placeholderTextColor="#888" multiline />
-          <TouchableOpacity onPress={sendSupportMessage} style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12}}>
-            <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>Enviar</Text>
-          </TouchableOpacity>
-        </View>
+        {supportTickets.find(t => t.id === supportTicketId)?.status === 'closed' ? (
+          <View style={{padding: 14, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center'}}>
+            <Text style={{color: '#888', fontSize: 12, marginBottom: 10}}>Este ticket fue cerrado por soporte</Text>
+            <View style={{flexDirection: 'row', gap: 8}}>
+              <TouchableOpacity style={{flex: 1, backgroundColor: '#9C27B0', borderRadius: 10, padding: 10, alignItems: 'center'}}
+                onPress={async () => {
+                  await apiRequest(`/api/support/tickets/${supportTicketId}/reopen`, { method: 'POST' }, token);
+                  loadSupportTickets(); loadSupportMessages(supportTicketId);
+                }}>
+                <Text style={{color: '#fff', fontSize: 12, fontWeight: '700'}}>Reabrir ticket</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{flex: 1, backgroundColor: th.border, borderRadius: 10, padding: 10, alignItems: 'center'}}
+                onPress={() => { setSupportTicketId(null); }}>
+                <Text style={{color: th.text, fontSize: 12}}>Nuevo ticket</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View>
+            <View style={{flexDirection: 'row', padding: 10, borderTopWidth: 1, borderTopColor: th.border, alignItems: 'center', gap: 8}}>
+              <TextInput style={{flex: 1, backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 13, color: th.text}} value={supportMsg} onChangeText={setSupportMsg} placeholder="Escribe tu mensaje..." placeholderTextColor="#888" multiline maxLength={6000} />
+              <TouchableOpacity onPress={sendSupportMessage} style={{backgroundColor: '#9C27B0', borderRadius: 10, padding: 12}}>
+                <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>Enviar</Text>
+              </TouchableOpacity>
+            </View>
+            {supportMsg.trim().split(/\s+/).length > 800 && (
+              <Text style={{color: supportMsg.trim().split(/\s+/).length > 1000 ? '#ff5252' : '#ff9800', fontSize: 10, paddingHorizontal: 14, paddingBottom: 4}}>
+                {supportMsg.trim().split(/\s+/).length}/1000 palabras
+              </Text>
+            )}
+          </View>
+        )}
       </View>
     );
   }

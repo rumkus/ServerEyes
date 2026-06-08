@@ -472,6 +472,9 @@ async function initDB() {
     )
   `);
 
+  // Email de soporte configurable
+  await pool.query(`INSERT INTO app_settings (key, value) VALUES ('support_email', 'soporte@servereyes.app') ON CONFLICT (key) DO NOTHING`).catch(() => {});
+
   // Soporte / chat
   await pool.query(`
     CREATE TABLE IF NOT EXISTS support_tickets (
@@ -483,8 +486,12 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS reopen_count INTEGER DEFAULT 0`).catch(() => {});
+
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS support_messages (
+    CREATE TABLE IF NOT EXISTS support_messages (`
       id SERIAL PRIMARY KEY,
       ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE CASCADE,
       sender_type VARCHAR(10) NOT NULL,
@@ -2487,6 +2494,27 @@ app.get('/api/support/tickets/:id/messages', authenticateToken, async (req, res)
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
+// Filtro de malas palabras
+const badWords = ['puta','mierda','carajo','pendejo','idiota','estupido','imbecil','pelotudo','boludo','forro','concha','verga','cojudo','hijo de puta','la concha','hdp','ctm','ptm','fuck','shit','bitch','asshole','bastard','dick','cunt'];
+function filterBadWords(text) {
+  if (!text) return { clean: text, hasBadWords: false };
+  let clean = text;
+  let found = false;
+  for (const w of badWords) {
+    const regex = new RegExp(w, 'gi');
+    if (regex.test(clean)) { found = true; clean = clean.replace(regex, '*'.repeat(w.length)); }
+  }
+  return { clean, hasBadWords: found };
+}
+
+function validateMessage(message) {
+  if (!message) return { ok: true, message: '' };
+  const wordCount = message.trim().split(/\s+/).length;
+  if (wordCount > 1000) return { ok: false, error: 'El mensaje supera las 1000 palabras. Adjuntalo como archivo TXT.' };
+  const filtered = filterBadWords(message);
+  return { ok: true, message: filtered.clean, warned: filtered.hasBadWords };
+}
+
 // Enviar mensaje (usuario)
 const optionalUpload = (req, res, next) => {
   if (req.headers['content-type']?.includes('multipart')) { upload.array('files', 4)(req, res, next); }
@@ -2494,9 +2522,13 @@ const optionalUpload = (req, res, next) => {
 };
 app.post('/api/support/tickets/:id/messages', authenticateToken, optionalUpload, async (req, res) => {
   try {
-    const ticket = await pool.query('SELECT id FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const ticket = await pool.query('SELECT id, status FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
-    const message = req.body.message || '';
+    if (ticket.rows[0].status === 'closed') return res.status(400).json({ error: 'Este ticket esta cerrado. Reabrilo o crea uno nuevo.' });
+    const raw = req.body.message || '';
+    const validation = validateMessage(raw);
+    if (!validation.ok) return res.status(400).json({ error: validation.error });
+    const message = validation.message;
     const attachments = (req.files || []).map(f => ({
       name: f.originalname, size: f.size, type: f.mimetype,
       data: f.buffer.toString('base64')
@@ -2541,9 +2573,12 @@ app.get('/api/admin/support/tickets/:id/messages', authenticateToken, requireAdm
 });
 
 // Admin: responder ticket
-app.post('/api/admin/support/tickets/:id/reply', authenticateToken, requireAdmin, upload.array('files', 4), async (req, res) => {
+app.post('/api/admin/support/tickets/:id/reply', authenticateToken, requireAdmin, optionalUpload, async (req, res) => {
   try {
-    const message = req.body.message || '';
+    const raw = req.body.message || '';
+    const validation = validateMessage(raw);
+    if (!validation.ok) return res.status(400).json({ error: validation.error });
+    const message = validation.message;
     const attachments = (req.files || []).map(f => ({
       name: f.originalname, size: f.size, type: f.mimetype,
       data: f.buffer.toString('base64')
@@ -2552,8 +2587,8 @@ app.post('/api/admin/support/tickets/:id/reply', authenticateToken, requireAdmin
       'INSERT INTO support_messages (ticket_id, sender_type, sender_id, message, attachments) VALUES ($1, $2, $3, $4, $5)',
       [req.params.id, 'admin', req.user.id, message, JSON.stringify(attachments)]
     );
-    await pool.query('UPDATE support_tickets SET updated_at = NOW() WHERE id = $1', [req.params.id]);
-    // Push al usuario
+    // Track first response time
+    await pool.query('UPDATE support_tickets SET updated_at = NOW(), first_response_at = COALESCE(first_response_at, NOW()) WHERE id = $1', [req.params.id]);
     const ticket = await pool.query('SELECT user_id FROM support_tickets WHERE id = $1', [req.params.id]);
     if (ticket.rows[0]) {
       sendPush(ticket.rows[0].user_id, '💬 Respuesta de soporte', message.substring(0, 100), { type: 'support' });
@@ -2565,8 +2600,67 @@ app.post('/api/admin/support/tickets/:id/reply', authenticateToken, requireAdmin
 // Admin: cerrar ticket
 app.post('/api/admin/support/tickets/:id/close', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    await pool.query('UPDATE support_tickets SET status = $1, updated_at = NOW() WHERE id = $2', ['closed', req.params.id]);
+    await pool.query('UPDATE support_tickets SET status = $1, updated_at = NOW(), closed_at = NOW() WHERE id = $2', ['closed', req.params.id]);
+    await pool.query(
+      `INSERT INTO support_messages (ticket_id, sender_type, sender_id, message) VALUES ($1, 'system', $2, 'Ticket cerrado por soporte')`,
+      [req.params.id, req.user.id]
+    );
     res.json({ message: 'Ticket cerrado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// User: reabrir ticket
+app.post('/api/support/tickets/:id/reopen', authenticateToken, async (req, res) => {
+  try {
+    const ticket = await pool.query('SELECT id FROM support_tickets WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (ticket.rows.length === 0) return res.status(404).json({ error: 'Ticket no encontrado' });
+    await pool.query('UPDATE support_tickets SET status = $1, updated_at = NOW(), reopen_count = reopen_count + 1 WHERE id = $2', ['open', req.params.id]);
+    await pool.query(
+      `INSERT INTO support_messages (ticket_id, sender_type, sender_id, message) VALUES ($1, 'system', $2, 'Ticket reabierto por el usuario')`,
+      [req.params.id, req.user.id]
+    );
+    res.json({ message: 'Ticket reabierto' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Metrics de soporte
+app.get('/api/admin/support/metrics', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const total = await pool.query('SELECT COUNT(*) as cnt FROM support_tickets');
+    const open = await pool.query("SELECT COUNT(*) as cnt FROM support_tickets WHERE status = 'open'");
+    const closed = await pool.query("SELECT COUNT(*) as cnt FROM support_tickets WHERE status = 'closed'");
+    const avgFirstResponse = await pool.query("SELECT AVG(EXTRACT(EPOCH FROM (first_response_at - created_at)) / 60) as avg_min FROM support_tickets WHERE first_response_at IS NOT NULL");
+    const avgResolution = await pool.query("SELECT AVG(EXTRACT(EPOCH FROM (closed_at - created_at)) / 60) as avg_min FROM support_tickets WHERE closed_at IS NOT NULL");
+    const totalMessages = await pool.query('SELECT COUNT(*) as cnt FROM support_messages');
+    const reopened = await pool.query("SELECT SUM(reopen_count) as cnt FROM support_tickets WHERE reopen_count > 0");
+    const byDay = await pool.query("SELECT DATE(created_at) as day, COUNT(*) as cnt FROM support_tickets WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day");
+    res.json({
+      total: parseInt(total.rows[0].cnt),
+      open: parseInt(open.rows[0].cnt),
+      closed: parseInt(closed.rows[0].cnt),
+      total_messages: parseInt(totalMessages.rows[0].cnt),
+      reopened: parseInt(reopened.rows[0].cnt || 0),
+      avg_first_response_min: Math.round(parseFloat(avgFirstResponse.rows[0].avg_min) || 0),
+      avg_resolution_min: Math.round(parseFloat(avgResolution.rows[0].avg_min) || 0),
+      tickets_by_day: byDay.rows
+    });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Email de soporte configurable
+app.get('/api/admin/support-email', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query("SELECT value FROM app_settings WHERE key = 'support_email'");
+    res.json({ email: r.rows[0]?.value || 'soporte@servereyes.app' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.post('/api/admin/support-email', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requerido' });
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('support_email', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [email]);
+    res.json({ message: 'Email actualizado' });
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
