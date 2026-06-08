@@ -84,7 +84,11 @@ const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) =
         {message ? <Text style={{color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 20}}>{message}</Text> : null}
         <View style={{flexDirection: 'row', width: '100%'}}>
           {btns.map((b: any, i: number) => (
-            <TouchableOpacity key={i} onPress={() => { if (onClose) onClose(); if (b.onPress) b.onPress(); }}
+            <TouchableOpacity key={i} onPress={async () => {
+              if (onClose) onClose();
+              await new Promise(r => setTimeout(r, 100));
+              if (b.onPress) await b.onPress();
+            }}
               style={{flex: 1, backgroundColor: b.style === 'cancel' ? '#1a2a3a' : b.style === 'danger' ? '#ff5252' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginLeft: i > 0 ? 10 : 0}}>
               <Text style={{color: '#fff', fontWeight: '700', fontSize: 14}}>{b.text}</Text>
             </TouchableOpacity>
@@ -1199,25 +1203,28 @@ export default function App() {
                 <TouchableOpacity
                   disabled={supportSending}
                   style={{backgroundColor: supportSending ? '#6a3a7a' : '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, opacity: supportSending ? 0.7 : 1}}
-                  onPress={async () => {
+                  onPress={() => {
                     if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
                     if (supportSending) return;
                     setSupportSending(true);
-                    try {
-                      const res = await apiRequest('/api/support/tickets', {
-                        method: 'POST',
-                        body: JSON.stringify({ subject: supportNewSubject.trim(), message: supportNewMsg.trim() || undefined })
-                      }, token);
-                      if (res.ok && res.data?.id) {
-                        setSupportSent(true);
-                        loadSupportTickets();
-                      } else {
-                        showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
+                    setTimeout(async () => {
+                      try {
+                        const res = await apiRequest('/api/support/tickets', {
+                          method: 'POST',
+                          body: JSON.stringify({ subject: supportNewSubject.trim(), message: supportNewMsg.trim() || undefined })
+                        }, token);
+                        if (res.ok && res.data?.id) {
+                          setSupportSent(true);
+                          loadSupportTickets();
+                        } else {
+                          setSupportSending(false);
+                          showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
+                        }
+                      } catch (e: any) {
+                        setSupportSending(false);
+                        showModal('📡', 'Error', 'No se pudo conectar al servidor.');
                       }
-                    } catch (e: any) {
-                      showModal('📡', 'Error', 'No se pudo conectar al servidor.');
-                    }
-                    setSupportSending(false);
+                    }, 50);
                   }}>
                   <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>{supportSending ? 'Enviando...' : 'Enviar consulta'}</Text>
                 </TouchableOpacity>
@@ -3085,7 +3092,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.5.1</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3143,7 +3150,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.5.1</Text>
             </View>
           </View>
         </TouchableOpacity>
