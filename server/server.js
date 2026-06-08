@@ -491,7 +491,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS reopen_count INTEGER DEFAULT 0`).catch(() => {});
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS support_messages (`
+    CREATE TABLE IF NOT EXISTS support_messages (
       id SERIAL PRIMARY KEY,
       ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE CASCADE,
       sender_type VARCHAR(10) NOT NULL,
