@@ -1058,11 +1058,15 @@ export default function App() {
   const sendSupportMessage = async () => {
     if (!supportMsg.trim() || !supportTicketId) return;
     if (supportMsg.length > 1000) { showModal('📝', 'Limite excedido', 'El mensaje supera los 1000 caracteres.'); return; }
-    const res = await apiRequest(`/api/support/tickets/${supportTicketId}/messages`, {
-      method: 'POST', body: JSON.stringify({ message: supportMsg.trim() })
-    }, token);
-    if (res.ok) { setSupportMsg(''); loadSupportMessages(supportTicketId); }
-    else if (res.data?.error) showModal('⚠️', 'Error', res.data.error);
+    const msgText = supportMsg.trim();
+    setSupportMsg('');
+    try {
+      const res = await apiRequest(`/api/support/tickets/${supportTicketId}/messages`, {
+        method: 'POST', body: JSON.stringify({ message: msgText })
+      }, token);
+      if (res.ok) { loadSupportMessages(supportTicketId); }
+      else { setSupportMsg(msgText); showModal('⚠️', 'Error', res.data?.error || 'No se pudo enviar'); }
+    } catch { setSupportMsg(msgText); showModal('📡', 'Error de conexion', 'No se pudo enviar el mensaje.'); }
   };
 
   const scrollRef = useRef<any>(null);
@@ -1181,16 +1185,24 @@ export default function App() {
             <TouchableOpacity style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10}}
               onPress={async () => {
                 if (!supportNewSubject.trim()) { showModal('✏️', 'Asunto requerido', 'Ingresa el asunto de tu consulta'); return; }
-                const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: supportNewSubject.trim() }) }, token);
-                if (res.ok && res.data?.id) {
-                  const ticketId = res.data.id;
-                  if (supportNewMsg.trim()) {
-                    await apiRequest(`/api/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message: supportNewMsg.trim() }) }, token);
+                try {
+                  const res = await apiRequest('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: supportNewSubject.trim() }) }, token);
+                  if (res.ok && res.data?.id) {
+                    const ticketId = res.data.id;
+                    const msgToSend = supportNewMsg.trim();
+                    setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
+                    setSupportTicketId(ticketId);
+                    setSupportMessages([]);
+                    loadSupportTickets();
+                    if (msgToSend) {
+                      const msgRes = await apiRequest(`/api/support/tickets/${ticketId}/messages`, { method: 'POST', body: JSON.stringify({ message: msgToSend }) }, token);
+                      if (msgRes.ok) loadSupportMessages(ticketId);
+                    }
+                  } else {
+                    showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta.');
                   }
-                  setSupportNewMode(false); setSupportNewSubject(''); setSupportNewMsg('');
-                  setSupportTicketId(ticketId); loadSupportMessages(ticketId); loadSupportTickets();
-                } else {
-                  showModal('⚠️', 'Error', res.data?.error || 'No se pudo crear la consulta. Verifica tu conexion.');
+                } catch (e: any) {
+                  showModal('📡', 'Error de conexion', 'No se pudo conectar. Verifica tu internet.');
                 }
               }}>
               <Text style={{color: '#fff', fontWeight: '700', fontSize: 15}}>Enviar consulta</Text>
@@ -3086,7 +3098,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.1.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.1.1</Text>
             </View>
           </View>
         </TouchableOpacity>
