@@ -89,6 +89,9 @@ tr:hover { background: #1a1a3e; }
 .history-item .size { color: #555; font-size: 12px; }
 .history-item .log { color: #aaa; font-size: 12px; flex: 1; margin: 0 16px; }
 
+@keyframes toastIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+
 /* Responsive */
 @media (max-width: 768px) {
   .content { padding: 12px; }
@@ -467,6 +470,7 @@ async function deleteNotif(id) {
 let adminSupportTickets = [];
 let adminSupportActive = null;
 let adminSupportMessages = [];
+let lastSupportMsgCount = 0;
 
 function renderSupportAdmin() {
   if (adminSupportActive) return renderSupportChat();
@@ -544,7 +548,64 @@ function renderSupportChat() {
 
 async function loadAdminSupport() {
   const r = await api('/api/admin/support/tickets');
-  if (r.ok) { adminSupportTickets = r.data; if (tab === 'support' && !adminSupportActive) render(); }
+  if (!r.ok) return;
+  const newTotal = r.data.reduce((a, t) => a + (t.msg_count || 0), 0);
+  const openCount = r.data.filter(t => t.status === 'open').length;
+  // Detectar mensajes nuevos
+  if (lastSupportMsgCount > 0 && newTotal > lastSupportMsgCount) {
+    const diff = newTotal - lastSupportMsgCount;
+    showSupportAlert(diff, r.data);
+  }
+  lastSupportMsgCount = newTotal;
+  adminSupportTickets = r.data;
+  // Actualizar badge del tab
+  updateSupportBadge(openCount);
+  if (tab === 'support' && !adminSupportActive) render();
+}
+
+function updateSupportBadge(count) {
+  const btn = document.querySelector('[onclick*="setTab(\'support\')"]');
+  if (!btn) return;
+  let badge = btn.querySelector('.support-tab-badge');
+  if (count > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'support-tab-badge';
+      badge.style.cssText = 'background:#ff5252;color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;margin-left:4px;animation:pulse 1s ease-in-out infinite';
+      btn.appendChild(badge);
+    }
+    badge.textContent = count;
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+function showSupportAlert(count, tickets) {
+  const latest = tickets.find(t => t.status === 'open');
+  // Sonido
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 800; gain.gain.value = 0.15;
+    osc.start(); osc.stop(ctx.currentTime + 0.15);
+    setTimeout(() => { const o2 = ctx.createOscillator(); o2.connect(gain); o2.frequency.value = 1000; o2.start(); o2.stop(ctx.currentTime + 0.15); }, 200);
+  } catch {}
+  // Toast
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#9C27B0;color:#fff;border-radius:14px;padding:14px 20px;box-shadow:0 6px 24px rgba(156,39,176,.4);z-index:9999;max-width:360px;cursor:pointer;animation:toastIn .4s ease-out;display:flex;align-items:center;gap:12px';
+  toast.innerHTML = `<span style="font-size:24px">🎧</span><div><div style="font-weight:700;font-size:14px">${count} mensaje(s) nuevo(s) en soporte</div><div style="font-size:12px;opacity:.9;margin-top:2px">${latest ? latest.email + ': ' + (latest.last_message || latest.subject).substring(0, 60) : ''}</div></div>`;
+  toast.onclick = () => { toast.remove(); setTab('support'); if (latest) openAdminTicket(latest.id); };
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentElement) toast.remove(); }, 8000);
+  // Title flash
+  const origTitle = document.title;
+  let flash = true;
+  const titleInterval = setInterval(() => {
+    document.title = flash ? `(${count}) Nuevo mensaje - Soporte` : origTitle;
+    flash = !flash;
+  }, 1000);
+  setTimeout(() => { clearInterval(titleInterval); document.title = origTitle; }, 10000);
 }
 
 async function openAdminTicket(id) {
@@ -678,9 +739,11 @@ async function resetPassword(userId, email) {
 if (token) { loadData(); } else { renderLogin(); }
 setInterval(() => { if (token && data && tab !== 'notifs' && tab !== 'support') loadData(); }, 15000);
 setInterval(() => {
-  if (token && tab === 'support') {
-    if (adminSupportActive) openAdminTicket(adminSupportActive);
-    else loadAdminSupport();
+  if (!token) return;
+  if (tab === 'support' && adminSupportActive) {
+    openAdminTicket(adminSupportActive);
+  } else {
+    loadAdminSupport();
   }
 }, 5000);
 </script>
