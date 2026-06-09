@@ -73,6 +73,26 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
   }
 }
 
+class ErrorBoundary extends React.Component<{children: any}, {error: any}> {
+  state = { error: null as any };
+  static getDerivedStateFromError(error: any) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{flex: 1, backgroundColor: '#0a1628', justifyContent: 'center', alignItems: 'center', padding: 30}}>
+          <Text style={{fontSize: 48, marginBottom: 16}}>💥</Text>
+          <Text style={{color: '#ff5252', fontSize: 18, fontWeight: '800', marginBottom: 8}}>Error en la app</Text>
+          <Text style={{color: '#888', fontSize: 13, textAlign: 'center', marginBottom: 20}}>{String(this.state.error?.message || this.state.error)}</Text>
+          <TouchableOpacity onPress={() => this.setState({ error: null })} style={{backgroundColor: '#9C27B0', borderRadius: 12, padding: 14, paddingHorizontal: 30}}>
+            <Text style={{color: '#fff', fontWeight: '700'}}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) => {
   if (!visible) return null;
   const btns = buttons || [{ text: 'OK' }];
@@ -101,7 +121,7 @@ const CustomModal = ({ visible, icon, title, message, buttons, onClose }: any) =
   );
 };
 
-export default function App() {
+function AppContent() {
   const [token, setToken] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [appReady, setAppReady] = useState(false);
@@ -864,8 +884,8 @@ export default function App() {
 
   if (showUrlMonitors) {
     return (
-      <View style={{flex: 1, backgroundColor: '#0a1628'}}>
-        <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Monitoreo de URLs" subtitle={`${urlMonitors.length} monitores`} />
         <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 100}}>
           {urlMonitors.length === 0 ? (
@@ -3148,7 +3168,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.8.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.8.1</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3206,7 +3226,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.8.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.8.1</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -3323,3 +3343,11 @@ const s = StyleSheet.create({
   fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8 },
   fabTxt: { fontSize: 30, color: '#0a1628', fontWeight: '700', marginTop: -2 },
 });
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
