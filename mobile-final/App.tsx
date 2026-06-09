@@ -444,7 +444,7 @@ export default function App() {
         } else {
           await AsyncStorage.removeItem('se_bio_token');
           setHasSavedCreds(false);
-          Alert.alert('Sesion expirada', 'Ingresa con tu email y contraseña');
+          showModal('🔒', 'Sesion expirada', 'Ingresa con tu email y contraseña');
         }
       }
     } catch {}
@@ -563,7 +563,7 @@ export default function App() {
     try {
       const res = await apiRequest('/api/machines', { method: 'POST', body: JSON.stringify({ machine_name: newName.trim() }) }, token);
       if (res.ok) { setNewKey(res.data.machine_key); setNewName(''); loadMachines(); }
-    } catch { Alert.alert('Error', 'No se pudo registrar'); }
+    } catch { showModal('⚠️', 'Error', 'No se pudo registrar'); }
   };
 
   const updateMachine = async (id: number, data: any) => {
@@ -731,8 +731,8 @@ export default function App() {
     setDnsUpdating(true);
     try {
       const res = await apiRequest(`/api/machines/${machineId}/update-dns`, { method: 'POST' }, token);
-      if (res.ok) Alert.alert('DNS Actualizado', `${res.data.host || 'Host'} apunta a ${res.data.ip}`);
-      else Alert.alert('Error', res.data.error || 'No se pudo actualizar');
+      if (res.ok) showModal('✅', 'DNS Actualizado', `${res.data.host || 'Host'} apunta a ${res.data.ip}`);
+      else showModal('⚠️', 'Error', res.data.error || 'No se pudo actualizar');
     } catch { showModal('📡', 'Error de conexion', 'No se pudo conectar con el servidor. Verifica tu conexion a internet.'); }
     setDnsUpdating(false);
   };
@@ -793,7 +793,7 @@ export default function App() {
         setPairingCode('');
         setShowPairing(false);
         loadMachines();
-        Alert.alert('Vinculado', `"${res.data.machine.machine_name}" vinculado exitosamente`);
+        showModal('✅', 'Vinculado', `"${res.data.machine.machine_name}" vinculado exitosamente`);
       } else {
         setPairingStatus(res.data.error || 'Error');
       }
@@ -801,9 +801,9 @@ export default function App() {
   };
 
   const deleteMachine = (m: any) => {
-    Alert.alert('Eliminar', `¿Eliminar "${m.machine_name}"?`, [
-      { text: 'No' },
-      { text: 'Si', style: 'destructive', onPress: async () => {
+    showModal('🗑', 'Eliminar maquina?', `"${m.machine_name}" se eliminara permanentemente.`, [
+      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+      { text: 'Eliminar', style: 'danger', onPress: async () => {
         await apiRequest(`/api/machines/${m.id}`, { method: 'DELETE' }, token);
         loadMachines();
       }}
@@ -845,14 +845,14 @@ export default function App() {
             ))}
           </View>
           <TouchableOpacity style={s.btn} onPress={async () => {
-            if (!urlUrl.trim()) { Alert.alert('Error', 'URL requerida'); return; }
+            if (!urlUrl.trim()) { showModal('⚠️', 'Error', 'URL requerida'); return; }
             const res = await apiRequest('/api/url-monitors', { method: 'POST', body: JSON.stringify({
               url: urlUrl.trim(), name: urlName.trim() || null, method: 'GET',
               expected_status: 200, timeout_ms: 10000,
               interval_seconds: parseInt(urlInterval) || 300
             }) }, token);
             if (res.ok) { setShowAddUrl(false); setUrlUrl(''); setUrlName(''); loadUrlMonitors(); }
-            else Alert.alert('Error', res.data?.error || 'Error');
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Agregar monitor</Text>
           </TouchableOpacity>
@@ -901,9 +901,9 @@ export default function App() {
                   <Text style={{color: u.is_active ? '#ff9800' : '#00e676', fontSize: 12, fontWeight: '600'}}>{u.is_active ? '⏸ Pausar' : '▶ Activar'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}} onPress={() => {
-                  Alert.alert('Eliminar', `¿Eliminar monitor "${u.name || u.url}"?`, [
-                    { text: 'No' },
-                    { text: 'Si', style: 'destructive', onPress: async () => {
+                  showModal('🗑', 'Eliminar monitor?', u.name || u.url, [
+                    { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                    { text: 'Eliminar', style: 'danger', onPress: async () => {
                       await apiRequest(`/api/url-monitors/${u.id}`, { method: 'DELETE' }, token);
                       loadUrlMonitors();
                     }}
@@ -920,6 +920,7 @@ export default function App() {
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -963,14 +964,14 @@ export default function App() {
           <TouchableOpacity style={s.btn} onPress={async () => {
             const startStr = `${mwStartDate}T${mwStartTime}:00`;
             const endStr = `${mwEndDate}T${mwEndTime}:00`;
-            if (!mwStartDate || !mwStartTime || !mwEndDate || !mwEndTime) { Alert.alert('Error', 'Completa fecha y hora'); return; }
+            if (!mwStartDate || !mwStartTime || !mwEndDate || !mwEndTime) { showModal('⚠️', 'Error', 'Completa fecha y hora'); return; }
             const res = await apiRequest('/api/maintenance', { method: 'POST', body: JSON.stringify({
               machine_id: mwMachineId ? parseInt(mwMachineId) : null,
               title: mwTitle || 'Mantenimiento',
               start_time: startStr, end_time: endStr
             }) }, token);
             if (res.ok) { setShowAddMaintenance(false); loadMaintenanceWindows(); }
-            else Alert.alert('Error', res.data?.error || 'Error');
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Crear ventana</Text>
           </TouchableOpacity>
@@ -1001,9 +1002,9 @@ export default function App() {
                   <Text style={{color: '#eee', fontSize: 15, fontWeight: '700'}}>{w.title}</Text>
                   <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>{w.machine_name || 'Todas'} · {fmtDate(w.start_time)} → {fmtDate(w.end_time)}</Text>
                   <TouchableOpacity onPress={() => {
-                    Alert.alert('Eliminar', '¿Eliminar esta ventana?', [
-                      { text: 'No' },
-                      { text: 'Si', style: 'destructive', onPress: async () => { await apiRequest(`/api/maintenance/${w.id}`, { method: 'DELETE' }, token); loadMaintenanceWindows(); }}
+                    showModal('🗑', 'Eliminar ventana?', 'Se eliminara permanentemente.', [
+                      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                      { text: 'Eliminar', style: 'danger', onPress: async () => { await apiRequest(`/api/maintenance/${w.id}`, { method: 'DELETE' }, token); loadMaintenanceWindows(); }}
                     ]);
                   }} style={{marginTop: 8}}>
                     <Text style={{color: '#ff5252', fontSize: 12}}>Eliminar</Text>
@@ -1020,9 +1021,9 @@ export default function App() {
                   <Text style={{color: '#eee', fontSize: 15, fontWeight: '700'}}>{w.title}</Text>
                   <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>{w.machine_name || 'Todas'} · {fmtDate(w.start_time)} → {fmtDate(w.end_time)}</Text>
                   <TouchableOpacity onPress={() => {
-                    Alert.alert('Eliminar', '¿Eliminar esta ventana?', [
-                      { text: 'No' },
-                      { text: 'Si', style: 'destructive', onPress: async () => { await apiRequest(`/api/maintenance/${w.id}`, { method: 'DELETE' }, token); loadMaintenanceWindows(); }}
+                    showModal('🗑', 'Eliminar ventana?', 'Se eliminara permanentemente.', [
+                      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                      { text: 'Eliminar', style: 'danger', onPress: async () => { await apiRequest(`/api/maintenance/${w.id}`, { method: 'DELETE' }, token); loadMaintenanceWindows(); }}
                     ]);
                   }} style={{marginTop: 8}}>
                     <Text style={{color: '#ff5252', fontSize: 12}}>Eliminar</Text>
@@ -1064,6 +1065,7 @@ export default function App() {
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -1365,7 +1367,7 @@ export default function App() {
             if (!sslHostname.trim()) return;
             const res = await apiRequest('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname: sslHostname.trim().replace(/^https?:\/\//, '').split('/')[0], name: sslName.trim() || undefined }) }, token);
             if (res.ok) { setSslAdding(false); setSslHostname(''); setSslName(''); loadSSLMonitors(); }
-            else Alert.alert('Error', res.data?.error || 'Error');
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Agregar</Text>
           </TouchableOpacity>
@@ -1430,7 +1432,7 @@ export default function App() {
                       Alert.prompt ? Alert.prompt('Dias de alerta', 'Separados por coma', async (text: string) => {
                         const parsed = text.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a: number, b: number) => b - a);
                         if (parsed.length > 0) { await apiRequest(`/api/ssl-monitors/${mon.id}`, { method: 'PUT', body: JSON.stringify({ alert_days: parsed }) }, token); loadSSLMonitors(); }
-                      }, 'plain-text', input) : Alert.alert('Dias de alerta', `Actual: ${input}\n\nPara editar, usa la version web.`);
+                      }, 'plain-text', input) : showModal('⚙', 'Dias de alerta', `Actual: ${input}\n\nPara editar, usa la version web.`);
                     }}>
                     <Text style={{color: '#00d4ff', fontSize: 12}}>⚙ Dias</Text>
                   </TouchableOpacity>
@@ -1749,15 +1751,15 @@ export default function App() {
               email_notifications: smtpEnabled
             }) }, token);
             if (res.ok) showModal('✅', 'Guardado', 'Configuracion SMTP guardada correctamente');
-            else Alert.alert('Error', res.data?.error || 'Error');
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Guardar</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={[s.btn, {backgroundColor: '#ff9800', marginTop: 8}]} onPress={async () => {
             const res = await apiRequest('/api/auth/smtp/test', { method: 'POST' }, token);
-            if (res.ok) Alert.alert('Enviado', res.data.message);
-            else Alert.alert('Error', res.data?.error || 'Error');
+            if (res.ok) showModal('✅', 'Enviado', res.data.message);
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Enviar email de prueba</Text>
           </TouchableOpacity>
@@ -1784,7 +1786,7 @@ export default function App() {
               method: 'POST', body: JSON.stringify({ current_password: currentPass, new_password: newPass })
             }, token);
             if (res.ok) {
-              Alert.alert('Listo', 'Contraseña actualizada');
+              showModal('✅', 'Listo', 'Contraseña actualizada');
               setShowChangePass(false); setCurrentPass(''); setNewPass('');
             } else {
               setChangePassError(res.data.error || 'Error');
@@ -2085,7 +2087,7 @@ export default function App() {
                   });
                 } catch (e: any) {
                   if (e.message !== 'User did not share') {
-                    Alert.alert('Error', `No se pudo compartir: ${e.message}`);
+                    showModal('⚠️', 'Error', `No se pudo compartir: ${e.message}`);
                   }
                 }
               }}
@@ -2496,7 +2498,7 @@ export default function App() {
             const alertDisksClean: {[k:string]: number} = {};
             Object.entries(detailAlertDisks).forEach(([k, v]) => { if (v && parseInt(v) > 0) alertDisksClean[k] = parseInt(v as string); });
             await updateMachine(detailMachine.id, { monitored_disks: detailMonitored, alert_disks: alertDisksClean });
-            Alert.alert('Guardado', detailMonitored.length > 0 ? `Mostrando: ${detailMonitored.join(', ')}` : 'Mostrando todos los discos');
+            showModal('✅', 'Guardado', detailMonitored.length > 0 ? `Mostrando: ${detailMonitored.join(', ')}` : 'Mostrando todos los discos');
             setDetailMachine(null);
           }}>
             <Text style={s.btnTxt}>Guardar seleccion</Text>
@@ -2710,7 +2712,7 @@ export default function App() {
           ))}
           <TouchableOpacity style={s.btn} onPress={async () => {
             await apiRequest('/api/machines/share', { method: 'POST', body: JSON.stringify({ user_id: shareUserId, machine_ids: [...shareSelected] }) }, token);
-            Alert.alert('Listo', `${shareSelected.size} maquina(s) compartidas`);
+            showModal('✅', 'Listo', `${shareSelected.size} maquina(s) compartidas`);
             setShareUserId(null);
             // Recargar org
             const res = await apiRequest('/api/organization', {}, token);
@@ -2750,10 +2752,10 @@ export default function App() {
                 if (!orgName.trim()) return;
                 const res = await apiRequest('/api/organization', { method: 'POST', body: JSON.stringify({ name: orgName.trim(), address: orgAddress, phone: orgPhone }) }, token);
                 if (res.ok) {
-                  Alert.alert('Listo', 'Empresa creada');
+                  showModal('✅', 'Listo', 'Empresa creada');
                   const r2 = await apiRequest('/api/organization', {}, token);
                   if (r2.ok) setOrgData(r2.data);
-                } else Alert.alert('Error', res.data?.error || 'Error');
+                } else showModal('⚠️', 'Error', res.data?.error || 'Error');
               }}><Text style={s.btnTxt}>Crear empresa</Text></TouchableOpacity>
 
               <View style={{marginTop: 30, borderTopWidth: 1, borderTopColor: '#2a2a4a', paddingTop: 20}}>
@@ -2762,8 +2764,8 @@ export default function App() {
                 <TouchableOpacity style={[s.btn, {backgroundColor: '#ff9800'}]} onPress={async () => {
                   if (!joinCode.trim()) return;
                   const res = await apiRequest('/api/organization/join', { method: 'POST', body: JSON.stringify({ code: joinCode.trim() }) }, token);
-                  if (res.ok) { Alert.alert('Listo', res.data.message); const r2 = await apiRequest('/api/organization', {}, token); if (r2.ok) setOrgData(r2.data); setJoinCode(''); }
-                  else Alert.alert('Error', res.data?.error || 'Error');
+                  if (res.ok) { showModal('✅', 'Listo', res.data.message); const r2 = await apiRequest('/api/organization', {}, token); if (r2.ok) setOrgData(r2.data); setJoinCode(''); }
+                  else showModal('⚠️', 'Error', res.data?.error || 'Error');
                 }}><Text style={s.btnTxt}>Unirme</Text></TouchableOpacity>
               </View>
             </>
@@ -2793,9 +2795,9 @@ export default function App() {
                         <Text style={{color: '#00d4ff', fontSize: 11, fontWeight: '600'}}>Compartir</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => {
-                        Alert.alert('Remover', `¿Remover a ${member.nombre || member.email}?`, [
-                          { text: 'No' },
-                          { text: 'Si', style: 'destructive', onPress: async () => {
+                        showModal('👤', 'Remover miembro?', `${member.nombre || member.email}`, [
+                          { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                          { text: 'Remover', style: 'danger', onPress: async () => {
                             await apiRequest(`/api/organization/member/${member.id}`, { method: 'DELETE' }, token);
                             const r2 = await apiRequest('/api/organization', {}, token);
                             if (r2.ok) setOrgData(r2.data);
@@ -2817,11 +2819,11 @@ export default function App() {
                   if (!inviteEmail.trim()) return;
                   const res = await apiRequest('/api/organization/invite', { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim() }) }, token);
                   if (res.ok) {
-                    Alert.alert('Invitacion', `Codigo: ${res.data.code}\n\nComparti este codigo con ${inviteEmail.trim()}`);
+                    showModal('📨', 'Invitacion enviada', `Codigo: ${res.data.code}\n\nComparti este codigo con ${inviteEmail.trim()}`);
                     setInviteEmail('');
                     const r2 = await apiRequest('/api/organization', {}, token);
                     if (r2.ok) setOrgData(r2.data);
-                  } else Alert.alert('Error', res.data?.error || 'Error');
+                  } else showModal('⚠️', 'Error', res.data?.error || 'Error');
                 }}>
                   <Text style={{color: '#1a1a2e', fontWeight: '700'}}>Invitar</Text>
                 </TouchableOpacity>
@@ -2875,10 +2877,10 @@ export default function App() {
           <Text style={{color: '#555', fontSize: 11, marginBottom: 16}}>Los agentes descargan el exe automaticamente cuando detectan una version nueva.</Text>
 
           <TouchableOpacity style={s.btn} onPress={async () => {
-            if (!agentVersion.trim() || !agentUrl.trim()) { Alert.alert('Error', 'Completa version y URL'); return; }
+            if (!agentVersion.trim() || !agentUrl.trim()) { showModal('⚠️', 'Error', 'Completa version y URL'); return; }
             const res = await apiRequest('/api/agent/version', { method: 'POST', body: JSON.stringify({ version: agentVersion.trim(), url: agentUrl.trim() }) }, token);
-            if (res.ok) { Alert.alert('Guardado', `Version ${agentVersion} configurada`); setShowAgentUpdate(false); }
-            else Alert.alert('Error', res.data?.error || 'Error');
+            if (res.ok) { showModal('✅', 'Guardado', `Version ${agentVersion} configurada`); setShowAgentUpdate(false); }
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
           }}>
             <Text style={s.btnTxt}>Guardar</Text>
           </TouchableOpacity>
@@ -3146,7 +3148,7 @@ export default function App() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.7.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.8.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3204,7 +3206,7 @@ export default function App() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.7.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.8.0</Text>
             </View>
           </View>
         </TouchableOpacity>
