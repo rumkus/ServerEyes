@@ -1784,8 +1784,9 @@ function AppContent() {
             <Text style={s.btnTxt}>Enviar email de prueba</Text>
           </TouchableOpacity>
 
-          <View style={{height: 30}} />
+          <View style={{height: 80}} />
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2885,8 +2886,9 @@ function AppContent() {
             </>
           )}
 
-          <View style={{height: 30}} />
+          <View style={{height: 80}} />
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -3180,7 +3182,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.9.2</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.9.3</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3238,7 +3240,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.9.2</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.9.3</Text>
             </View>
           </View>
         </TouchableOpacity>
