@@ -285,6 +285,8 @@ function AppContent() {
   const [savedScans, setSavedScans] = useState<any[]>([]);
   const [scanDetail, setScanDetail] = useState<any>(null);
   const [scanCompare, setScanCompare] = useState<any>(null);
+  const [scanSaveName, setScanSaveName] = useState('');
+  const [scanSaving, setScanSaving] = useState(false);
   const [customModal, setCustomModal] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
@@ -1429,7 +1431,8 @@ function AppContent() {
       const results = await NativeScanner.scanSubnet(subnet);
       const devices = (results || []).map((d: any) => ({
         ip: d.ip,
-        hostname: d.hostname !== d.ip ? d.hostname : '',
+        hostname: d.hostname && d.hostname !== d.ip ? d.hostname : '',
+        mac: d.mac || '',
         ports: d.ports ? Array.from(d.ports) : [],
         type: d.type || '📡 Dispositivo',
         status: 'up'
@@ -1450,17 +1453,20 @@ function AppContent() {
   };
 
   const saveScan = async () => {
-    if (scanResults.length === 0) return;
-    showModal('💾', 'Guardar escaneo', 'Ingresa un nombre para este escaneo:', [
-      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
-      { text: 'Guardar', onPress: async () => {
-        const name = scanSubnet ? `Red ${scanSubnet}*` : `Escaneo ${new Date().toLocaleDateString('es')}`;
-        const res = await apiRequest('/api/network-scans', {
-          method: 'POST', body: JSON.stringify({ name, subnet: scanSubnet || getLocalSubnet(), results: scanResults })
-        }, token);
-        if (res.ok) { showModal('✅', 'Guardado', `${scanResults.length} dispositivos guardados`); loadSavedScans(); }
-      }}
-    ]);
+    if (scanResults.length === 0 || !scanSaveName.trim()) {
+      showModal('✏️', 'Nombre requerido', 'Ingresa un nombre para guardar el escaneo');
+      return;
+    }
+    setScanSaving(true);
+    const res = await apiRequest('/api/network-scans', {
+      method: 'POST', body: JSON.stringify({ name: scanSaveName.trim(), subnet: scanSubnet || getLocalSubnet(), results: scanResults })
+    }, token);
+    setScanSaving(false);
+    if (res.ok) {
+      showModal('✅', 'Guardado', `${scanResults.length} dispositivos guardados como "${scanSaveName.trim()}"`);
+      setScanSaveName('');
+      loadSavedScans();
+    }
   };
 
   if (scanCompare) {
@@ -1575,13 +1581,16 @@ function AppContent() {
                 style={{flex: 1, backgroundColor: scanning ? '#555' : '#00d4ff', borderRadius: 10, padding: 12, alignItems: 'center', marginRight: 8}}>
                 <Text style={{color: scanning ? '#888' : '#0a1628', fontWeight: '700', fontSize: 14}}>{scanning ? 'Escaneando...' : '🔍 Escanear'}</Text>
               </TouchableOpacity>
+              </View>
               {scanResults.length > 0 && !scanning && (
-                <TouchableOpacity onPress={saveScan}
-                  style={{backgroundColor: '#4CAF50', borderRadius: 10, padding: 12, paddingHorizontal: 20}}>
-                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 14}}>💾</Text>
+              <View style={{flexDirection: 'row', marginTop: 10}}>
+                <TextInput style={{flex: 1, backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 13, color: th.text, marginRight: 8}} value={scanSaveName} onChangeText={setScanSaveName} placeholder="Nombre del cliente o red..." placeholderTextColor="#555" />
+                <TouchableOpacity onPress={saveScan} disabled={scanSaving}
+                  style={{backgroundColor: scanSaving ? '#555' : '#4CAF50', borderRadius: 10, padding: 12, paddingHorizontal: 16, justifyContent: 'center'}}>
+                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>{scanSaving ? '...' : '💾 Guardar'}</Text>
                 </TouchableOpacity>
+              </View>
               )}
-            </View>
           </View>
 
           {scanResults.length > 0 && (
@@ -1590,21 +1599,27 @@ function AppContent() {
               {scanResults.map((d: any, i: number) => (
                 <View key={i} style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#00e676'}}>
                   <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
-                    <Text style={{fontSize: 18, marginRight: 10}}>{(d.type || '📱').split(' ')[0]}</Text>
+                    <Text style={{fontSize: 22, marginRight: 12}}>{(d.type || '📱').split(' ')[0]}</Text>
                     <View style={{flex: 1}}>
-                      <Text style={{color: th.text, fontSize: 15, fontWeight: '700'}}>{d.ip}</Text>
-                      <Text style={{color: th.sub, fontSize: 11}}>{(d.type || '').split(' ').slice(1).join(' ') || 'Dispositivo'}</Text>
+                      <Text style={{color: th.text, fontSize: 16, fontWeight: '800'}}>{d.ip}</Text>
+                      {d.hostname ? <Text style={{color: '#00d4ff', fontSize: 11}}>{d.hostname}</Text> : null}
                     </View>
+                    {d.mac ? (
+                      <Text style={{color: th.sub, fontSize: 10, fontFamily: 'monospace'}}>{d.mac}</Text>
+                    ) : null}
                   </View>
-                  {d.ports && d.ports.length > 0 && (
-                    <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
-                      {d.ports.map((p: number, j: number) => (
-                        <View key={j} style={{backgroundColor: th.border, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, marginRight: 4, marginBottom: 2}}>
-                          <Text style={{color: '#00d4ff', fontSize: 10, fontWeight: '600'}}>{p}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
+                  <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 2}}>
+                    <Text style={{color: th.sub, fontSize: 11, flex: 1}}>{(d.type || '').split(' ').slice(1).join(' ') || 'Dispositivo'}</Text>
+                    {d.ports && d.ports.length > 0 && (
+                      <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+                        {d.ports.map((p: number, j: number) => (
+                          <View key={j} style={{backgroundColor: th.border, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 3}}>
+                            <Text style={{color: '#00d4ff', fontSize: 9, fontWeight: '600'}}>{p}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                 </View>
               ))}
             </View>
@@ -3461,7 +3476,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.1.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.2.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3520,7 +3535,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.1.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.2.0</Text>
             </View>
           </View>
         </TouchableOpacity>

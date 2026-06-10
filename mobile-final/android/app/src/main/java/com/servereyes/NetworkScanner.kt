@@ -1,6 +1,8 @@
 package com.servereyes
 
 import com.facebook.react.bridge.*
+import java.io.BufferedReader
+import java.io.FileReader
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -12,6 +14,28 @@ class NetworkScanner(reactContext: ReactApplicationContext) : ReactContextBaseJa
 
     override fun getName(): String = "NetworkScanner"
 
+    private fun getArpTable(): Map<String, String> {
+        val arpMap = mutableMapOf<String, String>()
+        try {
+            val reader = BufferedReader(FileReader("/proc/net/arp"))
+            reader.readLine() // skip header
+            var line = reader.readLine()
+            while (line != null) {
+                val parts = line.split("\\s+".toRegex())
+                if (parts.size >= 4) {
+                    val ip = parts[0]
+                    val mac = parts[3].uppercase()
+                    if (mac != "00:00:00:00:00:00" && mac.length == 17) {
+                        arpMap[ip] = mac
+                    }
+                }
+                line = reader.readLine()
+            }
+            reader.close()
+        } catch (_: Exception) {}
+        return arpMap
+    }
+
     @ReactMethod
     fun scanSubnet(subnet: String, promise: Promise) {
         Thread {
@@ -20,6 +44,8 @@ class NetworkScanner(reactContext: ReactApplicationContext) : ReactContextBaseJa
                 val executor = Executors.newFixedThreadPool(30)
                 val found = AtomicInteger(0)
                 val futures = mutableListOf<java.util.concurrent.Future<*>>()
+                // Read ARP table after pings populate it
+                val arpTable = mutableMapOf<String, String>()
 
                 for (i in 1..254) {
                     val ip = "$subnet$i"
@@ -65,6 +91,7 @@ class NetworkScanner(reactContext: ReactApplicationContext) : ReactContextBaseJa
                                     else -> "📡 Dispositivo"
                                 }
                                 device.putString("type", type)
+                                device.putString("mac", "")
 
                                 synchronized(results) {
                                     results.pushMap(device)
@@ -78,7 +105,24 @@ class NetworkScanner(reactContext: ReactApplicationContext) : ReactContextBaseJa
                 executor.shutdown()
                 executor.awaitTermination(120, TimeUnit.SECONDS)
 
-                promise.resolve(results)
+                // Read ARP table to get MAC addresses
+                val arp = getArpTable()
+                val finalResults = WritableNativeArray()
+                for (i in 0 until results.size()) {
+                    val device = results.getMap(i)
+                    if (device != null) {
+                        val updated = WritableNativeMap()
+                        updated.putString("ip", device.getString("ip") ?: "")
+                        updated.putString("hostname", device.getString("hostname") ?: "")
+                        updated.putString("status", device.getString("status") ?: "up")
+                        updated.putString("type", device.getString("type") ?: "")
+                        updated.putArray("ports", device.getArray("ports") ?: WritableNativeArray())
+                        updated.putString("mac", arp[device.getString("ip")] ?: "")
+                        finalResults.pushMap(updated)
+                    }
+                }
+
+                promise.resolve(finalResults)
             } catch (e: Exception) {
                 promise.reject("SCAN_ERROR", e.message)
             }
