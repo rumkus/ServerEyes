@@ -2231,7 +2231,7 @@ app.post('/api/auth/smtp', authenticateToken, async (req, res) => {
   try {
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, email_notifications } = req.body;
     await pool.query(
-      'UPDATE users SET smtp_host = $1, smtp_port = $2, smtp_secure = $3, smtp_user = $4, smtp_from = $6, email_notifications = $7 WHERE id = $8',
+      'UPDATE users SET smtp_host = $1, smtp_port = $2, smtp_secure = $3, smtp_user = $4, smtp_from = $5, email_notifications = $6 WHERE id = $7',
       [smtp_host || null, smtp_port || 587, smtp_secure || false, smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
     );
     // Solo actualizar password si se envió (no vacío)

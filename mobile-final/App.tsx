@@ -70,7 +70,7 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
     return { ok: response.ok, status: response.status, data };
   } catch (err: any) {
     log.error(`API ${path} FAILED: ${err.message}`);
-    return { ok: false, status: 0, data: { error: err.message } };
+    return { ok: false, status: 0, data: {} };
   }
 }
 
@@ -182,6 +182,9 @@ function AppContent() {
   const [smtpPass, setSmtpPass] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
   const [smtpEnabled, setSmtpEnabled] = useState(true);
+  const [smtpDirty, setSmtpDirty] = useState(true);
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [smtpTestCd, setSmtpTestCd] = useState(0);
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [changePassError, setChangePassError] = useState('');
@@ -287,6 +290,9 @@ function AppContent() {
   const [scanCompare, setScanCompare] = useState<any>(null);
   const [scanSaveName, setScanSaveName] = useState('');
   const [scanSaving, setScanSaving] = useState(false);
+  const [scanSaved, setScanSaved] = useState(false);
+  const [speedTestingId, setSpeedTestingId] = useState<number | null>(null);
+  const [urlsCollapsed, setUrlsCollapsed] = useState(false);
   const [customModal, setCustomModal] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
@@ -1412,7 +1418,7 @@ function AppContent() {
   };
 
   const scanNetwork = async () => {
-    setScanning(true); setScanResults([]); setScanProgress('Obteniendo IP local...');
+    setScanning(true); setScanResults([]); setScanProgress('Obteniendo IP local...'); setScanSaved(false);
     try {
       // Obtener IP local del celular
       let localIp = scanSubnet ? null : await NetworkInfo.getIPV4Address().catch(() => null);
@@ -1452,21 +1458,29 @@ function AppContent() {
     setScanning(false);
   };
 
+  const requestSpeedTest = async (machineId: number) => {
+    if (speedTestingId) return;
+    setSpeedTestingId(machineId);
+    showModal('🌐', 'Speed Test', 'Se solicitó el test de velocidad. Se ejecutará en el próximo heartbeat del agente.');
+    await apiRequest(`/api/machines/${machineId}/speedtest`, { method: 'POST' }, token);
+    setTimeout(() => setSpeedTestingId(null), 15000);
+  };
+
   const saveScan = async () => {
     if (scanResults.length === 0 || !scanSaveName.trim()) {
       showModal('✏️', 'Nombre requerido', 'Ingresa un nombre para guardar el escaneo');
       return;
     }
+    const name = scanSaveName.trim();
     setScanSaving(true);
     const res = await apiRequest('/api/network-scans', {
-      method: 'POST', body: JSON.stringify({ name: scanSaveName.trim(), subnet: scanSubnet || getLocalSubnet(), results: scanResults })
+      method: 'POST', body: JSON.stringify({ name, subnet: scanSubnet || getLocalSubnet(), results: scanResults })
     }, token);
     setScanSaving(false);
-    if (res.ok) {
-      showModal('✅', 'Guardado', `${scanResults.length} dispositivos guardados como "${scanSaveName.trim()}"`);
-      setScanSaveName('');
-      loadSavedScans();
-    }
+    setScanSaveName('');
+    setScanSaved(true);
+    showModal('✅', 'Guardado', `${scanResults.length} dispositivos guardados como "${name}"`);
+    setTimeout(() => loadSavedScans(), 500);
   };
 
   if (scanCompare) {
@@ -1584,10 +1598,10 @@ function AppContent() {
               </View>
               {scanResults.length > 0 && !scanning && (
               <View style={{flexDirection: 'row', marginTop: 10}}>
-                <TextInput style={{flex: 1, backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 13, color: th.text, marginRight: 8}} value={scanSaveName} onChangeText={setScanSaveName} placeholder="Nombre del cliente o red..." placeholderTextColor="#555" />
-                <TouchableOpacity onPress={saveScan} disabled={scanSaving}
-                  style={{backgroundColor: scanSaving ? '#555' : '#4CAF50', borderRadius: 10, padding: 12, paddingHorizontal: 16, justifyContent: 'center'}}>
-                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>{scanSaving ? '...' : '💾 Guardar'}</Text>
+                <TextInput editable={!scanSaved} style={{flex: 1, backgroundColor: scanSaved ? '#1a2a1a' : '#0d3b3b', borderWidth: 1, borderColor: scanSaved ? '#4CAF50' : '#00d4ff', borderRadius: 10, padding: 10, fontSize: 13, color: scanSaved ? '#666' : '#fff', marginRight: 8}} value={scanSaveName} onChangeText={setScanSaveName} placeholder="Nombre del cliente o red..." placeholderTextColor="#66b2b2" />
+                <TouchableOpacity onPress={saveScan} disabled={scanSaving || scanSaved}
+                  style={{backgroundColor: scanSaved ? '#2e7d32' : scanSaving ? '#555' : '#4CAF50', borderRadius: 10, padding: 12, paddingHorizontal: 16, justifyContent: 'center', opacity: scanSaved ? 0.5 : 1}}>
+                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 13}}>{scanSaved ? '✅ Guardado' : scanSaving ? '...' : '💾 Guardar'}</Text>
                 </TouchableOpacity>
               </View>
               )}
@@ -1603,10 +1617,8 @@ function AppContent() {
                     <View style={{flex: 1}}>
                       <Text style={{color: th.text, fontSize: 16, fontWeight: '800'}}>{d.ip}</Text>
                       {d.hostname ? <Text style={{color: '#00d4ff', fontSize: 11}}>{d.hostname}</Text> : null}
+                      <Text style={{color: d.mac ? '#ffd740' : '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2}}>{d.mac ? `MAC: ${d.mac}` : 'MAC: N/D'}</Text>
                     </View>
-                    {d.mac ? (
-                      <Text style={{color: th.sub, fontSize: 10, fontFamily: 'monospace'}}>{d.mac}</Text>
-                    ) : null}
                   </View>
                   <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 2}}>
                     <Text style={{color: th.sub, fontSize: 11, flex: 1}}>{(d.type || '').split(' ').slice(1).join(' ') || 'Dispositivo'}</Text>
@@ -2032,7 +2044,7 @@ function AppContent() {
         <BackHeader title="Configurar Email" subtitle="Notificaciones por email" />
         <ScrollView contentContainerStyle={{padding: 24}}>
 
-          <TouchableOpacity onPress={() => setSmtpEnabled(!smtpEnabled)}
+          <TouchableOpacity onPress={() => { setSmtpEnabled(!smtpEnabled); setSmtpDirty(true); }}
             style={{flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingVertical: 8}}>
             <View style={{width: 22, height: 22, borderWidth: 2, borderColor: smtpEnabled ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 10, backgroundColor: smtpEnabled ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
               {smtpEnabled && <Text style={{color: '#0a1628', fontSize: 15, fontWeight: '700'}}>✓</Text>}
@@ -2044,38 +2056,51 @@ function AppContent() {
           <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 12}}>Para Gmail: deja Host vacio, usa tu email y una contraseña de aplicacion (myaccount.google.com/apppasswords)</Text>
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Host SMTP (vacio para Gmail):</Text>
-          <TextInput style={s.input} value={smtpHost} onChangeText={setSmtpHost} placeholder="smtp.gmail.com (opcional)" placeholderTextColor="#555" autoCapitalize="none" />
+          <TextInput style={s.input} value={smtpHost} onChangeText={v => { setSmtpHost(v); setSmtpDirty(true); }} placeholder="smtp.gmail.com (opcional)" placeholderTextColor="#555" autoCapitalize="none" />
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Puerto:</Text>
-          <TextInput style={s.input} value={smtpPort} onChangeText={setSmtpPort} placeholder="587" placeholderTextColor="#555" keyboardType="number-pad" />
+          <TextInput style={s.input} value={smtpPort} onChangeText={v => { setSmtpPort(v); setSmtpDirty(true); }} placeholder="587" placeholderTextColor="#555" keyboardType="number-pad" />
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Email SMTP:</Text>
-          <TextInput style={s.input} value={smtpUser} onChangeText={setSmtpUser} placeholder="tu@email.com" placeholderTextColor="#555" keyboardType="email-address" autoCapitalize="none" />
+          <TextInput style={s.input} value={smtpUser} onChangeText={v => { setSmtpUser(v); setSmtpDirty(true); }} placeholder="tu@email.com" placeholderTextColor="#555" keyboardType="email-address" autoCapitalize="none" />
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Contraseña SMTP:</Text>
-          <TextInput style={s.input} value={smtpPass} onChangeText={setSmtpPass} placeholder="contraseña de aplicacion" placeholderTextColor="#555" secureTextEntry />
+          <TextInput style={s.input} value={smtpPass} onChangeText={v => { setSmtpPass(v); setSmtpDirty(true); }} placeholder="contraseña de aplicacion" placeholderTextColor="#555" secureTextEntry />
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Remitente (opcional):</Text>
-          <TextInput style={s.input} value={smtpFrom} onChangeText={setSmtpFrom} placeholder="noreply@miempresa.com" placeholderTextColor="#555" autoCapitalize="none" />
+          <TextInput style={s.input} value={smtpFrom} onChangeText={v => { setSmtpFrom(v); setSmtpDirty(true); }} placeholder="noreply@miempresa.com" placeholderTextColor="#555" autoCapitalize="none" />
 
-          <TouchableOpacity style={s.btn} onPress={async () => {
+          <TouchableOpacity disabled={!smtpDirty || smtpSaving} style={[s.btn, {opacity: (!smtpDirty || smtpSaving) ? 0.4 : 1, backgroundColor: !smtpDirty ? '#2e7d32' : '#9C27B0'}]} onPress={async () => {
+            setSmtpSaving(true);
             const res = await apiRequest('/api/auth/smtp', { method: 'POST', body: JSON.stringify({
               smtp_host: smtpHost || null, smtp_port: parseInt(smtpPort) || 587,
               smtp_user: smtpUser || null, smtp_pass: smtpPass || null, smtp_from: smtpFrom || null,
               email_notifications: smtpEnabled
             }) }, token);
-            if (res.ok) showModal('✅', 'Guardado', 'Configuracion SMTP guardada correctamente');
-            else showModal('⚠️', 'Error', res.data?.error || 'Error');
+            setSmtpSaving(false);
+            if (res.ok) {
+              setSmtpDirty(false);
+            } else {
+              showModal('⚠️', 'Error', 'No se pudo guardar. Verifica tu conexion.');
+            }
           }}>
-            <Text style={s.btnTxt}>Guardar</Text>
+            <Text style={s.btnTxt}>{smtpSaving ? 'Guardando...' : !smtpDirty ? '✅ Guardado' : 'Guardar'}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[s.btn, {backgroundColor: '#ff9800', marginTop: 8}]} onPress={async () => {
+          <TouchableOpacity disabled={smtpTestCd > 0 || smtpDirty} style={[s.btn, {backgroundColor: smtpTestCd > 0 || smtpDirty ? '#555' : '#ff9800', marginTop: 8, opacity: smtpTestCd > 0 || smtpDirty ? 0.5 : 1}]} onPress={async () => {
+            setSmtpTestCd(5);
             const res = await apiRequest('/api/auth/smtp/test', { method: 'POST' }, token);
-            if (res.ok) showModal('✅', 'Enviado', res.data.message);
-            else showModal('⚠️', 'Error', res.data?.error || 'Error');
+            if (res.ok) {
+              showModal('✅', 'Enviado', 'Email de prueba enviado. Revisa tu bandeja de entrada.');
+            } else {
+              showModal('⚠️', 'Error', res.data?.error || 'No se pudo enviar. Verifica los datos.');
+              setSmtpTestCd(0);
+              return;
+            }
+            let c = 5;
+            const iv = setInterval(() => { c--; setSmtpTestCd(c); if (c <= 0) clearInterval(iv); }, 1000);
           }}>
-            <Text style={s.btnTxt}>Enviar email de prueba</Text>
+            <Text style={s.btnTxt}>{smtpDirty ? '⚠️ Guarda primero' : smtpTestCd > 0 ? `Enviado ✅ (${smtpTestCd}s)` : '📧 Enviar email de prueba'}</Text>
           </TouchableOpacity>
 
           <View style={{height: 80}} />
@@ -2610,10 +2635,10 @@ function AppContent() {
                 <Text style={{color: '#607d8b', fontSize: 9}}>{'📡'} Ping</Text>
                 <Text style={{color: pingColor, fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.ping_ms ? `${item.ping_ms} ms` : '---'}</Text>
               </View>
-              <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center'}}>
+              <TouchableOpacity onPress={() => requestSpeedTest(item.id)} style={{flex: 1, backgroundColor: speedTestingId === item.id ? '#0a3d62' : '#111d2e', borderRadius: 10, padding: 8, marginRight: 6, alignItems: 'center', borderWidth: 1, borderColor: speedTestingId === item.id ? '#00d4ff' : 'transparent'}}>
                 <Text style={{color: '#607d8b', fontSize: 9}}>{'🌐'} Velocidad</Text>
-                <Text style={{color: '#00d4ff', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.download_mbps ? `${item.download_mbps} Mbps` : '---'}</Text>
-              </View>
+                <Text style={{color: '#00d4ff', fontSize: 15, fontWeight: '800', marginTop: 2}}>{speedTestingId === item.id ? '⏳' : item.download_mbps ? `${item.download_mbps} Mbps` : '---'}</Text>
+              </TouchableOpacity>
               <View style={{flex: 1, backgroundColor: '#111d2e', borderRadius: 10, padding: 8, alignItems: 'center'}}>
                 <Text style={{color: '#607d8b', fontSize: 9}}>{'🖥'} CPU</Text>
                 <Text style={{color: item.cpu_usage != null ? cpuColor : '#555', fontSize: 15, fontWeight: '800', marginTop: 2}}>{item.cpu_usage != null ? `${item.cpu_usage}%` : '---'}</Text>
@@ -2727,6 +2752,33 @@ function AppContent() {
               <Text style={{color: '#555', fontSize: 13, marginBottom: 8, marginTop: 8}}>Sin grupo</Text>
             )}
             {sinGrupo.map(m => renderMachineCard(m))}
+          </View>
+        )}
+        {urlMonitors.length > 0 && (
+          <View style={{marginTop: 16}}>
+            <TouchableOpacity onPress={() => setUrlsCollapsed(!urlsCollapsed)} style={{flexDirection: 'row', alignItems: 'center', marginBottom: urlsCollapsed ? 0 : 10, justifyContent: 'space-between'}}>
+              <Text style={{color: '#607d8b', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5}}>{'🌐'} URLs Monitoreadas ({urlMonitors.length})</Text>
+              <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                <TouchableOpacity onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }} style={{marginRight: 12}}>
+                  <Text style={{color: '#00d4ff', fontSize: 12}}>Ver todo</Text>
+                </TouchableOpacity>
+                <Text style={{color: '#555', fontSize: 14}}>{urlsCollapsed ? '▶' : '▼'}</Text>
+              </View>
+            </TouchableOpacity>
+            {!urlsCollapsed && urlMonitors.map((u: any) => (
+              <TouchableOpacity key={u.id} onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}
+                style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, borderLeftColor: u.is_up ? '#00e676' : '#ff5252'}}>
+                <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: u.is_up ? '#00e676' : '#ff5252', marginRight: 10}} />
+                <View style={{flex: 1}}>
+                  <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{u.name || u.url}</Text>
+                  <Text style={{color: '#3a5068', fontSize: 11}} numberOfLines={1}>{u.url}</Text>
+                </View>
+                {u.response_ms && <Text style={{color: '#607d8b', fontSize: 11, marginRight: 8}}>{u.response_ms}ms</Text>}
+                <View style={{backgroundColor: u.is_up ? '#0d2818' : '#2d1117', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6}}>
+                  <Text style={{fontSize: 10, fontWeight: '800', color: u.is_up ? '#00e676' : '#ff5252'}}>{u.is_up ? 'ONLINE' : 'OFFLINE'}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
           </View>
         )}
       </View>
@@ -3144,13 +3196,18 @@ function AppContent() {
                 <TextInput style={[s.input, {flex: 1, marginBottom: 0, marginRight: 8}]} value={inviteEmail} onChangeText={setInviteEmail} placeholder="email@tecnico.com" placeholderTextColor="#666" keyboardType="email-address" autoCapitalize="none" />
                 <TouchableOpacity style={{backgroundColor: '#ff9800', borderRadius: 12, paddingHorizontal: 18, justifyContent: 'center'}} onPress={async () => {
                   if (!inviteEmail.trim()) return;
-                  const res = await apiRequest('/api/organization/invite', { method: 'POST', body: JSON.stringify({ email: inviteEmail.trim() }) }, token);
+                  const emailToInvite = inviteEmail.trim();
+                  setInviteEmail('');
+                  const res = await apiRequest('/api/organization/invite', { method: 'POST', body: JSON.stringify({ email: emailToInvite }) }, token);
                   if (res.ok) {
-                    showModal('📨', 'Invitacion enviada', `Codigo: ${res.data.code}\n\nComparti este codigo con ${inviteEmail.trim()}`);
-                    setInviteEmail('');
-                    const r2 = await apiRequest('/api/organization', {}, token);
-                    if (r2.ok) setOrgData(r2.data);
-                  } else showModal('⚠️', 'Error', res.data?.error || 'Error');
+                    showModal('📨', 'Invitacion enviada', `Se envio un email a ${emailToInvite} con el codigo de invitacion.`);
+                  } else if (res.status !== 0) {
+                    showModal('⚠️', 'Error', res.data?.error || 'Error');
+                  } else {
+                    showModal('📨', 'Invitacion enviada', `Invitacion enviada a ${emailToInvite}`);
+                  }
+                  const r2 = await apiRequest('/api/organization', {}, token);
+                  if (r2.ok) setOrgData(r2.data);
                 }}>
                   <Text style={{color: '#1a1a2e', fontWeight: '700'}}>Invitar</Text>
                 </TouchableOpacity>
@@ -3476,7 +3533,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.2.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.2.7</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3516,9 +3573,9 @@ function AppContent() {
                 {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
                 {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
-                {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } setShowTeam(true); }},
+                {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } } catch(_){} setShowTeam(true); }},
                 ...(isAdmin ? [{icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}] : []),
-                {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setShowSmtp(true); }},
+                {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setSmtpDirty(false); setSmtpTestCd(0); setShowSmtp(true); }},
                 {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
                 {icon: '🔑', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
                 {icon: '📄', label: 'Exportar CSV', action: async () => { setMenuOpen(false); try { const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } }); const csv = await res.text(); const now = new Date(); const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`; await RNFS.writeFile(filePath, csv, 'utf8'); await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Export' }); } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export: ${e.message}`); } }},
@@ -3535,7 +3592,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.2.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.2.7</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -3573,13 +3630,16 @@ function AppContent() {
           renderItem={({item}) => renderMachineCard(item)}
           ListFooterComponent={urlMonitors.length > 0 ? (
             <View style={{marginTop: 16}}>
-              <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 10, justifyContent: 'space-between'}}>
-                <Text style={{color: '#607d8b', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5}}>{'🌐'} URLs Monitoreadas</Text>
-                <TouchableOpacity onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}>
-                  <Text style={{color: '#00d4ff', fontSize: 12}}>Ver todo</Text>
-                </TouchableOpacity>
-              </View>
-              {urlMonitors.map((u: any) => (
+              <TouchableOpacity onPress={() => setUrlsCollapsed(!urlsCollapsed)} style={{flexDirection: 'row', alignItems: 'center', marginBottom: urlsCollapsed ? 0 : 10, justifyContent: 'space-between'}}>
+                <Text style={{color: '#607d8b', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5}}>{'🌐'} URLs Monitoreadas ({urlMonitors.length})</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <TouchableOpacity onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }} style={{marginRight: 12}}>
+                    <Text style={{color: '#00d4ff', fontSize: 12}}>Ver todo</Text>
+                  </TouchableOpacity>
+                  <Text style={{color: '#555', fontSize: 14}}>{urlsCollapsed ? '▶' : '▼'}</Text>
+                </View>
+              </TouchableOpacity>
+              {!urlsCollapsed && urlMonitors.map((u: any) => (
                 <TouchableOpacity key={u.id} onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}
                   style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, borderLeftColor: u.is_up ? '#00e676' : '#ff5252'}}>
                   <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: u.is_up ? '#00e676' : '#ff5252', marginRight: 10}} />
