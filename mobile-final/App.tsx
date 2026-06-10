@@ -336,8 +336,8 @@ function AppContent() {
 
   const FloatingBackButton = () => (
     <TouchableOpacity onPress={() => goBack()}
-      style={{position: 'absolute', bottom: 30, left: 24, width: 48, height: 48, borderRadius: 24, backgroundColor: '#9C27B0', alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.3, shadowRadius: 4}}>
-      <Text style={{color: '#fff', fontSize: 20, fontWeight: '700'}}>{'←'}</Text>
+      style={{position: 'absolute', bottom: 28, right: 24, width: 50, height: 50, borderRadius: 25, backgroundColor: '#9C27B0', alignItems: 'center', justifyContent: 'center', elevation: 10, shadowColor: '#9C27B0', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.4, shadowRadius: 6}}>
+      <View style={{width: 20, height: 20, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: '#fff', transform: [{rotate: '45deg'}], marginLeft: 4}} />
     </TouchableOpacity>
   );
 
@@ -1814,6 +1814,7 @@ function AppContent() {
             <Text style={s.btnTxt}>Guardar</Text>
           </TouchableOpacity>
         </View>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1886,6 +1887,7 @@ function AppContent() {
             })}
           </ScrollView>
         )}
+        <FloatingBackButton />
       </View>
     );
   }
@@ -1955,6 +1957,7 @@ function AppContent() {
             </View>
           </ScrollView>
         )}
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2006,6 +2009,7 @@ function AppContent() {
             <View style={{height: 30}} />
           </ScrollView>
         )}
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2233,6 +2237,7 @@ function AppContent() {
             </TouchableOpacity>
           </>
         )}
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2524,6 +2529,7 @@ function AppContent() {
           </TouchableOpacity>
           <Text style={{color: '#666', fontSize: 11, textAlign: 'center', marginTop: 6, marginBottom: 30}}>Si no seleccionas ninguno, se muestran todos en el resumen.</Text>
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2555,6 +2561,7 @@ function AppContent() {
             </View>
           )}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2616,6 +2623,7 @@ function AppContent() {
             </>
           )}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2658,6 +2666,7 @@ function AppContent() {
             </>
           )}
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2700,6 +2709,7 @@ function AppContent() {
             <Text style={{color: '#00d4ff', fontSize: 14, fontWeight: '700'}}>🔄 Forzar chequeo</Text>
           </TouchableOpacity>
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -2741,6 +2751,7 @@ function AppContent() {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setShareUserId(null)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -3167,7 +3178,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.8.2</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.9.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3225,7 +3236,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.8.2</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.9.0</Text>
             </View>
           </View>
         </TouchableOpacity>
