@@ -549,6 +549,7 @@ function AppContent() {
 
   // Auto-refresh cada 10 segundos
   const firstLoadDone = useRef(false);
+  const scrollRef = useRef<any>(null);
   useEffect(() => {
     if (!token) { firstLoadDone.current = false; return; }
     log.info('Token activo, iniciando refresh loop');
@@ -577,6 +578,15 @@ function AppContent() {
 
     return () => { clearTimeout(timeout); clearInterval(interval); };
   }, [token]);
+
+  // Auto-refresh chat de soporte cada 5 segundos
+  useEffect(() => {
+    if (!supportTicketId || !token) return;
+    const interval = setInterval(() => {
+      loadSupportMessages(supportTicketId);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [supportTicketId, token]);
 
   const addMachine = async () => {
     if (!newName.trim()) return;
@@ -1130,17 +1140,6 @@ function AppContent() {
       setTimeout(() => { try { loadSupportMessages(supportTicketId); } catch {} }, 2000);
     }
   };
-
-  const scrollRef = useRef<any>(null);
-
-  // Auto-refresh chat de soporte cada 5 segundos
-  useEffect(() => {
-    if (!supportTicketId || !token) return;
-    const interval = setInterval(() => {
-      loadSupportMessages(supportTicketId);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [supportTicketId, token]);
 
   if (supportTicketId) {
     const isClosed = supportTickets.find(t => t.id === supportTicketId)?.status === 'closed';
@@ -3168,7 +3167,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.8.1</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.8.2</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3226,7 +3225,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.8.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.8.2</Text>
             </View>
           </View>
         </TouchableOpacity>
