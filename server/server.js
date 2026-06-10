@@ -67,10 +67,16 @@ async function sendEmail(to, subject, body) {
 async function sendEmailWithUserSMTP(user, subject, htmlBody, toOverride) {
   try {
     const nodemailer = require('nodemailer');
-    const transport = nodemailer.createTransport(user.smtp_host ? {
-      host: user.smtp_host, port: user.smtp_port || 587, secure: user.smtp_secure || false,
+    const secVal = user.smtp_secure;
+    const isSecure = secVal === 'ssl' || secVal === true;
+    const useTls = secVal === 'tls';
+    const transportOpts = user.smtp_host ? {
+      host: user.smtp_host, port: user.smtp_port || 587, secure: isSecure,
+      ...(useTls ? { requireTLS: true } : {}),
+      ...(secVal === 'none' ? { tls: { rejectUnauthorized: false } } : {}),
       auth: { user: user.smtp_user, pass: user.smtp_pass }
-    } : { service: 'gmail', auth: { user: user.smtp_user, pass: user.smtp_pass } });
+    } : { service: 'gmail', auth: { user: user.smtp_user, pass: user.smtp_pass } };
+    const transport = nodemailer.createTransport(transportOpts);
 
     const recipient = toOverride || user.email;
     await transport.sendMail({
@@ -762,18 +768,25 @@ app.post('/api/organization/invite', authenticateToken, async (req, res) => {
     const inviter = await pool.query('SELECT email, nombre, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [req.user.id]);
     const inviterData = inviter.rows[0];
     const inviterName = inviterData?.nombre || inviterData?.email || '';
+    const apkUrl = 'https://github.com/rumkus/ServerEyes/releases/latest';
     const inviteHtml = `<h3 style="color:#333">Te invitaron a unirte a <strong>${orgName}</strong></h3>
-       <p style="color:#555">${inviterName} te invito a ser parte de su equipo en ServerEyes.</p>
+       <p style="color:#555"><strong>${inviterName}</strong> de la empresa <strong>${orgName}</strong> te invito a ser parte de su equipo en ServerEyes.</p>
        <div style="background:#f0f7ff;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
          <p style="color:#888;margin:0 0 8px;font-size:13px">Tu codigo de invitacion:</p>
          <p style="font-size:28px;font-weight:800;color:#2196F3;letter-spacing:4px;margin:0">${code}</p>
        </div>
-       <p style="color:#555">Para unirte:</p>
-       <ol style="color:#555">
-         <li>Descarga la app <strong>ServerEyes</strong> o ingresa a la web</li>
-         <li>Registrate con este email (<strong>${email}</strong>)</li>
-         <li>Ve a <strong>Empresa y Equipo</strong> e ingresa el codigo</li>
+       <p style="color:#555"><strong>Para unirte:</strong></p>
+       <ol style="color:#555;line-height:1.8">
+         <li>Descarga la app ServerEyes: <a href="${apkUrl}" style="color:#2196F3;font-weight:600">${apkUrl}</a></li>
+         <li>Instala el APK en tu celular Android</li>
+         <li>Registrate con este email: <strong>${email}</strong></li>
+         <li>Ve a <strong>Menu ☰ → Empresa y Equipo</strong></li>
+         <li>En la seccion <strong>"¿Te invitaron a un equipo?"</strong> ingresa el codigo: <strong>${code}</strong></li>
        </ol>
+       <div style="background:#fff3e0;border-radius:8px;padding:12px;margin:16px 0;border-left:4px solid #ff9800">
+         <p style="color:#555;margin:0;font-size:13px"><strong>Invitado por:</strong> ${inviterName} (${inviterData?.email || ''})</p>
+         <p style="color:#555;margin:4px 0 0;font-size:13px"><strong>Empresa:</strong> ${orgName}</p>
+       </div>
        <p style="color:#999;font-size:12px">Si no esperabas esta invitacion, ignora este mensaje.</p>`;
     if (inviterData?.smtp_user && inviterData?.smtp_pass) {
       sendEmailWithUserSMTP(inviterData, `Invitacion a ${orgName}`, inviteHtml, email);
@@ -2220,7 +2233,7 @@ app.get('/api/auth/smtp', authenticateToken, async (req, res) => {
   try {
     const user = await pool.query('SELECT smtp_host, smtp_port, smtp_secure, smtp_user, smtp_from, email_notifications FROM users WHERE id = $1', [req.user.id]);
     const u = user.rows[0] || {};
-    res.json({ smtp_host: u.smtp_host || '', smtp_port: u.smtp_port || 587, smtp_secure: u.smtp_secure || false, smtp_user: u.smtp_user || '', smtp_from: u.smtp_from || '', email_notifications: u.email_notifications !== false, configured: !!u.smtp_user });
+    res.json({ smtp_host: u.smtp_host || '', smtp_port: u.smtp_port || 587, smtp_secure: u.smtp_secure || 'tls', smtp_user: u.smtp_user || '', smtp_from: u.smtp_from || '', email_notifications: u.email_notifications !== false, configured: !!u.smtp_user });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -2232,7 +2245,7 @@ app.post('/api/auth/smtp', authenticateToken, async (req, res) => {
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, email_notifications } = req.body;
     await pool.query(
       'UPDATE users SET smtp_host = $1, smtp_port = $2, smtp_secure = $3, smtp_user = $4, smtp_from = $5, email_notifications = $6 WHERE id = $7',
-      [smtp_host || null, smtp_port || 587, smtp_secure || false, smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
+      [smtp_host || null, smtp_port || 587, smtp_secure || 'tls', smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
     );
     // Solo actualizar password si se envió (no vacío)
     if (smtp_pass) {

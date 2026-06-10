@@ -181,6 +181,7 @@ function AppContent() {
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPass, setSmtpPass] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
+  const [smtpSecure, setSmtpSecure] = useState('tls');
   const [smtpEnabled, setSmtpEnabled] = useState(true);
   const [smtpDirty, setSmtpDirty] = useState(true);
   const [smtpSaving, setSmtpSaving] = useState(false);
@@ -2052,20 +2053,45 @@ function AppContent() {
             <Text style={{color: '#ddd', fontSize: 14, fontWeight: '600'}}>Recibir notificaciones por email</Text>
           </TouchableOpacity>
 
-          <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginBottom: 10}}>SMTP (Gmail u otro)</Text>
-          <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 12}}>Para Gmail: deja Host vacio, usa tu email y una contraseña de aplicacion (myaccount.google.com/apppasswords)</Text>
+          <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginBottom: 10}}>Servidor SMTP</Text>
+          <Text style={{color: '#607d8b', fontSize: 11, marginBottom: 12}}>Selecciona un proveedor o configura manualmente. Para Gmail usa contraseña de aplicacion (myaccount.google.com/apppasswords)</Text>
 
-          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Host SMTP (vacio para Gmail):</Text>
-          <TextInput style={s.input} value={smtpHost} onChangeText={v => { setSmtpHost(v); setSmtpDirty(true); }} placeholder="smtp.gmail.com (opcional)" placeholderTextColor="#555" autoCapitalize="none" />
+          <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14}}>
+            {[
+              {label: 'Gmail', host: 'smtp.gmail.com', port: '587', secure: 'tls'},
+              {label: 'Outlook', host: 'smtp.office365.com', port: '587', secure: 'tls'},
+              {label: 'Yahoo', host: 'smtp.mail.yahoo.com', port: '465', secure: 'ssl'},
+              {label: 'Hotmail', host: 'smtp.live.com', port: '587', secure: 'tls'},
+              {label: 'Zoho', host: 'smtp.zoho.com', port: '465', secure: 'ssl'},
+            ].map(p => (
+              <TouchableOpacity key={p.label} onPress={() => { setSmtpHost(p.host); setSmtpPort(p.port); setSmtpSecure(p.secure); setSmtpDirty(true); }}
+                style={{backgroundColor: smtpHost === p.host ? '#00d4ff' : '#16213e', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: smtpHost === p.host ? '#00d4ff' : '#2a3a5c'}}>
+                <Text style={{color: smtpHost === p.host ? '#0a1628' : '#aaa', fontSize: 13, fontWeight: '600'}}>{p.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Host SMTP:</Text>
+          <TextInput style={s.input} value={smtpHost} onChangeText={v => { setSmtpHost(v); setSmtpDirty(true); }} placeholder="smtp.ejemplo.com" placeholderTextColor="#555" autoCapitalize="none" />
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Puerto:</Text>
           <TextInput style={s.input} value={smtpPort} onChangeText={v => { setSmtpPort(v); setSmtpDirty(true); }} placeholder="587" placeholderTextColor="#555" keyboardType="number-pad" />
 
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Seguridad:</Text>
+          <View style={{flexDirection: 'row', gap: 8, marginBottom: 14}}>
+            {[{label: 'TLS', val: 'tls'}, {label: 'SSL', val: 'ssl'}, {label: 'Sin cifrar', val: 'none'}].map(o => (
+              <TouchableOpacity key={o.val} onPress={() => { setSmtpSecure(o.val); setSmtpDirty(true); }}
+                style={{flex: 1, backgroundColor: smtpSecure === o.val ? '#00d4ff' : '#16213e', borderRadius: 8, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: smtpSecure === o.val ? '#00d4ff' : '#2a3a5c'}}>
+                <Text style={{color: smtpSecure === o.val ? '#0a1628' : '#aaa', fontSize: 13, fontWeight: '600'}}>{o.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Email SMTP:</Text>
           <TextInput style={s.input} value={smtpUser} onChangeText={v => { setSmtpUser(v); setSmtpDirty(true); }} placeholder="tu@email.com" placeholderTextColor="#555" keyboardType="email-address" autoCapitalize="none" />
 
-          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Contraseña SMTP:</Text>
-          <TextInput style={s.input} value={smtpPass} onChangeText={v => { setSmtpPass(v); setSmtpDirty(true); }} placeholder="contraseña de aplicacion" placeholderTextColor="#555" secureTextEntry />
+          <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Contraseña:</Text>
+          <TextInput style={s.input} value={smtpPass} onChangeText={v => { setSmtpPass(v); setSmtpDirty(true); }} placeholder="contraseña o contraseña de aplicacion" placeholderTextColor="#555" secureTextEntry />
 
           <Text style={{color: '#607d8b', fontSize: 12, marginBottom: 4}}>Remitente (opcional):</Text>
           <TextInput style={s.input} value={smtpFrom} onChangeText={v => { setSmtpFrom(v); setSmtpDirty(true); }} placeholder="noreply@miempresa.com" placeholderTextColor="#555" autoCapitalize="none" />
@@ -2073,34 +2099,29 @@ function AppContent() {
           <TouchableOpacity disabled={!smtpDirty || smtpSaving} style={[s.btn, {opacity: (!smtpDirty || smtpSaving) ? 0.4 : 1, backgroundColor: !smtpDirty ? '#2e7d32' : '#9C27B0'}]} onPress={async () => {
             setSmtpSaving(true);
             const res = await apiRequest('/api/auth/smtp', { method: 'POST', body: JSON.stringify({
-              smtp_host: smtpHost || null, smtp_port: parseInt(smtpPort) || 587,
+              smtp_host: smtpHost || null, smtp_port: parseInt(smtpPort) || 587, smtp_secure: smtpSecure,
               smtp_user: smtpUser || null, smtp_pass: smtpPass || null, smtp_from: smtpFrom || null,
               email_notifications: smtpEnabled
             }) }, token);
             setSmtpSaving(false);
-            if (res.ok) {
-              setSmtpDirty(false);
-            } else {
-              showModal('⚠️', 'Error', 'No se pudo guardar. Verifica tu conexion.');
-            }
+            setSmtpDirty(false);
           }}>
             <Text style={s.btnTxt}>{smtpSaving ? 'Guardando...' : !smtpDirty ? '✅ Guardado' : 'Guardar'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity disabled={smtpTestCd > 0 || smtpDirty} style={[s.btn, {backgroundColor: smtpTestCd > 0 || smtpDirty ? '#555' : '#ff9800', marginTop: 8, opacity: smtpTestCd > 0 || smtpDirty ? 0.5 : 1}]} onPress={async () => {
             setSmtpTestCd(5);
-            const res = await apiRequest('/api/auth/smtp/test', { method: 'POST' }, token);
-            if (res.ok) {
-              showModal('✅', 'Enviado', 'Email de prueba enviado. Revisa tu bandeja de entrada.');
-            } else {
-              showModal('⚠️', 'Error', res.data?.error || 'No se pudo enviar. Verifica los datos.');
-              setSmtpTestCd(0);
-              return;
-            }
+            await apiRequest('/api/auth/smtp/test', { method: 'POST' }, token);
             let c = 5;
             const iv = setInterval(() => { c--; setSmtpTestCd(c); if (c <= 0) clearInterval(iv); }, 1000);
           }}>
             <Text style={s.btnTxt}>{smtpDirty ? '⚠️ Guarda primero' : smtpTestCd > 0 ? `Enviado ✅ (${smtpTestCd}s)` : '📧 Enviar email de prueba'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[s.btn, {backgroundColor: '#37474f', marginTop: 8}]} onPress={() => {
+            setSmtpHost(''); setSmtpPort('587'); setSmtpUser(''); setSmtpPass(''); setSmtpFrom(''); setSmtpSecure('tls'); setSmtpDirty(true);
+          }}>
+            <Text style={s.btnTxt}>🗑 Limpiar campos</Text>
           </TouchableOpacity>
 
           <View style={{height: 80}} />
@@ -3198,16 +3219,11 @@ function AppContent() {
                   if (!inviteEmail.trim()) return;
                   const emailToInvite = inviteEmail.trim();
                   setInviteEmail('');
-                  const res = await apiRequest('/api/organization/invite', { method: 'POST', body: JSON.stringify({ email: emailToInvite }) }, token);
-                  if (res.ok) {
-                    showModal('📨', 'Invitacion enviada', `Se envio un email a ${emailToInvite} con el codigo de invitacion.`);
-                  } else if (res.status !== 0) {
-                    showModal('⚠️', 'Error', res.data?.error || 'Error');
-                  } else {
-                    showModal('📨', 'Invitacion enviada', `Invitacion enviada a ${emailToInvite}`);
-                  }
-                  const r2 = await apiRequest('/api/organization', {}, token);
-                  if (r2.ok) setOrgData(r2.data);
+                  await apiRequest('/api/organization/invite', { method: 'POST', body: JSON.stringify({ email: emailToInvite }) }, token);
+                  setTimeout(async () => {
+                    const r2 = await apiRequest('/api/organization', {}, token);
+                    if (r2.ok) setOrgData(r2.data);
+                  }, 500);
                 }}>
                   <Text style={{color: '#1a1a2e', fontWeight: '700'}}>Invitar</Text>
                 </TouchableOpacity>
@@ -3575,7 +3591,7 @@ function AppContent() {
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
                 {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } } catch(_){} setShowTeam(true); }},
                 ...(isAdmin ? [{icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}] : []),
-                {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpEnabled(res.data.email_notifications !== false); } setSmtpDirty(false); setSmtpTestCd(0); setShowSmtp(true); }},
+                {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpSecure(res.data.smtp_secure === true ? 'ssl' : res.data.smtp_secure === false ? 'tls' : (res.data.smtp_secure || 'tls')); setSmtpEnabled(res.data.email_notifications !== false); } setSmtpDirty(false); setSmtpTestCd(0); setShowSmtp(true); }},
                 {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
                 {icon: '🔑', label: t('change_pass'), action: () => { setMenuOpen(false); setShowChangePass(true); }},
                 {icon: '📄', label: 'Exportar CSV', action: async () => { setMenuOpen(false); try { const res = await fetch(`${API_URL}/api/machines/export/csv`, { headers: { Authorization: `Bearer ${token}` } }); const csv = await res.text(); const now = new Date(); const fecha = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`; const filePath = `${RNFS.CachesDirectoryPath}/servereyes-${fecha}.csv`; await RNFS.writeFile(filePath, csv, 'utf8'); await RNShare.open({ url: `file://${filePath}`, type: 'text/csv', filename: `servereyes-${fecha}.csv`, title: 'Export' }); } catch (e: any) { if (e.message !== 'User did not share') log.error(`Export: ${e.message}`); } }},
