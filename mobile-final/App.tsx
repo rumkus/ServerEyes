@@ -1387,6 +1387,7 @@ function AppContent() {
   };
 
   const getLocalSubnet = () => {
+    // Intentar desde las maquinas monitoreadas
     const m = machines.find((m: any) => m.is_online && m.local_ip);
     if (m) {
       const ip = m.local_ip.split(' | ')[0].split(' (')[0].trim();
@@ -1396,26 +1397,64 @@ function AppContent() {
     return '192.168.1.';
   };
 
+  const detectSubnet = async () => {
+    try {
+      // Intentar detectar la IP del gateway via HTTP a un servicio conocido
+      const res = await fetch('https://api.ipify.org?format=json', { method: 'GET' }).catch(() => null);
+      // No podemos obtener la IP local del celular directamente sin un módulo nativo
+      // Usamos la subred de las maquinas monitoreadas o el default
+    } catch {}
+  };
+
+  const probeIP = async (ip: string): Promise<any | null> => {
+    const ports = [80, 443, 8080, 3389, 22, 21, 445, 139, 9100, 631, 515, 53, 5353];
+    const openPorts: number[] = [];
+    const checks = ports.map(port => new Promise<void>((resolve) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => { controller.abort(); resolve(); }, 600);
+      fetch(`http://${ip}:${port}`, { signal: controller.signal, method: 'HEAD', mode: 'no-cors' })
+        .then(() => { openPorts.push(port); clearTimeout(timer); resolve(); })
+        .catch(() => { clearTimeout(timer); resolve(); });
+    }));
+    await Promise.all(checks);
+    if (openPorts.length > 0) {
+      let deviceType = 'Desconocido';
+      if (openPorts.includes(9100) || openPorts.includes(631) || openPorts.includes(515)) deviceType = '🖨 Impresora';
+      else if (openPorts.includes(80) && openPorts.includes(443) && !openPorts.includes(3389)) deviceType = '🌐 Router/AP';
+      else if (openPorts.includes(3389)) deviceType = '💻 PC/Notebook';
+      else if (openPorts.includes(22)) deviceType = '🖥 Servidor/Linux';
+      else if (openPorts.includes(445) || openPorts.includes(139)) deviceType = '💻 PC Windows';
+      else if (openPorts.includes(80) || openPorts.includes(443)) deviceType = '📱 Dispositivo';
+      else if (openPorts.includes(5353)) deviceType = '📱 Movil/IoT';
+      return { ip, ports: openPorts.sort((a, b) => a - b), type: deviceType, status: 'up' };
+    }
+    // Fallback: intentar HTTP simple
+    try {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 500);
+      await fetch(`http://${ip}`, { signal: c.signal, method: 'HEAD', mode: 'no-cors' });
+      clearTimeout(t);
+      return { ip, ports: [80], type: '📱 Dispositivo', status: 'up' };
+    } catch { return null; }
+  };
+
   const scanNetwork = async () => {
     const subnet = scanSubnet || getLocalSubnet();
-    setScanning(true); setScanResults([]); setScanProgress('Iniciando escaneo...');
+    setScanning(true); setScanResults([]); setScanProgress('Iniciando escaneo de red...');
     const results: any[] = [];
-    for (let i = 1; i <= 254; i++) {
-      const ip = subnet + i;
-      if (i % 10 === 0) setScanProgress(`Escaneando ${ip}... (${i}/254)`);
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 800);
-        const res = await fetch(`http://${ip}`, { signal: controller.signal, method: 'HEAD' }).catch(() => null);
-        clearTimeout(timeout);
-        if (res) {
-          const openPorts: number[] = [80];
-          results.push({ ip, hostname: '', ports: openPorts, status: 'up', response: res.status });
-          setScanResults([...results]);
-        }
-      } catch {}
+    const batchSize = 15;
+    for (let batch = 0; batch < 254; batch += batchSize) {
+      const promises = [];
+      for (let i = batch + 1; i <= Math.min(batch + batchSize, 254); i++) {
+        promises.push(probeIP(subnet + i));
+      }
+      setScanProgress(`Escaneando ${subnet}${batch + 1}-${Math.min(batch + batchSize, 254)}... (${Math.min(batch + batchSize, 254)}/254)`);
+      const batchResults = await Promise.all(promises);
+      for (const r of batchResults) {
+        if (r) { results.push(r); setScanResults([...results]); }
+      }
     }
-    setScanProgress(`Escaneo completo: ${results.length} dispositivos encontrados`);
+    setScanProgress(`Completo: ${results.length} dispositivos en ${subnet}*`);
     setScanResults(results);
     setScanning(false);
   };
@@ -1559,14 +1598,22 @@ function AppContent() {
             <View style={{marginBottom: 16}}>
               <Text style={{color: th.sub, fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase'}}>Dispositivos encontrados ({scanResults.length})</Text>
               {scanResults.map((d: any, i: number) => (
-                <View key={i} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center'}}>
-                  <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: '#00e676', marginRight: 10}} />
-                  <View style={{flex: 1}}>
-                    <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{d.ip}</Text>
-                    {d.hostname ? <Text style={{color: th.sub, fontSize: 11}}>{d.hostname}</Text> : null}
+                <View key={i} style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#00e676'}}>
+                  <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
+                    <Text style={{fontSize: 18, marginRight: 10}}>{(d.type || '📱').split(' ')[0]}</Text>
+                    <View style={{flex: 1}}>
+                      <Text style={{color: th.text, fontSize: 15, fontWeight: '700'}}>{d.ip}</Text>
+                      <Text style={{color: th.sub, fontSize: 11}}>{(d.type || '').split(' ').slice(1).join(' ') || 'Dispositivo'}</Text>
+                    </View>
                   </View>
                   {d.ports && d.ports.length > 0 && (
-                    <Text style={{color: '#00d4ff', fontSize: 10}}>P: {d.ports.join(', ')}</Text>
+                    <View style={{flexDirection: 'row', flexWrap: 'wrap', marginTop: 4}}>
+                      {d.ports.map((p: number, j: number) => (
+                        <View key={j} style={{backgroundColor: th.border, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, marginRight: 4, marginBottom: 2}}>
+                          <Text style={{color: '#00d4ff', fontSize: 10, fontWeight: '600'}}>{p}</Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               ))}
@@ -3424,7 +3471,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.0.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.0.1</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3483,7 +3530,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.0.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.0.1</Text>
             </View>
           </View>
         </TouchableOpacity>
