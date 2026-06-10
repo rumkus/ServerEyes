@@ -945,9 +945,9 @@ function AppContent() {
             </View>
           ))}
         </ScrollView>
-        <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
+        <TouchableOpacity style={{position: 'absolute', bottom: 28, left: 24, width: 50, height: 50, borderRadius: 25, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
           onPress={() => { setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
-          <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
+          <Text style={{fontSize: 24, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
         <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
@@ -1080,7 +1080,7 @@ function AppContent() {
             </View>
           )}
         </ScrollView>
-        <TouchableOpacity style={{position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
+        <TouchableOpacity style={{position: 'absolute', bottom: 28, left: 24, width: 50, height: 50, borderRadius: 25, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
           onPress={() => {
             const now = new Date();
             const pad = (n: number) => String(n).padStart(2, '0');
@@ -1361,6 +1361,7 @@ function AppContent() {
             </ScrollView>
           </>
         )}
+        <FloatingBackButton />
         <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
@@ -3179,7 +3180,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.9.1</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.9.2</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3237,7 +3238,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.9.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.9.2</Text>
             </View>
           </View>
         </TouchableOpacity>
