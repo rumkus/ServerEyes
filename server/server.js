@@ -64,7 +64,7 @@ async function sendEmail(to, subject, body) {
   }
 }
 
-async function sendEmailWithUserSMTP(user, subject, htmlBody) {
+async function sendEmailWithUserSMTP(user, subject, htmlBody, toOverride) {
   try {
     const nodemailer = require('nodemailer');
     const transport = nodemailer.createTransport(user.smtp_host ? {
@@ -72,9 +72,10 @@ async function sendEmailWithUserSMTP(user, subject, htmlBody) {
       auth: { user: user.smtp_user, pass: user.smtp_pass }
     } : { service: 'gmail', auth: { user: user.smtp_user, pass: user.smtp_pass } });
 
+    const recipient = toOverride || user.email;
     await transport.sendMail({
       from: user.smtp_from || user.smtp_user,
-      to: user.email,
+      to: recipient,
       subject: '[ServerEyes] ' + subject,
       html: `<div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
         <div style="max-width:500px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
@@ -85,9 +86,9 @@ async function sendEmailWithUserSMTP(user, subject, htmlBody) {
         </div>
       </div>`
     });
-    console.log(`[EMAIL-USER] Enviado a ${user.email}: ${subject}`);
+    console.log(`[EMAIL-USER] Enviado a ${recipient}: ${subject}`);
   } catch (err) {
-    console.error(`[EMAIL-USER] Error enviando a ${user.email}:`, err.message);
+    console.error(`[EMAIL-USER] Error enviando a ${toOverride || user.email}:`, err.message);
   }
 }
 
@@ -758,10 +759,10 @@ app.post('/api/organization/invite', authenticateToken, async (req, res) => {
     // Enviar email de invitacion
     const orgInfo = await pool.query('SELECT name FROM organizations WHERE id = $1', [org.rows[0].id]);
     const orgName = orgInfo.rows[0]?.name || 'una empresa';
-    const inviter = await pool.query('SELECT email, nombre FROM users WHERE id = $1', [req.user.id]);
-    const inviterName = inviter.rows[0]?.nombre || inviter.rows[0]?.email || '';
-    sendEmail(email, `Invitacion a ${orgName}`,
-      `<h3 style="color:#333">Te invitaron a unirte a <strong>${orgName}</strong></h3>
+    const inviter = await pool.query('SELECT email, nombre, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [req.user.id]);
+    const inviterData = inviter.rows[0];
+    const inviterName = inviterData?.nombre || inviterData?.email || '';
+    const inviteHtml = `<h3 style="color:#333">Te invitaron a unirte a <strong>${orgName}</strong></h3>
        <p style="color:#555">${inviterName} te invito a ser parte de su equipo en ServerEyes.</p>
        <div style="background:#f0f7ff;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
          <p style="color:#888;margin:0 0 8px;font-size:13px">Tu codigo de invitacion:</p>
@@ -773,8 +774,12 @@ app.post('/api/organization/invite', authenticateToken, async (req, res) => {
          <li>Registrate con este email (<strong>${email}</strong>)</li>
          <li>Ve a <strong>Empresa y Equipo</strong> e ingresa el codigo</li>
        </ol>
-       <p style="color:#999;font-size:12px">Si no esperabas esta invitacion, ignora este mensaje.</p>`
-    );
+       <p style="color:#999;font-size:12px">Si no esperabas esta invitacion, ignora este mensaje.</p>`;
+    if (inviterData?.smtp_user && inviterData?.smtp_pass) {
+      sendEmailWithUserSMTP(inviterData, `Invitacion a ${orgName}`, inviteHtml, email);
+    } else {
+      sendEmail(email, `Invitacion a ${orgName}`, inviteHtml);
+    }
 
     res.json({ message: 'Invitacion creada', code });
   } catch (error) {
