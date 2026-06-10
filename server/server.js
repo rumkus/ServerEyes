@@ -852,7 +852,8 @@ app.post('/api/organization/join', authenticateToken, async (req, res) => {
     await pool.query('UPDATE users SET organization_id = $1, role = $2 WHERE id = $3', [invitation.organization_id, 'technician', req.user.id]);
     await pool.query('UPDATE invitations SET status = $1 WHERE id = $2', ['accepted', invitation.id]);
 
-    const org = await pool.query('SELECT name FROM organizations WHERE id = $1', [invitation.organization_id]);
+    const org = await pool.query('SELECT name, owner_id FROM organizations WHERE id = $1', [invitation.organization_id]);
+    try { await sendPush(org.rows[0].owner_id, '👥 Nuevo miembro', `${user.rows[0].email} acepto la invitacion a ${org.rows[0].name}`, { type: 'invite_accepted' }); } catch(_){}
     res.json({ message: 'Te uniste a ' + org.rows[0].name, organization_id: invitation.organization_id });
   } catch (error) {
     console.error('Error aceptando invitacion:', error);
@@ -921,7 +922,7 @@ app.post('/api/pending-changes', authenticateToken, async (req, res) => {
       [req.user.id, ownerId, change_type, target_type, target_id, target_name || '', JSON.stringify(data)]
     );
     // Notificar al owner
-    try { await notifyUser(ownerId, `Cambio pendiente: ${change_type} en ${target_name || target_type}`); } catch(_){}
+    try { await sendPush(ownerId, '📋 Cambio pendiente', `${change_type} en ${target_name || target_type}`, { type: 'pending_change' }); } catch(_){}
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
@@ -944,52 +945,63 @@ app.get('/api/pending-changes', authenticateToken, async (req, res) => {
   }
 });
 
-// Aprobar o rechazar cambio
-app.post('/api/pending-changes/:id/:action', authenticateToken, async (req, res) => {
-  try {
-    const { id, action } = req.params;
-    if (action !== 'approve' && action !== 'reject') return res.status(400).json({ error: 'Accion invalida' });
-    const pc = await pool.query('SELECT * FROM pending_changes WHERE id = $1 AND owner_id = $2 AND status = $3', [id, req.user.id, 'pending']);
-    if (pc.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
-    const change = pc.rows[0];
+// Funcion helper para resolver un cambio pendiente
+async function resolvePendingChange(changeId, ownerId, doApply) {
+  const pc = await pool.query('SELECT * FROM pending_changes WHERE id = $1 AND owner_id = $2 AND status = $3', [changeId, ownerId, 'pending']);
+  if (pc.rows.length === 0) return null;
+  const change = pc.rows[0];
 
-    if (action === 'approve' && change.data) {
-      const d = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
-      if (change.change_type === 'edit' && change.target_type === 'machine') {
-        const sets = []; const vals = []; let i = 1;
-        for (const [k, v] of Object.entries(d)) {
-          if (['machine_name','notes','alert_cpu','alert_ram','alert_disk','alert_ping','alert_offline','rdp_port','rdp_user','mac_address'].includes(k)) {
-            sets.push(`${k} = $${i}`); vals.push(v); i++;
-          }
+  if (doApply && change.data) {
+    const d = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
+    if (change.change_type === 'edit' && change.target_type === 'machine') {
+      const sets = []; const vals = []; let i = 1;
+      for (const [k, v] of Object.entries(d)) {
+        if (['machine_name','notes','alert_cpu','alert_ram','alert_disk','alert_ping','alert_offline','rdp_port','rdp_user','mac_address'].includes(k)) {
+          sets.push(`${k} = $${i}`); vals.push(v); i++;
         }
-        if (sets.length > 0) {
-          vals.push(change.target_id);
-          await pool.query(`UPDATE machines SET ${sets.join(', ')} WHERE id = $${i}`, vals);
-        }
-      } else if (change.change_type === 'delete' && change.target_type === 'machine') {
-        await pool.query('DELETE FROM machines WHERE id = $1 AND user_id = $2', [change.target_id, req.user.id]);
-      } else if (change.change_type === 'edit' && change.target_type === 'url') {
-        const sets = []; const vals = []; let i = 1;
-        for (const [k, v] of Object.entries(d)) {
-          if (['url','name','method','expected_status','timeout_ms','interval_seconds','is_active','notify_down'].includes(k)) {
-            sets.push(`${k} = $${i}`); vals.push(v); i++;
-          }
-        }
-        if (sets.length > 0) {
-          vals.push(change.target_id);
-          await pool.query(`UPDATE url_monitors SET ${sets.join(', ')} WHERE id = $${i}`, vals);
-        }
-      } else if (change.change_type === 'delete' && change.target_type === 'url') {
-        await pool.query('DELETE FROM url_monitors WHERE id = $1 AND user_id = $2', [change.target_id, req.user.id]);
       }
+      if (sets.length > 0) { vals.push(change.target_id); await pool.query(`UPDATE machines SET ${sets.join(', ')} WHERE id = $${i}`, vals); }
+    } else if (change.change_type === 'delete' && change.target_type === 'machine') {
+      await pool.query('DELETE FROM machines WHERE id = $1 AND user_id = $2', [change.target_id, ownerId]);
+    } else if (change.change_type === 'edit' && change.target_type === 'url') {
+      const sets = []; const vals = []; let i = 1;
+      for (const [k, v] of Object.entries(d)) {
+        if (['url','name','method','expected_status','timeout_ms','interval_seconds','is_active','notify_down'].includes(k)) {
+          sets.push(`${k} = $${i}`); vals.push(v); i++;
+        }
+      }
+      if (sets.length > 0) { vals.push(change.target_id); await pool.query(`UPDATE url_monitors SET ${sets.join(', ')} WHERE id = $${i}`, vals); }
+    } else if (change.change_type === 'delete' && change.target_type === 'url') {
+      await pool.query('DELETE FROM url_monitors WHERE id = $1 AND user_id = $2', [change.target_id, ownerId]);
     }
+  }
 
-    await pool.query('UPDATE pending_changes SET status = $1, resolved_at = NOW(), resolved_by = $2 WHERE id = $3',
-      [action === 'approve' ? 'approved' : 'rejected', req.user.id, id]);
-    try { await notifyUser(change.requester_id, `Tu cambio fue ${action === 'approve' ? 'aprobado' : 'rechazado'}: ${change.change_type} en ${change.target_name || change.target_type}`); } catch(_){}
-    res.json({ message: action === 'approve' ? 'Aprobado' : 'Rechazado' });
+  await pool.query('UPDATE pending_changes SET status = $1, resolved_at = NOW(), resolved_by = $2 WHERE id = $3',
+    [doApply ? 'approved' : 'rejected', ownerId, changeId]);
+  try { await sendPush(change.requester_id, doApply ? '✅ Cambio aprobado' : '❌ Cambio rechazado', `${change.change_type} en ${change.target_name || change.target_type}`, { type: 'change_resolved' }); } catch(_){}
+  return change;
+}
+
+// Aprobar cambio
+app.post('/api/pending-changes/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    const change = await resolvePendingChange(req.params.id, req.user.id, true);
+    if (!change) return res.status(404).json({ error: 'No encontrado' });
+    res.json({ message: 'Aprobado' });
   } catch (error) {
-    console.error('Error en pending change:', error);
+    console.error('Error aprobando:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Rechazar cambio
+app.post('/api/pending-changes/:id/reject', authenticateToken, async (req, res) => {
+  try {
+    const change = await resolvePendingChange(req.params.id, req.user.id, false);
+    if (!change) return res.status(404).json({ error: 'No encontrado' });
+    res.json({ message: 'Rechazado' });
+  } catch (error) {
+    console.error('Error rechazando:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });

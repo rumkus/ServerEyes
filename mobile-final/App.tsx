@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration, Share, ScrollView, AppState } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, StatusBar, Vibration, Share, ScrollView, AppState, RefreshControl } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import RNShare from 'react-native-share';
@@ -3219,7 +3219,14 @@ function AppContent() {
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Empresa y Equipo" />
-        <ScrollView contentContainerStyle={{padding: 24}}>
+        <ScrollView contentContainerStyle={{padding: 24}} refreshControl={
+          <RefreshControl refreshing={false} onRefresh={async () => {
+            const res = await apiRequest('/api/organization', {}, token);
+            if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } }
+            const pc = await apiRequest('/api/pending-changes', {}, token);
+            if (pc.ok) setPendingChanges(pc.data);
+          }} tintColor="#00d4ff" />
+        }>
 
           {!org ? (
             <>
@@ -3691,7 +3698,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.2</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.3</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3753,7 +3760,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.2</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.3</Text>
             </View>
           </View>
         </TouchableOpacity>
