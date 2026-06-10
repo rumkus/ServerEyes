@@ -754,6 +754,28 @@ app.post('/api/organization/invite', authenticateToken, async (req, res) => {
       'INSERT INTO invitations (organization_id, invited_by, email, code) VALUES ($1, $2, $3, $4)',
       [org.rows[0].id, req.user.id, email, code]
     );
+
+    // Enviar email de invitacion
+    const orgInfo = await pool.query('SELECT name FROM organizations WHERE id = $1', [org.rows[0].id]);
+    const orgName = orgInfo.rows[0]?.name || 'una empresa';
+    const inviter = await pool.query('SELECT email, nombre FROM users WHERE id = $1', [req.user.id]);
+    const inviterName = inviter.rows[0]?.nombre || inviter.rows[0]?.email || '';
+    sendEmail(email, `Invitacion a ${orgName}`,
+      `<h3 style="color:#333">Te invitaron a unirte a <strong>${orgName}</strong></h3>
+       <p style="color:#555">${inviterName} te invito a ser parte de su equipo en ServerEyes.</p>
+       <div style="background:#f0f7ff;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
+         <p style="color:#888;margin:0 0 8px;font-size:13px">Tu codigo de invitacion:</p>
+         <p style="font-size:28px;font-weight:800;color:#2196F3;letter-spacing:4px;margin:0">${code}</p>
+       </div>
+       <p style="color:#555">Para unirte:</p>
+       <ol style="color:#555">
+         <li>Descarga la app <strong>ServerEyes</strong> o ingresa a la web</li>
+         <li>Registrate con este email (<strong>${email}</strong>)</li>
+         <li>Ve a <strong>Empresa y Equipo</strong> e ingresa el codigo</li>
+       </ol>
+       <p style="color:#999;font-size:12px">Si no esperabas esta invitacion, ignora este mensaje.</p>`
+    );
+
     res.json({ message: 'Invitacion creada', code });
   } catch (error) {
     console.error('Error invitando:', error);
