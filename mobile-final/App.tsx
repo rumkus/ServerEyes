@@ -276,6 +276,14 @@ function AppContent() {
   const [supportNewMode, setSupportNewMode] = useState(false);
   const [supportSending, setSupportSending] = useState(false);
   const [supportSent, setSupportSent] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanResults, setScanResults] = useState<any[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState('');
+  const [scanSubnet, setScanSubnet] = useState('');
+  const [savedScans, setSavedScans] = useState<any[]>([]);
+  const [scanDetail, setScanDetail] = useState<any>(null);
+  const [scanCompare, setScanCompare] = useState<any>(null);
   const [customModal, setCustomModal] = useState<any>(null);
 
   // Funcion para volver a la pantalla principal
@@ -287,6 +295,9 @@ function AppContent() {
     if (showMaintenance) { setShowMaintenance(false); return true; }
     if (supportTicketId) { setSupportTicketId(null); return true; }
     if (showSupport) { setShowSupport(false); return true; }
+    if (scanCompare) { setScanCompare(null); return true; }
+    if (scanDetail) { setScanDetail(null); return true; }
+    if (showScanner) { setShowScanner(false); return true; }
     if (sslAdding) { setSslAdding(false); return true; }
     if (showSSL) { setShowSSL(false); return true; }
     if (incidentDetail) { setIncidentDetail(null); return true; }
@@ -1361,6 +1372,237 @@ function AppContent() {
             </ScrollView>
           </>
         )}
+        <FloatingBackButton />
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
+      </View>
+    );
+  }
+
+  // NETWORK SCANNER
+  const commonPorts = [21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,1521,3306,3389,5432,5900,8080,8443];
+
+  const loadSavedScans = async () => {
+    const res = await apiRequest('/api/network-scans', {}, token);
+    if (res.ok) setSavedScans(res.data);
+  };
+
+  const getLocalSubnet = () => {
+    const m = machines.find((m: any) => m.is_online && m.local_ip);
+    if (m) {
+      const ip = m.local_ip.split(' | ')[0].split(' (')[0].trim();
+      const parts = ip.split('.');
+      if (parts.length === 4) return parts.slice(0, 3).join('.') + '.';
+    }
+    return '192.168.1.';
+  };
+
+  const scanNetwork = async () => {
+    const subnet = scanSubnet || getLocalSubnet();
+    setScanning(true); setScanResults([]); setScanProgress('Iniciando escaneo...');
+    const results: any[] = [];
+    for (let i = 1; i <= 254; i++) {
+      const ip = subnet + i;
+      if (i % 10 === 0) setScanProgress(`Escaneando ${ip}... (${i}/254)`);
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 800);
+        const res = await fetch(`http://${ip}`, { signal: controller.signal, method: 'HEAD' }).catch(() => null);
+        clearTimeout(timeout);
+        if (res) {
+          const openPorts: number[] = [80];
+          results.push({ ip, hostname: '', ports: openPorts, status: 'up', response: res.status });
+          setScanResults([...results]);
+        }
+      } catch {}
+    }
+    setScanProgress(`Escaneo completo: ${results.length} dispositivos encontrados`);
+    setScanResults(results);
+    setScanning(false);
+  };
+
+  const saveScan = async () => {
+    if (scanResults.length === 0) return;
+    showModal('💾', 'Guardar escaneo', 'Ingresa un nombre para este escaneo:', [
+      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+      { text: 'Guardar', onPress: async () => {
+        const name = scanSubnet ? `Red ${scanSubnet}*` : `Escaneo ${new Date().toLocaleDateString('es')}`;
+        const res = await apiRequest('/api/network-scans', {
+          method: 'POST', body: JSON.stringify({ name, subnet: scanSubnet || getLocalSubnet(), results: scanResults })
+        }, token);
+        if (res.ok) { showModal('✅', 'Guardado', `${scanResults.length} dispositivos guardados`); loadSavedScans(); }
+      }}
+    ]);
+  };
+
+  if (scanCompare) {
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Comparacion" subtitle={`${scanCompare.scan1.name} vs ${scanCompare.scan2.name}`} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 80}}>
+          <View style={{flexDirection: 'row', marginBottom: 16}}>
+            <View style={{flex: 1, backgroundColor: '#112a1a', borderRadius: 10, padding: 12, marginRight: 8, alignItems: 'center'}}>
+              <Text style={{color: '#00e676', fontSize: 20, fontWeight: '800'}}>{scanCompare.new_devices.length}</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>Nuevas</Text>
+            </View>
+            <View style={{flex: 1, backgroundColor: '#2d1117', borderRadius: 10, padding: 12, marginRight: 8, alignItems: 'center'}}>
+              <Text style={{color: '#ff5252', fontSize: 20, fontWeight: '800'}}>{scanCompare.removed_devices.length}</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>Eliminadas</Text>
+            </View>
+            <View style={{flex: 1, backgroundColor: '#1a1a00', borderRadius: 10, padding: 12, alignItems: 'center'}}>
+              <Text style={{color: '#ff9800', fontSize: 20, fontWeight: '800'}}>{scanCompare.ip_changes.length}</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>IP cambiada</Text>
+            </View>
+          </View>
+          {scanCompare.new_devices.length > 0 && (
+            <View style={{marginBottom: 16}}>
+              <Text style={{color: '#00e676', fontSize: 14, fontWeight: '700', marginBottom: 8}}>Dispositivos nuevos</Text>
+              {scanCompare.new_devices.map((d: any, i: number) => (
+                <View key={i} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: '#00e676'}}>
+                  <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{d.ip}</Text>
+                  {d.hostname ? <Text style={{color: th.sub, fontSize: 11}}>{d.hostname}</Text> : null}
+                </View>
+              ))}
+            </View>
+          )}
+          {scanCompare.removed_devices.length > 0 && (
+            <View style={{marginBottom: 16}}>
+              <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '700', marginBottom: 8}}>Dispositivos eliminados</Text>
+              {scanCompare.removed_devices.map((d: any, i: number) => (
+                <View key={i} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: '#ff5252'}}>
+                  <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{d.ip}</Text>
+                  {d.hostname ? <Text style={{color: th.sub, fontSize: 11}}>{d.hostname}</Text> : null}
+                </View>
+              ))}
+            </View>
+          )}
+          {scanCompare.ip_changes.length > 0 && (
+            <View style={{marginBottom: 16}}>
+              <Text style={{color: '#ff9800', fontSize: 14, fontWeight: '700', marginBottom: 8}}>Cambios de IP</Text>
+              {scanCompare.ip_changes.map((d: any, i: number) => (
+                <View key={i} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: '#ff9800'}}>
+                  <Text style={{color: th.text, fontSize: 13, fontWeight: '600'}}>{d.hostname}</Text>
+                  <Text style={{color: '#ff9800', fontSize: 12}}>{d.old_ip} → {d.new_ip}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+        <FloatingBackButton />
+      </View>
+    );
+  }
+
+  if (scanDetail) {
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title={scanDetail.name} subtitle={`${scanDetail.device_count} dispositivos · ${new Date(scanDetail.created_at).toLocaleDateString('es')}`} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 80}}>
+          {(scanDetail.results || []).map((d: any, i: number) => (
+            <View key={i} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center'}}>
+              <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: '#00e676', marginRight: 10}} />
+              <View style={{flex: 1}}>
+                <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{d.ip}</Text>
+                {d.hostname ? <Text style={{color: th.sub, fontSize: 11}}>{d.hostname}</Text> : null}
+              </View>
+              {d.ports && d.ports.length > 0 && (
+                <Text style={{color: '#00d4ff', fontSize: 10}}>{d.ports.join(', ')}</Text>
+              )}
+            </View>
+          ))}
+          <View style={{marginTop: 16}}>
+            <Text style={{color: th.sub, fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase'}}>Comparar con otro escaneo</Text>
+            {savedScans.filter(s => s.id !== scanDetail.id).map((s: any) => (
+              <TouchableOpacity key={s.id} onPress={async () => {
+                const res = await apiRequest(`/api/network-scans/${scanDetail.id}/compare/${s.id}`, {}, token);
+                if (res.ok) setScanCompare(res.data);
+              }} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center'}}>
+                <Text style={{fontSize: 16, marginRight: 10}}>📊</Text>
+                <View style={{flex: 1}}>
+                  <Text style={{color: th.text, fontSize: 13, fontWeight: '600'}}>{s.name}</Text>
+                  <Text style={{color: th.sub, fontSize: 11}}>{s.device_count} dispositivos · {new Date(s.created_at).toLocaleDateString('es')}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+        <FloatingBackButton />
+      </View>
+    );
+  }
+
+  if (showScanner) {
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Escaner de Red" subtitle={scanning ? scanProgress : `${scanResults.length} dispositivos`} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 80}}>
+          <View style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 16}}>
+            <Text style={{color: th.sub, fontSize: 12, marginBottom: 6}}>Subred a escanear</Text>
+            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 14, color: th.text, marginBottom: 10}} value={scanSubnet} onChangeText={setScanSubnet} placeholder={getLocalSubnet()} placeholderTextColor="#555" autoCapitalize="none" />
+            <View style={{flexDirection: 'row'}}>
+              <TouchableOpacity disabled={scanning} onPress={scanNetwork}
+                style={{flex: 1, backgroundColor: scanning ? '#555' : '#00d4ff', borderRadius: 10, padding: 12, alignItems: 'center', marginRight: 8}}>
+                <Text style={{color: scanning ? '#888' : '#0a1628', fontWeight: '700', fontSize: 14}}>{scanning ? 'Escaneando...' : '🔍 Escanear'}</Text>
+              </TouchableOpacity>
+              {scanResults.length > 0 && !scanning && (
+                <TouchableOpacity onPress={saveScan}
+                  style={{backgroundColor: '#4CAF50', borderRadius: 10, padding: 12, paddingHorizontal: 20}}>
+                  <Text style={{color: '#fff', fontWeight: '700', fontSize: 14}}>💾</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {scanResults.length > 0 && (
+            <View style={{marginBottom: 16}}>
+              <Text style={{color: th.sub, fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase'}}>Dispositivos encontrados ({scanResults.length})</Text>
+              {scanResults.map((d: any, i: number) => (
+                <View key={i} style={{backgroundColor: th.card, borderRadius: 10, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center'}}>
+                  <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: '#00e676', marginRight: 10}} />
+                  <View style={{flex: 1}}>
+                    <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{d.ip}</Text>
+                    {d.hostname ? <Text style={{color: th.sub, fontSize: 11}}>{d.hostname}</Text> : null}
+                  </View>
+                  {d.ports && d.ports.length > 0 && (
+                    <Text style={{color: '#00d4ff', fontSize: 10}}>P: {d.ports.join(', ')}</Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {savedScans.length > 0 && (
+            <View>
+              <Text style={{color: th.sub, fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase'}}>Escaneos guardados</Text>
+              {savedScans.map((s: any) => (
+                <TouchableOpacity key={s.id} onPress={async () => {
+                  const res = await apiRequest(`/api/network-scans/${s.id}`, {}, token);
+                  if (res.ok) { setScanDetail(res.data); loadSavedScans(); }
+                }} style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 8, flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{fontSize: 24, marginRight: 12}}>📡</Text>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: th.text, fontSize: 14, fontWeight: '700'}}>{s.name}</Text>
+                    <Text style={{color: th.sub, fontSize: 11}}>{s.device_count} dispositivos · {new Date(s.created_at).toLocaleDateString('es')}</Text>
+                  </View>
+                  <TouchableOpacity onPress={async (e) => {
+                    e.stopPropagation();
+                    showModal('🗑', 'Eliminar escaneo?', s.name, [
+                      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                      { text: 'Eliminar', style: 'danger', onPress: async () => {
+                        await apiRequest(`/api/network-scans/${s.id}`, { method: 'DELETE' }, token);
+                        loadSavedScans();
+                      }}
+                    ]);
+                  }} style={{padding: 8}}>
+                    <Text style={{color: '#ff5252', fontSize: 14}}>🗑</Text>
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </ScrollView>
         <FloatingBackButton />
         <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
@@ -3182,7 +3424,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v2.9.3</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.0.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3217,7 +3459,8 @@ function AppContent() {
                 {icon: '🌐', label: 'URLs', action: async () => { setMenuOpen(false); await loadUrlMonitors(); setShowUrlMonitors(true); }},
                 {icon: '🔧', label: 'Mantenimiento', action: async () => { setMenuOpen(false); await loadMaintenanceWindows(); setShowMaintenance(true); }},
                 {icon: '🎧', label: 'Soporte', action: async () => { setMenuOpen(false); await loadSupportTickets(); setShowSupport(true); }},
-                {icon: '🔒', label: 'Certificados SSL', action: async () => { setMenuOpen(false); await loadSSLMonitors(); setShowSSL(true); }},
+                {icon: '📡', label: 'Escaner de Red', action: async () => { setMenuOpen(false); await loadSavedScans(); setShowScanner(true); }},
+              {icon: '🔒', label: 'Certificados SSL', action: async () => { setMenuOpen(false); await loadSSLMonitors(); setShowSSL(true); }},
                 {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
                 {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
@@ -3240,7 +3483,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v2.9.3</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.0.0</Text>
             </View>
           </View>
         </TouchableOpacity>

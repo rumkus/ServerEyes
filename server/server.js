@@ -522,6 +522,19 @@ async function initDB() {
     )
   `);
 
+  // Network scans
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS network_scans (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      name VARCHAR(255) NOT NULL,
+      subnet VARCHAR(50),
+      results JSONB DEFAULT '[]',
+      device_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   // Security info
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS security_info JSONB`).catch(() => {});
 
@@ -2697,6 +2710,73 @@ app.post('/api/admin/support-email', authenticateToken, requireAdmin, async (req
     if (!email) return res.status(400).json({ error: 'Email requerido' });
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('support_email', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [email]);
     res.json({ message: 'Email actualizado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// ── NETWORK SCANS ──
+app.get('/api/network-scans', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, subnet, device_count, created_at FROM network_scans WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    res.json(result.rows);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.get('/api/network-scans/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM network_scans WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    res.json(result.rows[0]);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.post('/api/network-scans', authenticateToken, async (req, res) => {
+  try {
+    const { name, subnet, results } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nombre requerido' });
+    const deviceCount = Array.isArray(results) ? results.length : 0;
+    const result = await pool.query(
+      'INSERT INTO network_scans (user_id, name, subnet, results, device_count) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [req.user.id, name, subnet || null, JSON.stringify(results || []), deviceCount]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.delete('/api/network-scans/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM network_scans WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ message: 'Eliminado' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.get('/api/network-scans/:id/compare/:otherId', authenticateToken, async (req, res) => {
+  try {
+    const [scan1, scan2] = await Promise.all([
+      pool.query('SELECT * FROM network_scans WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]),
+      pool.query('SELECT * FROM network_scans WHERE id = $1 AND user_id = $2', [req.params.otherId, req.user.id])
+    ]);
+    if (scan1.rows.length === 0 || scan2.rows.length === 0) return res.status(404).json({ error: 'Escaneo no encontrado' });
+    const s1 = scan1.rows[0]; const s2 = scan2.rows[0];
+    const r1 = s1.results || []; const r2 = s2.results || [];
+    const ips1 = new Set(r1.map((d) => d.ip));
+    const ips2 = new Set(r2.map((d) => d.ip));
+    const newDevices = r2.filter((d) => !ips1.has(d.ip));
+    const removedDevices = r1.filter((d) => !ips2.has(d.ip));
+    const changedDevices = r2.filter((d) => {
+      const prev = r1.find((p) => p.hostname && d.hostname && p.hostname === d.hostname && p.ip !== d.ip);
+      return prev;
+    }).map((d) => {
+      const prev = r1.find((p) => p.hostname === d.hostname);
+      return { hostname: d.hostname, old_ip: prev.ip, new_ip: d.ip };
+    });
+    res.json({
+      scan1: { id: s1.id, name: s1.name, date: s1.created_at, count: r1.length },
+      scan2: { id: s2.id, name: s2.name, date: s2.created_at, count: r2.length },
+      new_devices: newDevices,
+      removed_devices: removedDevices,
+      ip_changes: changedDevices,
+      same: r2.filter((d) => ips1.has(d.ip)).length
+    });
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
