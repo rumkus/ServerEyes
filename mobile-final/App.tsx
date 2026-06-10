@@ -224,6 +224,9 @@ function AppContent() {
   const [joinCode, setJoinCode] = useState('');
   const [shareUserId, setShareUserId] = useState<number | null>(null);
   const [shareSelected, setShareSelected] = useState<Set<number>>(new Set());
+  const [shareUrlSelected, setShareUrlSelected] = useState<Set<number>>(new Set());
+  const [shareHistorySelected, setShareHistorySelected] = useState<Set<number>>(new Set());
+  const [pendingChanges, setPendingChanges] = useState<any[]>([]);
   const [showUrlMonitors, setShowUrlMonitors] = useState(false);
   const [urlMonitors, setUrlMonitors] = useState<any[]>([]);
   const [showAddUrl, setShowAddUrl] = useState(false);
@@ -3087,37 +3090,76 @@ function AppContent() {
   // SHARE PICKER - elegir maquinas para compartir con un tecnico
   if (shareUserId) {
     const myMachines = machines.filter(m => !m.is_shared);
+    const myUrls = urlMonitors.filter(u => !u.is_shared);
     return (
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
-          <Text style={s.title}>Compartir maquinas</Text>
-          <Text style={[s.sub, {marginBottom: 16}]}>Selecciona las maquinas que este tecnico podra ver</Text>
+          <Text style={s.title}>Compartir recursos</Text>
+          <Text style={[s.sub, {marginBottom: 16}]}>Selecciona que puede ver este tecnico</Text>
+
+          <Text style={{color: '#00d4ff', fontSize: 15, fontWeight: '700', marginBottom: 10}}>Maquinas ({myMachines.length})</Text>
           {myMachines.map(m => (
-            <TouchableOpacity key={m.id} onPress={() => {
-              const next = new Set(shareSelected);
-              if (next.has(m.id)) next.delete(m.id); else next.add(m.id);
-              setShareSelected(next);
-            }} style={{flexDirection: 'row', alignItems: 'center', backgroundColor: '#16213e', borderRadius: 10, padding: 14, marginBottom: 8}}>
-              <View style={{width: 22, height: 22, borderWidth: 2, borderColor: shareSelected.has(m.id) ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 12, backgroundColor: shareSelected.has(m.id) ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
-                {shareSelected.has(m.id) && <Text style={{color: '#1a1a2e', fontSize: 15, fontWeight: '700'}}>✓</Text>}
-              </View>
-              <View style={{flex: 1}}>
-                <Text style={{color: '#eee', fontSize: 15, fontWeight: '600'}}>{m.machine_name}</Text>
-                {m.grupo && <Text style={{color: '#00d4ff', fontSize: 11}}>{m.grupo}</Text>}
-              </View>
-              <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: m.is_online ? '#00e676' : '#ff5252'}} />
-            </TouchableOpacity>
+            <View key={m.id} style={{backgroundColor: '#16213e', borderRadius: 10, padding: 14, marginBottom: 8}}>
+              <TouchableOpacity onPress={() => {
+                const next = new Set(shareSelected);
+                if (next.has(m.id)) { next.delete(m.id); const nh = new Set(shareHistorySelected); nh.delete(m.id); setShareHistorySelected(nh); }
+                else next.add(m.id);
+                setShareSelected(next);
+              }} style={{flexDirection: 'row', alignItems: 'center'}}>
+                <View style={{width: 22, height: 22, borderWidth: 2, borderColor: shareSelected.has(m.id) ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 12, backgroundColor: shareSelected.has(m.id) ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+                  {shareSelected.has(m.id) && <Text style={{color: '#1a1a2e', fontSize: 15, fontWeight: '700'}}>✓</Text>}
+                </View>
+                <View style={{flex: 1}}>
+                  <Text style={{color: '#eee', fontSize: 15, fontWeight: '600'}}>{m.machine_name}</Text>
+                  {m.grupo && <Text style={{color: '#00d4ff', fontSize: 11}}>{m.grupo}</Text>}
+                </View>
+                <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: m.is_online ? '#00e676' : '#ff5252'}} />
+              </TouchableOpacity>
+              {shareSelected.has(m.id) && (
+                <TouchableOpacity onPress={() => {
+                  const nh = new Set(shareHistorySelected);
+                  if (nh.has(m.id)) nh.delete(m.id); else nh.add(m.id);
+                  setShareHistorySelected(nh);
+                }} style={{flexDirection: 'row', alignItems: 'center', marginTop: 8, marginLeft: 34}}>
+                  <View style={{width: 18, height: 18, borderWidth: 2, borderColor: shareHistorySelected.has(m.id) ? '#ff9800' : '#444', borderRadius: 3, marginRight: 8, backgroundColor: shareHistorySelected.has(m.id) ? '#ff9800' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+                    {shareHistorySelected.has(m.id) && <Text style={{color: '#1a1a2e', fontSize: 12, fontWeight: '700'}}>✓</Text>}
+                  </View>
+                  <Text style={{color: '#888', fontSize: 12}}>Compartir historial de metricas</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ))}
-          <TouchableOpacity style={s.btn} onPress={async () => {
-            await apiRequest('/api/machines/share', { method: 'POST', body: JSON.stringify({ user_id: shareUserId, machine_ids: [...shareSelected] }) }, token);
-            showModal('✅', 'Listo', `${shareSelected.size} maquina(s) compartidas`);
+
+          {myUrls.length > 0 && (
+            <>
+              <Text style={{color: '#ff9800', fontSize: 15, fontWeight: '700', marginTop: 16, marginBottom: 10}}>URLs ({myUrls.length})</Text>
+              {myUrls.map(u => (
+                <TouchableOpacity key={u.id} onPress={() => {
+                  const next = new Set(shareUrlSelected);
+                  if (next.has(u.id)) next.delete(u.id); else next.add(u.id);
+                  setShareUrlSelected(next);
+                }} style={{flexDirection: 'row', alignItems: 'center', backgroundColor: '#16213e', borderRadius: 10, padding: 14, marginBottom: 8}}>
+                  <View style={{width: 22, height: 22, borderWidth: 2, borderColor: shareUrlSelected.has(u.id) ? '#00d4ff' : '#555', borderRadius: 4, marginRight: 12, backgroundColor: shareUrlSelected.has(u.id) ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center'}}>
+                    {shareUrlSelected.has(u.id) && <Text style={{color: '#1a1a2e', fontSize: 15, fontWeight: '700'}}>✓</Text>}
+                  </View>
+                  <View style={{flex: 1}}>
+                    <Text style={{color: '#eee', fontSize: 14, fontWeight: '600'}}>{u.name || u.url}</Text>
+                    <Text style={{color: '#555', fontSize: 11}} numberOfLines={1}>{u.url}</Text>
+                  </View>
+                  <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: u.is_up ? '#00e676' : '#ff5252'}} />
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+
+          <TouchableOpacity style={[s.btn, {marginTop: 20}]} onPress={async () => {
+            await apiRequest('/api/machines/share', { method: 'POST', body: JSON.stringify({
+              user_id: shareUserId, machine_ids: [...shareSelected], url_ids: [...shareUrlSelected], history_ids: [...shareHistorySelected]
+            }) }, token);
             setShareUserId(null);
-            // Recargar org
-            const res = await apiRequest('/api/organization', {}, token);
-            if (res.ok) setOrgData(res.data);
           }}>
-            <Text style={s.btnTxt}>Guardar ({shareSelected.size})</Text>
+            <Text style={s.btnTxt}>Guardar ({shareSelected.size} maq. + {shareUrlSelected.size} URLs)</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setShareUserId(null)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
         </ScrollView>
@@ -3194,8 +3236,15 @@ function AppContent() {
                     <View style={{flexDirection: 'row'}}>
                       <TouchableOpacity onPress={async () => {
                         const res = await apiRequest(`/api/machines/shared/${member.id}`, {}, token);
-                        const ids = res.ok ? new Set(res.data as number[]) : new Set<number>();
-                        setShareSelected(ids);
+                        if (res.ok && res.data.machine_ids) {
+                          setShareSelected(new Set(res.data.machine_ids));
+                          setShareHistorySelected(new Set(res.data.history_ids || []));
+                          setShareUrlSelected(new Set(res.data.url_ids || []));
+                        } else {
+                          setShareSelected(new Set());
+                          setShareHistorySelected(new Set());
+                          setShareUrlSelected(new Set());
+                        }
                         setShareUserId(member.id);
                       }} style={{backgroundColor: '#0a3d62', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, marginRight: 6}}>
                         <Text style={{color: '#00d4ff', fontSize: 11, fontWeight: '600'}}>Compartir</Text>
@@ -3255,6 +3304,54 @@ function AppContent() {
                     </View>
                   ))}
                 </>
+              )}
+            </>
+          )}
+
+              {/* Cambios pendientes - solo owner */}
+              {isOwner && pendingChanges.length > 0 && (
+                <>
+                  <Text style={{color: '#ff5252', fontSize: 16, fontWeight: '700', marginTop: 20, marginBottom: 10}}>Cambios pendientes ({pendingChanges.length})</Text>
+                  {pendingChanges.map((pc: any) => (
+                    <View key={pc.id} style={{backgroundColor: '#1a1028', borderRadius: 10, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#ff9800'}}>
+                      <Text style={{color: '#eee', fontSize: 14, fontWeight: '600'}}>{pc.change_type === 'edit' ? '✏️ Editar' : '🗑 Eliminar'} {pc.target_name || pc.target_type}</Text>
+                      <Text style={{color: '#888', fontSize: 12, marginTop: 2}}>Solicitado por: {pc.requester_name || pc.requester_email}</Text>
+                      {pc.data && <Text style={{color: '#607d8b', fontSize: 11, marginTop: 4}} numberOfLines={3}>{JSON.stringify(typeof pc.data === 'string' ? JSON.parse(pc.data) : pc.data, null, 0).slice(0, 150)}</Text>}
+                      <View style={{flexDirection: 'row', marginTop: 10, gap: 10}}>
+                        <TouchableOpacity onPress={async () => {
+                          await apiRequest(`/api/pending-changes/${pc.id}/approve`, { method: 'POST' }, token);
+                          setPendingChanges(prev => prev.filter(p => p.id !== pc.id));
+                          loadMachines(); loadUrlMonitors();
+                        }} style={{flex: 1, backgroundColor: '#2e7d32', borderRadius: 8, paddingVertical: 10, alignItems: 'center'}}>
+                          <Text style={{color: '#fff', fontWeight: '700'}}>Aprobar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={async () => {
+                          await apiRequest(`/api/pending-changes/${pc.id}/reject`, { method: 'POST' }, token);
+                          setPendingChanges(prev => prev.filter(p => p.id !== pc.id));
+                        }} style={{flex: 1, backgroundColor: '#c62828', borderRadius: 8, paddingVertical: 10, alignItems: 'center'}}>
+                          <Text style={{color: '#fff', fontWeight: '700'}}>Rechazar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              {/* Salir del grupo - solo tecnicos */}
+              {!isOwner && org && (
+                <TouchableOpacity style={{backgroundColor: '#2d1117', borderRadius: 12, padding: 16, marginTop: 24, alignItems: 'center', borderWidth: 1, borderColor: '#ff5252'}} onPress={() => {
+                  showModal('🚪', 'Salir del grupo?', `Dejaras de pertenecer a ${org.name}. Ya no veras las maquinas y URLs compartidas.`, [
+                    { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                    { text: 'Salir', style: 'danger', onPress: async () => {
+                      await apiRequest('/api/organization/leave', { method: 'POST' }, token);
+                      setOrgData(null);
+                      loadMachines(); loadUrlMonitors();
+                    }}
+                  ]);
+                }}>
+                  <Text style={{color: '#ff5252', fontSize: 15, fontWeight: '700'}}>Salir del grupo</Text>
+                  <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>{org.name}</Text>
+                </TouchableOpacity>
               )}
             </>
           )}
@@ -3556,7 +3653,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.2.7</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3596,7 +3693,7 @@ function AppContent() {
                 {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
                 {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
-                {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } } catch(_){} setShowTeam(true); }},
+                {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } const pc = await apiRequest('/api/pending-changes', {}, token); if (pc.ok) setPendingChanges(pc.data); } catch(_){} setShowTeam(true); }},
                 ...(isAdmin ? [{icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}] : []),
                 {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpSecure(res.data.smtp_secure === true ? 'ssl' : res.data.smtp_secure === false ? 'tls' : (res.data.smtp_secure || 'tls')); setSmtpEnabled(res.data.email_notifications !== false); } setSmtpDirty(false); setSmtpTestCd(0); setShowSmtp(true); }},
                 {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
@@ -3615,7 +3712,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.2.7</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.0</Text>
             </View>
           </View>
         </TouchableOpacity>

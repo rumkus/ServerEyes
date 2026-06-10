@@ -350,6 +350,38 @@ async function initDB() {
     )
   `);
 
+  await pool.query(`ALTER TABLE machine_shares ADD COLUMN IF NOT EXISTS share_history BOOLEAN DEFAULT false`).catch(() => {});
+
+  // Compartir URLs con tecnicos
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS url_shares (
+      id SERIAL PRIMARY KEY,
+      url_id INTEGER REFERENCES url_monitors(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      shared_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(url_id, user_id)
+    )
+  `);
+
+  // Cambios pendientes de aprobacion
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pending_changes (
+      id SERIAL PRIMARY KEY,
+      requester_id INTEGER REFERENCES users(id),
+      owner_id INTEGER REFERENCES users(id),
+      change_type VARCHAR(50) NOT NULL,
+      target_type VARCHAR(50) NOT NULL,
+      target_id INTEGER,
+      target_name VARCHAR(255),
+      data JSONB,
+      status VARCHAR(20) DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW(),
+      resolved_at TIMESTAMP,
+      resolved_by INTEGER REFERENCES users(id)
+    )
+  `);
+
   // Audit log
   await pool.query(`
     CREATE TABLE IF NOT EXISTS audit_log (
@@ -853,43 +885,170 @@ app.delete('/api/organization/member/:id', authenticateToken, async (req, res) =
   }
 });
 
-// Compartir maquinas con un tecnico
+// Tecnico sale del grupo
+app.post('/api/organization/leave', authenticateToken, async (req, res) => {
+  try {
+    const user = await pool.query('SELECT organization_id FROM users WHERE id = $1', [req.user.id]);
+    if (!user.rows[0]?.organization_id) return res.status(400).json({ error: 'No perteneces a ninguna organizacion' });
+    const orgId = user.rows[0].organization_id;
+    const org = await pool.query('SELECT owner_id FROM organizations WHERE id = $1', [orgId]);
+    if (org.rows[0]?.owner_id === req.user.id) return res.status(400).json({ error: 'El owner no puede salir de su propia organizacion' });
+    await pool.query('UPDATE users SET organization_id = NULL, role = $1 WHERE id = $2', ['owner', req.user.id]);
+    await pool.query('DELETE FROM machine_shares WHERE user_id = $1', [req.user.id]);
+    await pool.query('DELETE FROM url_shares WHERE user_id = $1', [req.user.id]);
+    res.json({ message: 'Saliste del grupo' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Crear cambio pendiente (tecnico propone un cambio)
+app.post('/api/pending-changes', authenticateToken, async (req, res) => {
+  try {
+    const { change_type, target_type, target_id, target_name, data } = req.body;
+    let ownerId;
+    if (target_type === 'machine') {
+      const m = await pool.query('SELECT user_id FROM machines WHERE id = $1', [target_id]);
+      ownerId = m.rows[0]?.user_id;
+    } else if (target_type === 'url') {
+      const u = await pool.query('SELECT user_id FROM url_monitors WHERE id = $1', [target_id]);
+      ownerId = u.rows[0]?.user_id;
+    }
+    if (!ownerId || ownerId === req.user.id) return res.status(400).json({ error: 'Solo para recursos compartidos' });
+    const result = await pool.query(
+      'INSERT INTO pending_changes (requester_id, owner_id, change_type, target_type, target_id, target_name, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [req.user.id, ownerId, change_type, target_type, target_id, target_name || '', JSON.stringify(data)]
+    );
+    // Notificar al owner
+    try { await notifyUser(ownerId, `Cambio pendiente: ${change_type} en ${target_name || target_type}`); } catch(_){}
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Owner obtiene cambios pendientes
+app.get('/api/pending-changes', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT pc.*, u.email as requester_email, u.nombre as requester_name
+       FROM pending_changes pc LEFT JOIN users u ON pc.requester_id = u.id
+       WHERE pc.owner_id = $1 AND pc.status = 'pending'
+       ORDER BY pc.created_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Aprobar o rechazar cambio
+app.post('/api/pending-changes/:id/:action', authenticateToken, async (req, res) => {
+  try {
+    const { id, action } = req.params;
+    if (action !== 'approve' && action !== 'reject') return res.status(400).json({ error: 'Accion invalida' });
+    const pc = await pool.query('SELECT * FROM pending_changes WHERE id = $1 AND owner_id = $2 AND status = $3', [id, req.user.id, 'pending']);
+    if (pc.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+    const change = pc.rows[0];
+
+    if (action === 'approve' && change.data) {
+      const d = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
+      if (change.change_type === 'edit' && change.target_type === 'machine') {
+        const sets = []; const vals = []; let i = 1;
+        for (const [k, v] of Object.entries(d)) {
+          if (['machine_name','notes','alert_cpu','alert_ram','alert_disk','alert_ping','alert_offline','rdp_port','rdp_user','mac_address'].includes(k)) {
+            sets.push(`${k} = $${i}`); vals.push(v); i++;
+          }
+        }
+        if (sets.length > 0) {
+          vals.push(change.target_id);
+          await pool.query(`UPDATE machines SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+        }
+      } else if (change.change_type === 'delete' && change.target_type === 'machine') {
+        await pool.query('DELETE FROM machines WHERE id = $1 AND user_id = $2', [change.target_id, req.user.id]);
+      } else if (change.change_type === 'edit' && change.target_type === 'url') {
+        const sets = []; const vals = []; let i = 1;
+        for (const [k, v] of Object.entries(d)) {
+          if (['url','name','method','expected_status','timeout_ms','interval_seconds','is_active','notify_down'].includes(k)) {
+            sets.push(`${k} = $${i}`); vals.push(v); i++;
+          }
+        }
+        if (sets.length > 0) {
+          vals.push(change.target_id);
+          await pool.query(`UPDATE url_monitors SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+        }
+      } else if (change.change_type === 'delete' && change.target_type === 'url') {
+        await pool.query('DELETE FROM url_monitors WHERE id = $1 AND user_id = $2', [change.target_id, req.user.id]);
+      }
+    }
+
+    await pool.query('UPDATE pending_changes SET status = $1, resolved_at = NOW(), resolved_by = $2 WHERE id = $3',
+      [action === 'approve' ? 'approved' : 'rejected', req.user.id, id]);
+    try { await notifyUser(change.requester_id, `Tu cambio fue ${action === 'approve' ? 'aprobado' : 'rechazado'}: ${change.change_type} en ${change.target_name || change.target_type}`); } catch(_){}
+    res.json({ message: action === 'approve' ? 'Aprobado' : 'Rechazado' });
+  } catch (error) {
+    console.error('Error en pending change:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Compartir maquinas y URLs con un tecnico
 app.post('/api/machines/share', authenticateToken, async (req, res) => {
   try {
-    const { user_id, machine_ids } = req.body;
-    if (!user_id || !machine_ids) return res.status(400).json({ error: 'user_id y machine_ids requeridos' });
+    const { user_id, machine_ids, url_ids, history_ids } = req.body;
+    if (!user_id) return res.status(400).json({ error: 'user_id requerido' });
 
-    // Verificar que soy dueño de las maquinas
+    // Maquinas
     const myMachines = await pool.query('SELECT id FROM machines WHERE user_id = $1', [req.user.id]);
-    const myIds = new Set(myMachines.rows.map(m => m.id));
-
-    // Borrar shares anteriores de este tecnico con mis maquinas
+    const myMIds = new Set(myMachines.rows.map(m => m.id));
     await pool.query('DELETE FROM machine_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
-
-    // Crear nuevos shares
-    for (const machineId of machine_ids) {
-      if (myIds.has(machineId)) {
+    const historySet = new Set(history_ids || []);
+    for (const machineId of (machine_ids || [])) {
+      if (myMIds.has(machineId)) {
         await pool.query(
-          'INSERT INTO machine_shares (machine_id, user_id, shared_by) VALUES ($1, $2, $3) ON CONFLICT (machine_id, user_id) DO NOTHING',
-          [machineId, user_id, req.user.id]
+          'INSERT INTO machine_shares (machine_id, user_id, shared_by, share_history) VALUES ($1, $2, $3, $4) ON CONFLICT (machine_id, user_id) DO UPDATE SET share_history = $4',
+          [machineId, user_id, req.user.id, historySet.has(machineId)]
         );
       }
     }
-    res.json({ message: 'Maquinas compartidas', count: machine_ids.length });
+
+    // URLs
+    const myUrls = await pool.query('SELECT id FROM url_monitors WHERE user_id = $1', [req.user.id]);
+    const myUIds = new Set(myUrls.rows.map(u => u.id));
+    await pool.query('DELETE FROM url_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
+    for (const urlId of (url_ids || [])) {
+      if (myUIds.has(urlId)) {
+        await pool.query(
+          'INSERT INTO url_shares (url_id, user_id, shared_by) VALUES ($1, $2, $3) ON CONFLICT (url_id, user_id) DO NOTHING',
+          [urlId, user_id, req.user.id]
+        );
+      }
+    }
+
+    res.json({ message: 'Recursos compartidos' });
   } catch (error) {
     console.error('Error compartiendo:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });
 
-// Obtener maquinas compartidas con un tecnico
+// Obtener recursos compartidos con un tecnico
 app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT machine_id FROM machine_shares WHERE user_id = $1 AND shared_by = $2',
+    const machines = await pool.query(
+      'SELECT machine_id, share_history FROM machine_shares WHERE user_id = $1 AND shared_by = $2',
       [req.params.userId, req.user.id]
     );
-    res.json(result.rows.map(r => r.machine_id));
+    const urls = await pool.query(
+      'SELECT url_id FROM url_shares WHERE user_id = $1 AND shared_by = $2',
+      [req.params.userId, req.user.id]
+    );
+    res.json({
+      machine_ids: machines.rows.map(r => r.machine_id),
+      history_ids: machines.rows.filter(r => r.share_history).map(r => r.machine_id),
+      url_ids: urls.rows.map(r => r.url_id)
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -1858,10 +2017,15 @@ app.get('/api/machines/:id/metrics', authenticateToken, async (req, res) => {
   try {
     const hours = parseInt(req.query.hours) || 24;
     const machine = await pool.query(
-      'SELECT id FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))',
+      'SELECT id, user_id FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))',
       [req.params.id, req.user.id]
     );
     if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+
+    if (machine.rows[0].user_id !== req.user.id) {
+      const shareCheck = await pool.query('SELECT share_history FROM machine_shares WHERE machine_id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+      if (!shareCheck.rows[0]?.share_history) return res.json([]);
+    }
 
     // Agrupar por intervalos para no devolver miles de puntos
     // < 6h: cada punto, 6-24h: cada 5 min, 24-72h: cada 15 min, >72h: cada hora
@@ -3281,8 +3445,17 @@ function isInMaintenance(machineId, userId) {
 
 app.get('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM url_monitors WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
-    res.json(result.rows);
+    const own = await pool.query('SELECT *, false as is_shared FROM url_monitors WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    const shared = await pool.query(
+      `SELECT um.*, true as is_shared, u.email as owner_email, u.nombre as owner_name
+       FROM url_monitors um
+       JOIN url_shares us ON us.url_id = um.id
+       LEFT JOIN users u ON um.user_id = u.id
+       WHERE us.user_id = $1
+       ORDER BY um.created_at DESC`,
+      [req.user.id]
+    );
+    res.json([...own.rows, ...shared.rows]);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
