@@ -879,6 +879,7 @@ app.delete('/api/organization/member/:id', authenticateToken, async (req, res) =
     if (org.rows.length === 0) return res.status(403).json({ error: 'No autorizado' });
     await pool.query('UPDATE users SET organization_id = NULL, role = $1 WHERE id = $2 AND organization_id = $3', ['owner', req.params.id, org.rows[0].id]);
     await pool.query('DELETE FROM machine_shares WHERE user_id = $1', [req.params.id]);
+    await pool.query('DELETE FROM url_shares WHERE user_id = $1', [req.params.id]);
     res.json({ message: 'Miembro removido' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });

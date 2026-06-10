@@ -584,6 +584,7 @@ function AppContent() {
         await loadMachines();
         loadUrlMonitors();
         loadUserNotifs();
+        apiRequest('/api/pending-changes', {}, token).then(r => { if (r.ok) setPendingChanges(r.data); });
         await apiRequest('/api/ip-changes', {}, token);
         await registerFCM();
         log.info('Primera carga completada');
@@ -622,6 +623,14 @@ function AppContent() {
 
   const updateMachine = async (id: number, data: any) => {
     try {
+      const m = machines.find(x => x.id === id);
+      if (m?.is_shared) {
+        await apiRequest('/api/pending-changes', { method: 'POST', body: JSON.stringify({
+          change_type: 'edit', target_type: 'machine', target_id: id, target_name: m.machine_name, data
+        }) }, token);
+        showModal('📋', 'Solicitud enviada', 'El owner debe aprobar este cambio.');
+        return;
+      }
       await apiRequest(`/api/machines/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token);
       loadMachines();
     } catch {}
@@ -949,19 +958,38 @@ function AppContent() {
               </View>
               <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center'}} onPress={async () => {
+                  if (u.is_shared) {
+                    await apiRequest('/api/pending-changes', { method: 'POST', body: JSON.stringify({
+                      change_type: 'edit', target_type: 'url', target_id: u.id, target_name: u.name || u.url, data: { is_active: !u.is_active }
+                    }) }, token);
+                    showModal('📋', 'Solicitud enviada', 'El owner debe aprobar este cambio.');
+                    return;
+                  }
                   await apiRequest(`/api/url-monitors/${u.id}`, { method: 'PUT', body: JSON.stringify({ is_active: !u.is_active }) }, token);
                   loadUrlMonitors();
                 }}>
                   <Text style={{color: u.is_active ? '#ff9800' : '#00e676', fontSize: 12, fontWeight: '600'}}>{u.is_active ? '⏸ Pausar' : '▶ Activar'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}} onPress={() => {
-                  showModal('🗑', 'Eliminar monitor?', u.name || u.url, [
-                    { text: 'Cancelar', style: 'cancel', onPress: () => {} },
-                    { text: 'Eliminar', style: 'danger', onPress: async () => {
-                      await apiRequest(`/api/url-monitors/${u.id}`, { method: 'DELETE' }, token);
-                      loadUrlMonitors();
-                    }}
-                  ]);
+                  if (u.is_shared) {
+                    showModal('📋', 'Solicitar eliminacion?', u.name || u.url, [
+                      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                      { text: 'Solicitar', style: 'danger', onPress: async () => {
+                        await apiRequest('/api/pending-changes', { method: 'POST', body: JSON.stringify({
+                          change_type: 'delete', target_type: 'url', target_id: u.id, target_name: u.name || u.url
+                        }) }, token);
+                        showModal('📋', 'Solicitud enviada', 'El owner debe aprobar la eliminacion.');
+                      }}
+                    ]);
+                  } else {
+                    showModal('🗑', 'Eliminar monitor?', u.name || u.url, [
+                      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+                      { text: 'Eliminar', style: 'danger', onPress: async () => {
+                        await apiRequest(`/api/url-monitors/${u.id}`, { method: 'DELETE' }, token);
+                        loadUrlMonitors();
+                      }}
+                    ]);
+                  }
                 }}>
                   <Text style={{color: '#ff5252', fontSize: 12, fontWeight: '600'}}>🗑 Eliminar</Text>
                 </TouchableOpacity>
@@ -3342,7 +3370,7 @@ function AppContent() {
                     { text: 'Cancelar', style: 'cancel', onPress: () => {} },
                     { text: 'Salir', style: 'danger', onPress: async () => {
                       await apiRequest('/api/organization/leave', { method: 'POST' }, token);
-                      setOrgData(null);
+                      setOrgData(null); setOrgName(''); setOrgAddress(''); setOrgPhone('');
                       loadMachines(); loadUrlMonitors();
                     }}
                   ]);
@@ -3651,7 +3679,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.0</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.1</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3691,7 +3719,7 @@ function AppContent() {
                 {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
                 {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
-                {icon: '👥', label: t('team'), action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } const pc = await apiRequest('/api/pending-changes', {}, token); if (pc.ok) setPendingChanges(pc.data); } catch(_){} setShowTeam(true); }},
+                {icon: '👥', label: `${t('team')}${pendingChanges.length > 0 ? ` (${pendingChanges.length})` : ''}`, badge: pendingChanges.length, action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } const pc = await apiRequest('/api/pending-changes', {}, token); if (pc.ok) setPendingChanges(pc.data); } catch(_){} setShowTeam(true); }},
                 ...(isAdmin ? [{icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}] : []),
                 {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpSecure(res.data.smtp_secure === true ? 'ssl' : res.data.smtp_secure === false ? 'tls' : (res.data.smtp_secure || 'tls')); setSmtpEnabled(res.data.email_notifications !== false); } setSmtpDirty(false); setSmtpTestCd(0); setShowSmtp(true); }},
                 {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
@@ -3701,7 +3729,10 @@ function AppContent() {
               ].map((item, i) => (
                 <TouchableOpacity key={i} onPress={item.action} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#111d2e'}}>
                   <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{item.icon}</Text>
-                  <Text style={{color: '#ccc', fontSize: 14}}>{item.label}</Text>
+                  <Text style={{color: '#ccc', fontSize: 14, flex: 1}}>{item.label}</Text>
+                  {(item as any).badge > 0 && <View style={{backgroundColor: '#ff5252', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6}}>
+                    <Text style={{color: '#fff', fontSize: 11, fontWeight: '700'}}>{(item as any).badge}</Text>
+                  </View>}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -3710,7 +3741,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.1</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -3764,6 +3795,7 @@ function AppContent() {
                   <View style={{flex: 1}}>
                     <Text style={{color: '#eee', fontSize: 13, fontWeight: '600'}}>{u.name || u.url}</Text>
                     <Text style={{color: '#3a5068', fontSize: 11}} numberOfLines={1}>{u.url}</Text>
+                    {u.is_shared && <Text style={{color: '#ff9800', fontSize: 10}}>{'👥'} {u.owner_name || u.owner_email}</Text>}
                   </View>
                   {u.response_ms && <Text style={{color: '#607d8b', fontSize: 11, marginRight: 8}}>{u.response_ms}ms</Text>}
                   <View style={{backgroundColor: u.is_up ? '#0d2818' : '#2d1117', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6}}>
