@@ -2780,6 +2780,27 @@ app.get('/api/network-scans/:id/compare/:otherId', authenticateToken, async (req
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
+// ── NETWORK SCAN (via agent) ──
+app.post('/api/network-scan/request', authenticateToken, async (req, res) => {
+  try {
+    const { machine_id } = req.body;
+    if (!machine_id) return res.status(400).json({ error: 'machine_id requerido' });
+    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))', [machine_id, req.user.id]);
+    if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+      ['scan_request_' + machine_id, JSON.stringify({ requested_at: new Date().toISOString(), user_id: req.user.id })]);
+    res.json({ message: 'Escaneo solicitado. Resultado en ~30 segundos.' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.get('/api/network-scan/result/:machineId', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT value FROM app_settings WHERE key = $1", ['scan_result_' + req.params.machineId]);
+    if (result.rows.length === 0) return res.json({ status: 'pending' });
+    res.json(JSON.parse(result.rows[0].value));
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
+});
+
 // ── SSL MONITORS CRUD ──
 app.get('/api/ssl-monitors', authenticateToken, async (req, res) => {
   try {

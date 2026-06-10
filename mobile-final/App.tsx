@@ -6,7 +6,8 @@ import RNShare from 'react-native-share';
 import messaging from '@react-native-firebase/messaging';
 import { Platform, PermissionsAndroid, NativeModules, BackHandler } from 'react-native';
 import ReactNativeBiometrics from 'react-native-biometrics';
-const { WidgetBridge } = NativeModules;
+import { NetworkInfo } from 'react-native-network-info';
+const { WidgetBridge, NetworkScanner: NativeScanner } = NativeModules;
 const rnBiometrics = new ReactNativeBiometrics();
 
 const API_URL = 'https://servereyes-production.up.railway.app';
@@ -1379,15 +1380,12 @@ function AppContent() {
   }
 
   // NETWORK SCANNER
-  const commonPorts = [21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,1521,3306,3389,5432,5900,8080,8443];
-
   const loadSavedScans = async () => {
     const res = await apiRequest('/api/network-scans', {}, token);
     if (res.ok) setSavedScans(res.data);
   };
 
   const getLocalSubnet = () => {
-    // Intentar desde las maquinas monitoreadas
     const m = machines.find((m: any) => m.is_online && m.local_ip);
     if (m) {
       const ip = m.local_ip.split(' | ')[0].split(' (')[0].trim();
@@ -1397,65 +1395,57 @@ function AppContent() {
     return '192.168.1.';
   };
 
-  const detectSubnet = async () => {
-    try {
-      // Intentar detectar la IP del gateway via HTTP a un servicio conocido
-      const res = await fetch('https://api.ipify.org?format=json', { method: 'GET' }).catch(() => null);
-      // No podemos obtener la IP local del celular directamente sin un módulo nativo
-      // Usamos la subred de las maquinas monitoreadas o el default
-    } catch {}
-  };
-
-  const probeIP = async (ip: string): Promise<any | null> => {
-    const ports = [80, 443, 8080, 3389, 22, 21, 445, 139, 9100, 631, 515, 53, 5353];
-    const openPorts: number[] = [];
-    const checks = ports.map(port => new Promise<void>((resolve) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => { controller.abort(); resolve(); }, 600);
-      fetch(`http://${ip}:${port}`, { signal: controller.signal, method: 'HEAD', mode: 'no-cors' })
-        .then(() => { openPorts.push(port); clearTimeout(timer); resolve(); })
-        .catch(() => { clearTimeout(timer); resolve(); });
-    }));
-    await Promise.all(checks);
-    if (openPorts.length > 0) {
-      let deviceType = 'Desconocido';
-      if (openPorts.includes(9100) || openPorts.includes(631) || openPorts.includes(515)) deviceType = '🖨 Impresora';
-      else if (openPorts.includes(80) && openPorts.includes(443) && !openPorts.includes(3389)) deviceType = '🌐 Router/AP';
-      else if (openPorts.includes(3389)) deviceType = '💻 PC/Notebook';
-      else if (openPorts.includes(22)) deviceType = '🖥 Servidor/Linux';
-      else if (openPorts.includes(445) || openPorts.includes(139)) deviceType = '💻 PC Windows';
-      else if (openPorts.includes(80) || openPorts.includes(443)) deviceType = '📱 Dispositivo';
-      else if (openPorts.includes(5353)) deviceType = '📱 Movil/IoT';
-      return { ip, ports: openPorts.sort((a, b) => a - b), type: deviceType, status: 'up' };
-    }
-    // Fallback: intentar HTTP simple
-    try {
-      const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 500);
-      await fetch(`http://${ip}`, { signal: c.signal, method: 'HEAD', mode: 'no-cors' });
-      clearTimeout(t);
-      return { ip, ports: [80], type: '📱 Dispositivo', status: 'up' };
-    } catch { return null; }
+  const detectDeviceType = (ports: number[]) => {
+    if (ports.includes(9100) || ports.includes(631) || ports.includes(515)) return '🖨 Impresora';
+    if (ports.includes(80) && ports.includes(443) && !ports.includes(3389) && !ports.includes(22)) return '🌐 Router/AP';
+    if (ports.includes(3389)) return '💻 PC Windows';
+    if (ports.includes(22)) return '🖥 Servidor Linux';
+    if (ports.includes(445) || ports.includes(139)) return '💻 PC Windows';
+    if (ports.includes(23)) return '🔀 Switch/Router';
+    if (ports.includes(5900)) return '🖥 PC (VNC)';
+    if (ports.includes(3306) || ports.includes(5432)) return '🗄 Servidor DB';
+    if (ports.includes(53) || ports.includes(5353)) return '📱 Movil/IoT';
+    if (ports.includes(80) || ports.includes(443) || ports.includes(8080)) return '📡 Dispositivo Web';
+    return '📡 Dispositivo';
   };
 
   const scanNetwork = async () => {
-    const subnet = scanSubnet || getLocalSubnet();
-    setScanning(true); setScanResults([]); setScanProgress('Iniciando escaneo de red...');
-    const results: any[] = [];
-    const batchSize = 15;
-    for (let batch = 0; batch < 254; batch += batchSize) {
-      const promises = [];
-      for (let i = batch + 1; i <= Math.min(batch + batchSize, 254); i++) {
-        promises.push(probeIP(subnet + i));
+    setScanning(true); setScanResults([]); setScanProgress('Obteniendo IP local...');
+    try {
+      // Obtener IP local del celular
+      let localIp = scanSubnet ? null : await NetworkInfo.getIPV4Address().catch(() => null);
+      let subnet = scanSubnet;
+      if (!subnet && localIp) {
+        const parts = localIp.split('.');
+        if (parts.length === 4) subnet = parts.slice(0, 3).join('.') + '.';
       }
-      setScanProgress(`Escaneando ${subnet}${batch + 1}-${Math.min(batch + batchSize, 254)}... (${Math.min(batch + batchSize, 254)}/254)`);
-      const batchResults = await Promise.all(promises);
-      for (const r of batchResults) {
-        if (r) { results.push(r); setScanResults([...results]); }
-      }
+      if (!subnet) subnet = getLocalSubnet();
+      setScanSubnet(subnet);
+
+      const ssid = await NetworkInfo.getSSID().catch(() => null);
+      setScanProgress(`Escaneando ${ssid || subnet + '*'}... (ping + puertos)`);
+
+      // Usar modulo nativo para escanear
+      const results = await NativeScanner.scanSubnet(subnet);
+      const devices = (results || []).map((d: any) => ({
+        ip: d.ip,
+        hostname: d.hostname !== d.ip ? d.hostname : '',
+        ports: d.ports ? Array.from(d.ports) : [],
+        type: d.type || '📡 Dispositivo',
+        status: 'up'
+      }));
+
+      devices.sort((a: any, b: any) => {
+        const pa = a.ip.split('.').map(Number);
+        const pb = b.ip.split('.').map(Number);
+        return pa[3] - pb[3];
+      });
+
+      setScanResults(devices);
+      setScanProgress(`Completo: ${devices.length} dispositivos en ${ssid || subnet + '*'}`);
+    } catch (e: any) {
+      setScanProgress(`Error: ${e?.message || 'Fallo el escaneo'}`);
     }
-    setScanProgress(`Completo: ${results.length} dispositivos en ${subnet}*`);
-    setScanResults(results);
     setScanning(false);
   };
 
@@ -1578,8 +1568,8 @@ function AppContent() {
         <BackHeader title="Escaner de Red" subtitle={scanning ? scanProgress : `${scanResults.length} dispositivos`} />
         <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 80}}>
           <View style={{backgroundColor: th.card, borderRadius: 12, padding: 14, marginBottom: 16}}>
-            <Text style={{color: th.sub, fontSize: 12, marginBottom: 6}}>Subred a escanear</Text>
-            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 14, color: th.text, marginBottom: 10}} value={scanSubnet} onChangeText={setScanSubnet} placeholder={getLocalSubnet()} placeholderTextColor="#555" autoCapitalize="none" />
+            <Text style={{color: th.sub, fontSize: 12, marginBottom: 6}}>Subred a escanear (se autodetecta del WiFi)</Text>
+            <TextInput style={{backgroundColor: th.input, borderWidth: 1, borderColor: th.border, borderRadius: 10, padding: 10, fontSize: 14, color: th.text, marginBottom: 10}} value={scanSubnet} onChangeText={setScanSubnet} placeholder={getLocalSubnet()} placeholderTextColor="#555" autoCapitalize="none" keyboardType="numeric" />
             <View style={{flexDirection: 'row'}}>
               <TouchableOpacity disabled={scanning} onPress={scanNetwork}
                 style={{flex: 1, backgroundColor: scanning ? '#555' : '#00d4ff', borderRadius: 10, padding: 12, alignItems: 'center', marginRight: 8}}>
@@ -3471,7 +3461,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.0.1</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.1.0</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3530,7 +3520,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.0.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.1.0</Text>
             </View>
           </View>
         </TouchableOpacity>

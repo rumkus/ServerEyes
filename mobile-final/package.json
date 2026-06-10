@@ -17,6 +17,7 @@
     "react-native": "0.76.9",
     "react-native-biometrics": "^3.0.1",
     "react-native-fs": "^2.20.0",
+    "react-native-network-info": "^5.2.2",
     "react-native-share": "^12.3.1"
   },
   "devDependencies": {

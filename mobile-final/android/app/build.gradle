@@ -83,8 +83,8 @@ android {
         applicationId "com.servereyes"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 44
-        versionName "3.0.1"
+        versionCode 45
+        versionName "3.1.0"
     }
     signingConfigs {
         debug {
