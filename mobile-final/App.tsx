@@ -3181,7 +3181,19 @@ function AppContent() {
             </>
           )}
 
-          <TouchableOpacity style={[s.btn, {marginTop: 20}]} onPress={async () => {
+          <View style={{flexDirection: 'row', gap: 10, marginTop: 20}}>
+            <TouchableOpacity style={{flex: 1, backgroundColor: '#37474f', borderRadius: 12, paddingVertical: 14, alignItems: 'center'}} onPress={() => {
+              setShareSelected(new Set()); setShareUrlSelected(new Set()); setShareHistorySelected(new Set());
+            }}>
+              <Text style={{color: '#fff', fontWeight: '700'}}>Quitar todo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={{flex: 1, backgroundColor: '#00d4ff', borderRadius: 12, paddingVertical: 14, alignItems: 'center'}} onPress={() => {
+              setShareSelected(new Set(myMachines.map(m => m.id))); setShareUrlSelected(new Set(myUrls.map(u => u.id)));
+            }}>
+              <Text style={{color: '#0a1628', fontWeight: '700'}}>Seleccionar todo</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={[s.btn, {marginTop: 10}]} onPress={async () => {
             await apiRequest('/api/machines/share', { method: 'POST', body: JSON.stringify({
               user_id: shareUserId, machine_ids: [...shareSelected], url_ids: [...shareUrlSelected], history_ids: [...shareHistorySelected]
             }) }, token);
@@ -3679,7 +3691,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.1</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.2</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3741,7 +3753,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.2</Text>
             </View>
           </View>
         </TouchableOpacity>

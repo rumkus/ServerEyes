@@ -352,18 +352,6 @@ async function initDB() {
 
   await pool.query(`ALTER TABLE machine_shares ADD COLUMN IF NOT EXISTS share_history BOOLEAN DEFAULT false`).catch(() => {});
 
-  // Compartir URLs con tecnicos
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS url_shares (
-      id SERIAL PRIMARY KEY,
-      url_id INTEGER REFERENCES url_monitors(id) ON DELETE CASCADE,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      shared_by INTEGER REFERENCES users(id),
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(url_id, user_id)
-    )
-  `);
-
   // Cambios pendientes de aprobacion
   await pool.query(`
     CREATE TABLE IF NOT EXISTS pending_changes (
@@ -432,6 +420,18 @@ async function initDB() {
       down_since TIMESTAMP,
       notify_down BOOLEAN DEFAULT true,
       created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  // Compartir URLs con tecnicos (debe ir despues de url_monitors)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS url_shares (
+      id SERIAL PRIMARY KEY,
+      url_id INTEGER REFERENCES url_monitors(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      shared_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(url_id, user_id)
     )
   `);
 
