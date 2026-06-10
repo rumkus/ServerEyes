@@ -392,6 +392,7 @@ function AppContent() {
   const [pushBanner, setPushBanner] = useState<{title: string, body: string, type?: string} | null>(null);
 
   // Listener de mensajes en primer plano
+  const bannerTimerRef = useRef<any>(null);
   useEffect(() => {
     const unsubscribe = messaging().onMessage(async (remoteMessage) => {
       try {
@@ -400,20 +401,28 @@ function AppContent() {
         const body = String(remoteMessage?.notification?.body || '');
         const type = String(remoteMessage?.data?.type || '');
         try { Vibration.vibrate([0, 200, 100, 200]); } catch {}
-        if (type === 'shares_updated' || type === 'invite_accepted' || type === 'change_resolved') {
-          setTimeout(() => { loadMachines(); loadUrlMonitors(); }, 300);
+
+        if (type === 'shares_updated' || type === 'change_resolved') {
+          setTimeout(() => { try { loadMachines(); loadUrlMonitors(); } catch {} }, 300);
+        }
+        if (type === 'invite_accepted') {
+          setTimeout(() => {
+            try { loadMachines(); loadUrlMonitors(); } catch {}
+            try { apiRequest('/api/organization', {}, tokenRef.current).then(r => { if (r.ok && r.data) setOrgData(r.data); }).catch(() => {}); } catch {}
+          }, 300);
         }
         if (type === 'pending_change') {
-          apiRequest('/api/pending-changes', {}, tokenRef.current).then(r => { if (r.ok) setPendingChanges(r.data); });
+          try { apiRequest('/api/pending-changes', {}, tokenRef.current).then(r => { if (r.ok && Array.isArray(r.data)) setPendingChanges(r.data); }).catch(() => {}); } catch {}
         }
+
+        if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
         setPushBanner({ title, body, type });
-        const timer = setTimeout(() => setPushBanner(null), 8000);
-        return () => clearTimeout(timer);
+        bannerTimerRef.current = setTimeout(() => setPushBanner(null), 8000);
       } catch (e: any) {
         log.error(`Push error: ${e?.message || 'unknown'}`);
       }
     });
-    return unsubscribe;
+    return () => { unsubscribe(); if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current); };
   }, []);
 
   // Detectar cuando la app vuelve del background
@@ -590,7 +599,7 @@ function AppContent() {
         await loadMachines();
         loadUrlMonitors();
         loadUserNotifs();
-        apiRequest('/api/pending-changes', {}, token).then(r => { if (r.ok) setPendingChanges(r.data); });
+        apiRequest('/api/pending-changes', {}, token).then(r => { if (r.ok && Array.isArray(r.data)) setPendingChanges(r.data); }).catch(() => {});
         await apiRequest('/api/ip-changes', {}, token);
         await registerFCM();
         log.info('Primera carga completada');
@@ -890,8 +899,10 @@ function AppContent() {
 
   // URL MONITORS
   const loadUrlMonitors = async () => {
-    const res = await apiRequest('/api/url-monitors', {}, token);
-    if (res.ok) setUrlMonitors(res.data);
+    try {
+      const res = await apiRequest('/api/url-monitors', {}, tokenRef.current);
+      if (res.ok && Array.isArray(res.data)) setUrlMonitors(res.data);
+    } catch {}
   };
 
   if (showAddUrl) {
@@ -3230,7 +3241,7 @@ function AppContent() {
             const res = await apiRequest('/api/organization', {}, token);
             if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } }
             const pc = await apiRequest('/api/pending-changes', {}, token);
-            if (pc.ok) setPendingChanges(pc.data);
+            if (pc.ok && Array.isArray(pc.data)) setPendingChanges(pc.data);
           }} tintColor="#00d4ff" />
         }>
 
@@ -3367,18 +3378,22 @@ function AppContent() {
                     <View key={pc.id} style={{backgroundColor: '#1a1028', borderRadius: 10, padding: 14, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#ff9800'}}>
                       <Text style={{color: '#eee', fontSize: 14, fontWeight: '600'}}>{pc.change_type === 'edit' ? '✏️ Editar' : '🗑 Eliminar'} {pc.target_name || pc.target_type}</Text>
                       <Text style={{color: '#888', fontSize: 12, marginTop: 2}}>Solicitado por: {pc.requester_name || pc.requester_email}</Text>
-                      {pc.data && <Text style={{color: '#607d8b', fontSize: 11, marginTop: 4}} numberOfLines={3}>{JSON.stringify(typeof pc.data === 'string' ? JSON.parse(pc.data) : pc.data, null, 0).slice(0, 150)}</Text>}
+                      {pc.data && <Text style={{color: '#607d8b', fontSize: 11, marginTop: 4}} numberOfLines={3}>{(() => { try { return JSON.stringify(typeof pc.data === 'string' ? JSON.parse(pc.data) : pc.data, null, 0).slice(0, 150); } catch { return ''; } })()}</Text>}
                       <View style={{flexDirection: 'row', marginTop: 10, gap: 10}}>
                         <TouchableOpacity onPress={async () => {
-                          await apiRequest(`/api/pending-changes/${pc.id}/approve`, { method: 'POST' }, token);
-                          setPendingChanges(prev => prev.filter(p => p.id !== pc.id));
-                          loadMachines(); loadUrlMonitors();
+                          try {
+                            await apiRequest(`/api/pending-changes/${pc.id}/approve`, { method: 'POST' }, token);
+                            setPendingChanges(prev => prev.filter(p => p.id !== pc.id));
+                            loadMachines(); loadUrlMonitors();
+                          } catch {}
                         }} style={{flex: 1, backgroundColor: '#2e7d32', borderRadius: 8, paddingVertical: 10, alignItems: 'center'}}>
                           <Text style={{color: '#fff', fontWeight: '700'}}>Aprobar</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={async () => {
-                          await apiRequest(`/api/pending-changes/${pc.id}/reject`, { method: 'POST' }, token);
-                          setPendingChanges(prev => prev.filter(p => p.id !== pc.id));
+                          try {
+                            await apiRequest(`/api/pending-changes/${pc.id}/reject`, { method: 'POST' }, token);
+                            setPendingChanges(prev => prev.filter(p => p.id !== pc.id));
+                          } catch {}
                         }} style={{flex: 1, backgroundColor: '#c62828', borderRadius: 8, paddingVertical: 10, alignItems: 'center'}}>
                           <Text style={{color: '#fff', fontWeight: '700'}}>Rechazar</Text>
                         </TouchableOpacity>
@@ -3744,7 +3759,7 @@ function AppContent() {
                 {icon: '🚨', label: 'Incidentes', action: async () => { setMenuOpen(false); await loadIncidents(); setShowIncidents(true); }},
                 {icon: '🔔', label: `Notificaciones${userNotifs.filter(n => !n.is_read).length > 0 ? ' (' + userNotifs.filter(n => !n.is_read).length + ')' : ''}`, action: async () => { setMenuOpen(false); await loadUserNotifs(); setShowNotifs(true); }},
                 {icon: '📜', label: 'Auditoria', action: async () => { setMenuOpen(false); await loadAuditLog(); setShowAuditLog(true); }},
-                {icon: '👥', label: `${t('team')}${pendingChanges.length > 0 ? ` (${pendingChanges.length})` : ''}`, badge: pendingChanges.length, action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } const pc = await apiRequest('/api/pending-changes', {}, token); if (pc.ok) setPendingChanges(pc.data); } catch(_){} setShowTeam(true); }},
+                {icon: '👥', label: `${t('team')}${pendingChanges.length > 0 ? ` (${pendingChanges.length})` : ''}`, badge: pendingChanges.length, action: async () => { setMenuOpen(false); try { const res = await apiRequest('/api/organization', {}, token); if (res.ok) { setOrgData(res.data); if (res.data.organization) { setOrgName(res.data.organization.name); setOrgAddress(res.data.organization.address || ''); setOrgPhone(res.data.organization.phone || ''); } } const pc = await apiRequest('/api/pending-changes', {}, token); if (pc.ok && Array.isArray(pc.data)) setPendingChanges(pc.data); } catch(_){} setShowTeam(true); }},
                 ...(isAdmin ? [{icon: '📋', label: t('logs'), action: () => { setMenuOpen(false); setLogText(_logs.slice(-200).reverse().join('\n')); setShowLogs(true); }}] : []),
                 {icon: '📧', label: 'Email', action: async () => { setMenuOpen(false); const res = await apiRequest('/api/auth/smtp', {}, token); if (res.ok) { setSmtpHost(res.data.smtp_host || ''); setSmtpPort(String(res.data.smtp_port || 587)); setSmtpUser(res.data.smtp_user || ''); setSmtpPass(''); setSmtpFrom(res.data.smtp_from || ''); setSmtpSecure(res.data.smtp_secure === true ? 'ssl' : res.data.smtp_secure === false ? 'tls' : (res.data.smtp_secure || 'tls')); setSmtpEnabled(res.data.email_notifications !== false); } setSmtpDirty(false); setSmtpTestCd(0); setShowSmtp(true); }},
                 {icon: darkMode ? '☀️' : '🌙', label: darkMode ? 'Modo claro' : 'Modo oscuro', action: () => { toggleTheme(); }},
@@ -3766,7 +3781,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.4</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.5</Text>
             </View>
           </View>
         </TouchableOpacity>

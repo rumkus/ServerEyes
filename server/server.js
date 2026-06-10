@@ -1093,10 +1093,13 @@ async function sendPush(userId, title, body, data = {}) {
     // Push notification
     if (firebaseAdmin && u.fcm_token) {
       try {
+        const strData = {};
+        for (const [k, v] of Object.entries(data)) strData[k] = String(v);
+        strData.click_action = 'FLUTTER_NOTIFICATION_CLICK';
         await firebaseAdmin.messaging().send({
           token: u.fcm_token,
-          notification: { title, body },
-          data: { ...data, click_action: 'FLUTTER_NOTIFICATION_CLICK' },
+          notification: { title: String(title), body: String(body) },
+          data: strData,
           android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
         });
         console.log(`[PUSH] Enviado a user ${userId}: ${title}`);
