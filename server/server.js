@@ -1039,6 +1039,7 @@ app.post('/api/machines/share', authenticateToken, async (req, res) => {
       }
     }
 
+    try { await sendPush(user_id, '🔄 Recursos actualizados', 'Se actualizaron las maquinas y URLs compartidas contigo', { type: 'shares_updated' }); } catch(_){}
     res.json({ message: 'Recursos compartidos' });
   } catch (error) {
     console.error('Error compartiendo:', error);

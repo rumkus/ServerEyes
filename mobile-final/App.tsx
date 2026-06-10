@@ -400,6 +400,12 @@ function AppContent() {
         const body = String(remoteMessage?.notification?.body || '');
         const type = String(remoteMessage?.data?.type || '');
         try { Vibration.vibrate([0, 200, 100, 200]); } catch {}
+        if (type === 'shares_updated' || type === 'invite_accepted' || type === 'change_resolved') {
+          setTimeout(() => { loadMachines(); loadUrlMonitors(); }, 300);
+        }
+        if (type === 'pending_change') {
+          apiRequest('/api/pending-changes', {}, tokenRef.current).then(r => { if (r.ok) setPendingChanges(r.data); });
+        }
         setPushBanner({ title, body, type });
         const timer = setTimeout(() => setPushBanner(null), 8000);
         return () => clearTimeout(timer);
@@ -416,7 +422,7 @@ function AppContent() {
       log.info(`AppState: ${state}`);
       if (state === 'active' && tokenRef.current) {
         log.info('App volvio a primer plano, recargando...');
-        setTimeout(() => loadMachines(), 500);
+        setTimeout(() => { loadMachines(); loadUrlMonitors(); }, 500);
       }
     });
     return () => sub.remove();
@@ -3698,7 +3704,7 @@ function AppContent() {
             <Text style={{fontSize: 24, marginRight: 8}}>{'👁'}</Text>
             <View>
               <Text style={{fontSize: 20, fontWeight: '800'}}><Text style={{color: th.text}}>Server</Text><Text style={{color: '#00d4ff'}}>Eyes</Text></Text>
-              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.3</Text>
+              <Text style={{color: th.sub, fontSize: 11}}>{machines.length} {t('machines_count')} · v3.3.4</Text>
             </View>
           </View>
           <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -3760,7 +3766,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.3</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.4</Text>
             </View>
           </View>
         </TouchableOpacity>
