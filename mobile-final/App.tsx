@@ -3305,8 +3305,6 @@ function AppContent() {
                   ))}
                 </>
               )}
-            </>
-          )}
 
               {/* Cambios pendientes - solo owner */}
               {isOwner && pendingChanges.length > 0 && (
