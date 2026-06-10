@@ -3163,9 +3163,15 @@ function AppContent() {
                 <TextInput style={[s.input, {textAlign: 'center', fontSize: 18, letterSpacing: 4}]} value={joinCode} onChangeText={setJoinCode} placeholder="CODIGO" placeholderTextColor="#555" autoCapitalize="characters" />
                 <TouchableOpacity style={[s.btn, {backgroundColor: '#ff9800'}]} onPress={async () => {
                   if (!joinCode.trim()) return;
-                  const res = await apiRequest('/api/organization/join', { method: 'POST', body: JSON.stringify({ code: joinCode.trim() }) }, token);
-                  if (res.ok) { showModal('✅', 'Listo', res.data.message); const r2 = await apiRequest('/api/organization', {}, token); if (r2.ok) setOrgData(r2.data); setJoinCode(''); }
-                  else showModal('⚠️', 'Error', res.data?.error || 'Error');
+                  const codeToJoin = joinCode.trim();
+                  setJoinCode('');
+                  await apiRequest('/api/organization/join', { method: 'POST', body: JSON.stringify({ code: codeToJoin }) }, token);
+                  setTimeout(async () => {
+                    const r2 = await apiRequest('/api/organization', {}, token);
+                    if (r2.ok) setOrgData(r2.data);
+                    loadMachines();
+                    loadUrlMonitors();
+                  }, 500);
                 }}><Text style={s.btnTxt}>Unirme</Text></TouchableOpacity>
               </View>
             </>
@@ -3199,8 +3205,8 @@ function AppContent() {
                           { text: 'Cancelar', style: 'cancel', onPress: () => {} },
                           { text: 'Remover', style: 'danger', onPress: async () => {
                             await apiRequest(`/api/organization/member/${member.id}`, { method: 'DELETE' }, token);
-                            const r2 = await apiRequest('/api/organization', {}, token);
-                            if (r2.ok) setOrgData(r2.data);
+                            setOrgData((prev: any) => prev ? {...prev, team: prev.team.filter((t: any) => t.id !== member.id)} : prev);
+                            setTimeout(async () => { const r2 = await apiRequest('/api/organization', {}, token); if (r2.ok) setOrgData(r2.data); }, 500);
                           }}
                         ]);
                       }} style={{backgroundColor: '#2d1117', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6}}>
@@ -3241,8 +3247,8 @@ function AppContent() {
                       </View>
                       <TouchableOpacity onPress={async () => {
                         await apiRequest(`/api/organization/invite/${inv.id}`, { method: 'DELETE' }, token);
-                        const r2 = await apiRequest('/api/organization', {}, token);
-                        if (r2.ok) setOrgData(r2.data);
+                        setOrgData((prev: any) => prev ? {...prev, invitations: prev.invitations.filter((i: any) => i.id !== inv.id)} : prev);
+                        setTimeout(async () => { const r2 = await apiRequest('/api/organization', {}, token); if (r2.ok) setOrgData(r2.data); }, 500);
                       }}>
                         <Text style={{color: '#ff5252', fontSize: 12}}>Cancelar</Text>
                       </TouchableOpacity>
@@ -3256,6 +3262,7 @@ function AppContent() {
           <View style={{height: 80}} />
         </ScrollView>
         <FloatingBackButton />
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
