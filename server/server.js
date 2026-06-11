@@ -1091,6 +1091,27 @@ app.get('/api/debug/force-history/:machineId', async (req, res) => {
     res.json({ updated: check.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/debug/test-metrics/:machineId/:userId', async (req, res) => {
+  try {
+    const mid = req.params.machineId;
+    const uid = req.params.userId;
+    const machine = await pool.query('SELECT id, user_id FROM machines WHERE id = $1', [mid]);
+    const share = await pool.query('SELECT share_history FROM machine_shares WHERE machine_id = $1 AND user_id = $2', [mid, uid]);
+    const isOwner = machine.rows[0]?.user_id === parseInt(uid);
+    const hasShare = share.rows.length > 0;
+    const shareHistory = share.rows[0]?.share_history;
+    const metricsCount = await pool.query('SELECT COUNT(*) as cnt FROM metrics_history WHERE machine_id = $1 AND timestamp > NOW() - INTERVAL \'24 hours\'', [mid]);
+    const sample = await pool.query('SELECT timestamp, cpu_usage, ram_usage FROM metrics_history WHERE machine_id = $1 ORDER BY timestamp DESC LIMIT 3', [mid]);
+    res.json({
+      machine: machine.rows[0],
+      isOwner,
+      hasShare,
+      shareHistory,
+      metricsLast24h: parseInt(metricsCount.rows[0].cnt),
+      sampleMetrics: sample.rows
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ============== PUSH NOTIFICATIONS ==============
 
