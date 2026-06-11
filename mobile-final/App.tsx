@@ -789,12 +789,15 @@ function AppContent() {
     setIpHistoryLoading(false);
   };
 
+  const [metricsDebug, setMetricsDebug] = useState('');
   const loadMetrics = async (machineId: number, hours: number) => {
     setMetricsLoading(true);
+    setMetricsDebug('cargando...');
     try {
       const res = await apiRequest(`/api/machines/${machineId}/metrics?hours=${hours}`, {}, tokenRef.current);
+      setMetricsDebug(`ok=${res.ok} status=${res.status} isArray=${Array.isArray(res.data)} len=${Array.isArray(res.data) ? res.data.length : 'N/A'} token=${tokenRef.current ? 'yes' : 'no'}`);
       if (res.ok && Array.isArray(res.data)) setMetricsData(res.data);
-    } catch {}
+    } catch (e: any) { setMetricsDebug(`error: ${e?.message}`); }
     setMetricsLoading(false);
   };
 
@@ -2450,7 +2453,8 @@ function AppContent() {
           </View>
         ) : (
           <ScrollView style={{flex: 1, padding: 16}}>
-            <Text style={{color: '#555', fontSize: 11, marginBottom: 16}}>{metricsData.length} puntos de datos</Text>
+            <Text style={{color: '#555', fontSize: 11, marginBottom: 4}}>{metricsData.length} puntos de datos</Text>
+            <Text style={{color: '#ff9800', fontSize: 9, marginBottom: 12}}>DBG: {metricsDebug} | shared={metricsMachine?.is_shared?'Y':'N'} hist={metricsMachine?.share_history?'Y':'N'}</Text>
 
             <View style={{marginBottom: 20}}>
               <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6}}>
@@ -3791,7 +3795,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.9</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.10</Text>
             </View>
           </View>
         </TouchableOpacity>
