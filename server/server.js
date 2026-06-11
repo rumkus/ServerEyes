@@ -1046,8 +1046,12 @@ app.post('/api/machines/share', authenticateToken, async (req, res) => {
       }
     }
 
+    // Verificar lo que quedo en DB
+    const verify = await pool.query('SELECT machine_id, share_history FROM machine_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
+    console.log(`[SHARE-VERIFY] DB result: ${JSON.stringify(verify.rows)}`);
+
     try { await sendPush(user_id, '🔄 Recursos actualizados', 'Se actualizaron las maquinas y URLs compartidas contigo', { type: 'shares_updated' }); } catch(_){}
-    res.json({ message: 'Recursos compartidos' });
+    res.json({ message: 'Recursos compartidos', _debug: verify.rows });
   } catch (error) {
     console.error('Error compartiendo:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -1075,6 +1079,14 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
+});
+
+// DEBUG: ver estado de machine_shares (TEMPORAL - eliminar despues)
+app.get('/api/debug/shares', async (req, res) => {
+  try {
+    const shares = await pool.query('SELECT ms.*, u.email as tech_email, m.machine_name FROM machine_shares ms LEFT JOIN users u ON ms.user_id = u.id LEFT JOIN machines m ON ms.machine_id = m.id ORDER BY ms.id DESC LIMIT 20');
+    res.json(shares.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============== PUSH NOTIFICATIONS ==============
