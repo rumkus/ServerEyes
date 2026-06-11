@@ -1016,9 +1016,12 @@ app.post('/api/machines/share', authenticateToken, async (req, res) => {
     const { user_id, machine_ids, url_ids, history_ids } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id requerido' });
 
+    console.log(`[SHARE-RAW] body=${JSON.stringify(req.body)} types: machine_ids=${typeof machine_ids}/${Array.isArray(machine_ids)} history_ids=${typeof history_ids}/${Array.isArray(history_ids)}`);
+
     const safeMachineIds = (machine_ids || []).map(Number).filter(n => !isNaN(n));
     const safeHistoryIds = (history_ids || []).map(Number).filter(n => !isNaN(n));
     const safeUrlIds = (url_ids || []).map(Number).filter(n => !isNaN(n));
+    console.log(`[SHARE-SAFE] machines=${JSON.stringify(safeMachineIds)} history=${JSON.stringify(safeHistoryIds)} urls=${JSON.stringify(safeUrlIds)}`);
 
     const myMachines = await pool.query('SELECT id FROM machines WHERE user_id = $1', [req.user.id]);
     const myMIds = new Set(myMachines.rows.map(m => m.id));
@@ -1074,11 +1077,18 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
   }
 });
 
-// DEBUG TEMPORAL
+// DEBUG TEMPORAL - ELIMINAR
 app.get('/api/debug/shares', async (req, res) => {
   try {
     const shares = await pool.query('SELECT ms.machine_id, ms.share_history, ms.user_id, ms.shared_by, u.email as tech, m.machine_name FROM machine_shares ms LEFT JOIN users u ON ms.user_id = u.id LEFT JOIN machines m ON ms.machine_id = m.id ORDER BY ms.id DESC LIMIT 20');
     res.json(shares.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/debug/force-history/:machineId', async (req, res) => {
+  try {
+    await pool.query('UPDATE machine_shares SET share_history = true WHERE machine_id = $1', [req.params.machineId]);
+    const check = await pool.query('SELECT machine_id, share_history, user_id FROM machine_shares WHERE machine_id = $1', [req.params.machineId]);
+    res.json({ updated: check.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
