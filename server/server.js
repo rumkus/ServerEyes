@@ -1010,38 +1010,33 @@ app.post('/api/pending-changes/:id/reject', authenticateToken, async (req, res) 
 });
 
 // DEBUG: ultimo share request
-let _lastShareReq = null;
-
 // Compartir maquinas y URLs con un tecnico
 app.post('/api/machines/share', authenticateToken, async (req, res) => {
   try {
     const { user_id, machine_ids, url_ids, history_ids } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id requerido' });
-    _lastShareReq = { body: req.body, owner: req.user.id, ts: new Date().toISOString() };
-    console.log(`[SHARE] owner=${req.user.id} -> tech=${user_id} machines=${JSON.stringify(machine_ids)} history=${JSON.stringify(history_ids)} urls=${JSON.stringify(url_ids)}`);
 
-    // Maquinas
+    const safeMachineIds = (machine_ids || []).map(Number).filter(n => !isNaN(n));
+    const safeHistoryIds = (history_ids || []).map(Number).filter(n => !isNaN(n));
+    const safeUrlIds = (url_ids || []).map(Number).filter(n => !isNaN(n));
+
     const myMachines = await pool.query('SELECT id FROM machines WHERE user_id = $1', [req.user.id]);
     const myMIds = new Set(myMachines.rows.map(m => m.id));
     await pool.query('DELETE FROM machine_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
-    const historySet = new Set(history_ids || []);
-    for (const machineId of (machine_ids || [])) {
-      const owned = myMIds.has(machineId);
-      const hist = historySet.has(machineId);
-      console.log(`[SHARE] machine ${machineId}: owned=${owned} share_history=${hist}`);
-      if (owned) {
+    const historySet = new Set(safeHistoryIds);
+    for (const machineId of safeMachineIds) {
+      if (myMIds.has(machineId)) {
         await pool.query(
           'INSERT INTO machine_shares (machine_id, user_id, shared_by, share_history) VALUES ($1, $2, $3, $4) ON CONFLICT (machine_id, user_id) DO UPDATE SET share_history = $4',
-          [machineId, user_id, req.user.id, hist]
+          [machineId, user_id, req.user.id, historySet.has(machineId)]
         );
       }
     }
 
-    // URLs
     const myUrls = await pool.query('SELECT id FROM url_monitors WHERE user_id = $1', [req.user.id]);
     const myUIds = new Set(myUrls.rows.map(u => u.id));
     await pool.query('DELETE FROM url_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
-    for (const urlId of (url_ids || [])) {
+    for (const urlId of safeUrlIds) {
       if (myUIds.has(urlId)) {
         await pool.query(
           'INSERT INTO url_shares (url_id, user_id, shared_by) VALUES ($1, $2, $3) ON CONFLICT (url_id, user_id) DO NOTHING',
@@ -1050,12 +1045,8 @@ app.post('/api/machines/share', authenticateToken, async (req, res) => {
       }
     }
 
-    // Verificar lo que quedo en DB
-    const verify = await pool.query('SELECT machine_id, share_history FROM machine_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
-    console.log(`[SHARE-VERIFY] DB result: ${JSON.stringify(verify.rows)}`);
-
     try { await sendPush(user_id, '🔄 Recursos actualizados', 'Se actualizaron las maquinas y URLs compartidas contigo', { type: 'shares_updated' }); } catch(_){}
-    res.json({ message: 'Recursos compartidos', _debug: verify.rows });
+    res.json({ message: 'Recursos compartidos' });
   } catch (error) {
     console.error('Error compartiendo:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -1073,24 +1064,14 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
       'SELECT url_id FROM url_shares WHERE user_id = $1 AND shared_by = $2',
       [req.params.userId, req.user.id]
     );
-    const result = {
+    res.json({
       machine_ids: machines.rows.map(r => r.machine_id),
       history_ids: machines.rows.filter(r => r.share_history).map(r => r.machine_id),
       url_ids: urls.rows.map(r => r.url_id)
-    };
-    console.log(`[SHARED] tech=${req.params.userId} owner=${req.user.id} machines=${JSON.stringify(result.machine_ids)} history=${JSON.stringify(result.history_ids)}`);
-    res.json(result);
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
-});
-
-// DEBUG: ver estado de machine_shares (TEMPORAL - eliminar despues)
-app.get('/api/debug/shares', async (req, res) => {
-  try {
-    const shares = await pool.query('SELECT ms.*, u.email as tech_email, m.machine_name FROM machine_shares ms LEFT JOIN users u ON ms.user_id = u.id LEFT JOIN machines m ON ms.machine_id = m.id ORDER BY ms.id DESC LIMIT 20');
-    res.json({ shares: shares.rows, lastShareRequest: _lastShareReq });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============== PUSH NOTIFICATIONS ==============
@@ -2066,7 +2047,6 @@ app.get('/api/machines/:id/metrics', authenticateToken, async (req, res) => {
 
     if (machine.rows[0].user_id !== req.user.id) {
       const shareCheck = await pool.query('SELECT share_history FROM machine_shares WHERE machine_id = $1 AND user_id = $2', [req.params.id, req.user.id]);
-      console.log(`[METRICS] user=${req.user.id} machine=${req.params.id} share_history=${shareCheck.rows[0]?.share_history} rows=${shareCheck.rows.length}`);
       if (!shareCheck.rows[0]?.share_history) return res.json([]);
     }
 
