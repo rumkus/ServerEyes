@@ -1014,6 +1014,7 @@ app.post('/api/machines/share', authenticateToken, async (req, res) => {
   try {
     const { user_id, machine_ids, url_ids, history_ids } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id requerido' });
+    console.log(`[SHARE] owner=${req.user.id} -> tech=${user_id} machines=${JSON.stringify(machine_ids)} history=${JSON.stringify(history_ids)} urls=${JSON.stringify(url_ids)}`);
 
     // Maquinas
     const myMachines = await pool.query('SELECT id FROM machines WHERE user_id = $1', [req.user.id]);
@@ -1021,10 +1022,13 @@ app.post('/api/machines/share', authenticateToken, async (req, res) => {
     await pool.query('DELETE FROM machine_shares WHERE user_id = $1 AND shared_by = $2', [user_id, req.user.id]);
     const historySet = new Set(history_ids || []);
     for (const machineId of (machine_ids || [])) {
-      if (myMIds.has(machineId)) {
+      const owned = myMIds.has(machineId);
+      const hist = historySet.has(machineId);
+      console.log(`[SHARE] machine ${machineId}: owned=${owned} share_history=${hist}`);
+      if (owned) {
         await pool.query(
           'INSERT INTO machine_shares (machine_id, user_id, shared_by, share_history) VALUES ($1, $2, $3, $4) ON CONFLICT (machine_id, user_id) DO UPDATE SET share_history = $4',
-          [machineId, user_id, req.user.id, historySet.has(machineId)]
+          [machineId, user_id, req.user.id, hist]
         );
       }
     }
@@ -1061,11 +1065,13 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
       'SELECT url_id FROM url_shares WHERE user_id = $1 AND shared_by = $2',
       [req.params.userId, req.user.id]
     );
-    res.json({
+    const result = {
       machine_ids: machines.rows.map(r => r.machine_id),
       history_ids: machines.rows.filter(r => r.share_history).map(r => r.machine_id),
       url_ids: urls.rows.map(r => r.url_id)
-    });
+    };
+    console.log(`[SHARED] tech=${req.params.userId} owner=${req.user.id} machines=${JSON.stringify(result.machine_ids)} history=${JSON.stringify(result.history_ids)}`);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -2044,6 +2050,7 @@ app.get('/api/machines/:id/metrics', authenticateToken, async (req, res) => {
 
     if (machine.rows[0].user_id !== req.user.id) {
       const shareCheck = await pool.query('SELECT share_history FROM machine_shares WHERE machine_id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+      console.log(`[METRICS] user=${req.user.id} machine=${req.params.id} share_history=${shareCheck.rows[0]?.share_history} rows=${shareCheck.rows.length}`);
       if (!shareCheck.rows[0]?.share_history) return res.json([]);
     }
 
