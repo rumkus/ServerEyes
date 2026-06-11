@@ -7,3 +7,5 @@ out/
 *.apk
 firebase-service-account.json
 *-service-account.json
+server/test-heartbeat.js
+mobile-final/android/app/src/main/assets/index.android.bundle
