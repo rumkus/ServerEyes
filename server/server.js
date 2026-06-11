@@ -1009,11 +1009,15 @@ app.post('/api/pending-changes/:id/reject', authenticateToken, async (req, res) 
   }
 });
 
+// DEBUG: ultimo share request
+let _lastShareReq = null;
+
 // Compartir maquinas y URLs con un tecnico
 app.post('/api/machines/share', authenticateToken, async (req, res) => {
   try {
     const { user_id, machine_ids, url_ids, history_ids } = req.body;
     if (!user_id) return res.status(400).json({ error: 'user_id requerido' });
+    _lastShareReq = { body: req.body, owner: req.user.id, ts: new Date().toISOString() };
     console.log(`[SHARE] owner=${req.user.id} -> tech=${user_id} machines=${JSON.stringify(machine_ids)} history=${JSON.stringify(history_ids)} urls=${JSON.stringify(url_ids)}`);
 
     // Maquinas
@@ -1085,7 +1089,7 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
 app.get('/api/debug/shares', async (req, res) => {
   try {
     const shares = await pool.query('SELECT ms.*, u.email as tech_email, m.machine_name FROM machine_shares ms LEFT JOIN users u ON ms.user_id = u.id LEFT JOIN machines m ON ms.machine_id = m.id ORDER BY ms.id DESC LIMIT 20');
-    res.json(shares.rows);
+    res.json({ shares: shares.rows, lastShareRequest: _lastShareReq });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
