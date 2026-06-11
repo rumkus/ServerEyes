@@ -403,10 +403,16 @@ function AppContent() {
         if (type === 'shares_updated' || type === 'change_resolved') {
           setTimeout(() => { try { loadMachines(); loadUrlMonitors(); } catch {} }, 300);
         }
-        if (type === 'invite_accepted') {
+        if (type === 'invite_accepted' || type === 'member_left') {
           setTimeout(() => {
             try { loadMachines(); loadUrlMonitors(); } catch {}
             try { apiRequest('/api/organization', {}, tokenRef.current).then(r => { if (r.ok && r.data) setOrgData(r.data); }).catch(() => {}); } catch {}
+          }, 300);
+        }
+        if (type === 'member_removed') {
+          setTimeout(() => {
+            try { setOrgData(null); setOrgName(''); setOrgAddress(''); setOrgPhone(''); } catch {}
+            try { loadMachines(); loadUrlMonitors(); } catch {}
           }, 300);
         }
         if (type === 'pending_change') {
@@ -2437,6 +2443,11 @@ function AppContent() {
         </View>
         {metricsLoading ? (
           <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}><ActivityIndicator size="large" color="#00d4ff" /></View>
+        ) : metricsData.length === 0 && metricsMachine.is_shared && !metricsMachine.share_history ? (
+          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40}}>
+            <Text style={{fontSize: 40, marginBottom: 16}}>🔒</Text>
+            <Text style={{color: '#888', fontSize: 16, textAlign: 'center'}}>El owner no compartio las metricas de esta maquina</Text>
+          </View>
         ) : (
           <ScrollView style={{flex: 1, padding: 16}}>
             <Text style={{color: '#555', fontSize: 11, marginBottom: 16}}>{metricsData.length} puntos de datos</Text>
@@ -2468,6 +2479,7 @@ function AppContent() {
             <View style={{height: 30}} />
           </ScrollView>
         )}
+        <FloatingBackButton />
       </View>
     );
   }
@@ -3550,10 +3562,9 @@ function AppContent() {
     return (
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
-        <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
-        <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>✏️</Text>
-        <Text style={s.title}>Editar maquina</Text>
-        <Text style={[s.sub, {marginBottom: 16}]}>Toca fuera para cerrar</Text>
+        <BackHeader title="Editar maquina" subtitle={editingMachine.machine_name} />
+        <ScrollView contentContainerStyle={{padding: 24}}>
+
         <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Nombre:</Text>
         <TextInput style={s.input} value={editName} onChangeText={setEditName} placeholder="Nombre" placeholderTextColor="#666" />
         <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Grupo / Cliente:</Text>
@@ -3696,6 +3707,7 @@ function AppContent() {
           <Text style={{color: '#ff5252', textAlign: 'center', fontSize: 14}}>Eliminar maquina</Text>
         </TouchableOpacity>
         </ScrollView>
+        <FloatingBackButton />
       </View>
     );
   }
@@ -3779,7 +3791,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.6</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.7</Text>
             </View>
           </View>
         </TouchableOpacity>

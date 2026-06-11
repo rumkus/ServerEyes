@@ -881,6 +881,7 @@ app.delete('/api/organization/member/:id', authenticateToken, async (req, res) =
     await pool.query('UPDATE users SET organization_id = NULL, role = $1 WHERE id = $2 AND organization_id = $3', ['owner', req.params.id, org.rows[0].id]);
     await pool.query('DELETE FROM machine_shares WHERE user_id = $1', [req.params.id]);
     await pool.query('DELETE FROM url_shares WHERE user_id = $1', [req.params.id]);
+    try { await sendPush(parseInt(req.params.id), '👥 Removido del equipo', 'El owner te removio del equipo', { type: 'member_removed' }); } catch(_){}
     res.json({ message: 'Miembro removido' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
@@ -898,6 +899,8 @@ app.post('/api/organization/leave', authenticateToken, async (req, res) => {
     await pool.query('UPDATE users SET organization_id = NULL, role = $1 WHERE id = $2', ['owner', req.user.id]);
     await pool.query('DELETE FROM machine_shares WHERE user_id = $1', [req.user.id]);
     await pool.query('DELETE FROM url_shares WHERE user_id = $1', [req.user.id]);
+    const ownerId = org.rows[0]?.owner_id;
+    if (ownerId) { try { await sendPush(ownerId, '👥 Miembro salio', 'Un tecnico salio del equipo', { type: 'member_left' }); } catch(_){} }
     res.json({ message: 'Saliste del grupo' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
@@ -1564,7 +1567,7 @@ app.get('/api/machines', authenticateToken, async (req, res) => {
     );
     // Maquinas compartidas conmigo
     const shared = await pool.query(
-      `SELECT m.*, true as is_shared, u.email as owner_email, u.nombre as owner_name
+      `SELECT m.*, true as is_shared, ms.share_history, u.email as owner_email, u.nombre as owner_name
        FROM machines m
        JOIN machine_shares ms ON ms.machine_id = m.id
        LEFT JOIN users u ON m.user_id = u.id
