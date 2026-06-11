@@ -1074,6 +1074,14 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
   }
 });
 
+// DEBUG TEMPORAL
+app.get('/api/debug/shares', async (req, res) => {
+  try {
+    const shares = await pool.query('SELECT ms.machine_id, ms.share_history, ms.user_id, ms.shared_by, u.email as tech, m.machine_name FROM machine_shares ms LEFT JOIN users u ON ms.user_id = u.id LEFT JOIN machines m ON ms.machine_id = m.id ORDER BY ms.id DESC LIMIT 20');
+    res.json(shares.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============== PUSH NOTIFICATIONS ==============
 
 // Registrar token FCM del dispositivo
