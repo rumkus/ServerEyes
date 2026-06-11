@@ -400,8 +400,6 @@ function AppContent() {
         const title = String(remoteMessage?.notification?.title || 'ServerEyes');
         const body = String(remoteMessage?.notification?.body || '');
         const type = String(remoteMessage?.data?.type || '');
-        try { Vibration.vibrate([0, 200, 100, 200]); } catch {}
-
         if (type === 'shares_updated' || type === 'change_resolved') {
           setTimeout(() => { try { loadMachines(); loadUrlMonitors(); } catch {} }, 300);
         }
@@ -3781,7 +3779,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.5</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.6</Text>
             </View>
           </View>
         </TouchableOpacity>
