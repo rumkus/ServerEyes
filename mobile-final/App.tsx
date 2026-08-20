@@ -229,6 +229,10 @@ function AppContent() {
   const [pendingChanges, setPendingChanges] = useState<any[]>([]);
   const [showUrlMonitors, setShowUrlMonitors] = useState(false);
   const [urlMonitors, setUrlMonitors] = useState<any[]>([]);
+  const [urlHistoryMonitor, setUrlHistoryMonitor] = useState<any>(null);
+  const [urlHistory, setUrlHistory] = useState<any[]>([]);
+  const [urlHistoryLoading, setUrlHistoryLoading] = useState(false);
+  const [urlHistorySoloFallos, setUrlHistorySoloFallos] = useState(false);
   const [showAddUrl, setShowAddUrl] = useState(false);
   const [urlName, setUrlName] = useState('');
   const [urlUrl, setUrlUrl] = useState('');
@@ -304,6 +308,7 @@ function AppContent() {
     if (menuOpen) { setMenuOpen(false); return true; }
     if (showAddUrl) { setShowAddUrl(false); return true; }
     if (showAddMaintenance) { setShowAddMaintenance(false); return true; }
+    if (urlHistoryMonitor) { setUrlHistoryMonitor(null); return true; }
     if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
     if (showMaintenance) { setShowMaintenance(false); return true; }
     if (supportTicketId) { setSupportTicketId(null); return true; }
@@ -912,6 +917,24 @@ function AppContent() {
     } catch {}
   };
 
+  const abrirUrlHistory = async (mon: any, soloFallos = false) => {
+    setUrlHistoryMonitor(mon);
+    setUrlHistorySoloFallos(soloFallos);
+    setUrlHistoryLoading(true);
+    try {
+      const q = soloFallos ? '?only_failures=true&limit=200' : '?limit=200';
+      const res = await apiRequest(`/api/url-monitors/${mon.id}/history${q}`, {}, tokenRef.current);
+      setUrlHistory(res.ok && Array.isArray(res.data) ? res.data : []);
+    } catch { setUrlHistory([]); }
+    setUrlHistoryLoading(false);
+  };
+
+  const fmtFecha = (ts: string) => {
+    const d = new Date(ts);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  };
+
   if (showAddUrl) {
     return (
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
@@ -949,6 +972,85 @@ function AppContent() {
     );
   }
 
+  if (urlHistoryMonitor) {
+    const mon = urlHistoryMonitor;
+    const caidas = urlHistory.filter((h: any) => !h.is_up).length;
+    const transitorios = urlHistory.filter((h: any) => h.is_up && h.attempts > 1).length;
+    const conMs = urlHistory.filter((h: any) => h.is_up && h.response_ms != null);
+    const msProm = conMs.length ? Math.round(conMs.reduce((a: number, h: any) => a + h.response_ms, 0) / conMs.length) : null;
+    const uptime = urlHistory.length ? ((urlHistory.length - caidas) / urlHistory.length * 100) : null;
+    const Resumen = ({valor, etiqueta, color}: {valor: string, etiqueta: string, color: string}) => (
+      <View style={{flex: 1, backgroundColor: th.card, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginHorizontal: 4}}>
+        <Text style={{fontSize: 20, fontWeight: '800', color}}>{valor}</Text>
+        <Text style={{fontSize: 10, color: th.sub, marginTop: 2, textTransform: 'uppercase'}}>{etiqueta}</Text>
+      </View>
+    );
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Historial de chequeos" subtitle={mon.name || mon.url} />
+        <View style={{flexDirection: 'row', paddingHorizontal: 12, paddingTop: 12}}>
+          {['Todos', 'Solo fallos'].map((t, i) => {
+            const activo = urlHistorySoloFallos === (i === 1);
+            return (
+              <TouchableOpacity key={t} onPress={() => abrirUrlHistory(mon, i === 1)}
+                style={{backgroundColor: activo ? '#00d4ff' : th.card, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7, marginRight: 8}}>
+                <Text style={{color: activo ? '#0a1628' : th.sub, fontWeight: '600', fontSize: 13}}>{t}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {!urlHistorySoloFallos && urlHistory.length > 0 && (
+          <View style={{flexDirection: 'row', paddingHorizontal: 8, paddingTop: 12}}>
+            <Resumen valor={uptime != null ? uptime.toFixed(1) + '%' : '—'} etiqueta="Uptime" color={uptime != null && uptime >= 99 ? '#00e676' : '#ff9800'} />
+            <Resumen valor={String(caidas)} etiqueta="Caidas" color={caidas ? '#ff5252' : '#00e676'} />
+            <Resumen valor={String(transitorios)} etiqueta="Fallos pasajeros" color={transitorios ? '#ff9800' : th.sub} />
+            <Resumen valor={msProm != null ? msProm + 'ms' : '—'} etiqueta="Promedio" color="#00d4ff" />
+          </View>
+        )}
+        <ScrollView contentContainerStyle={{padding: 12, paddingBottom: 100}}>
+          {urlHistoryLoading ? (
+            <View style={{alignItems: 'center', paddingVertical: 60}}>
+              <ActivityIndicator color="#00d4ff" />
+            </View>
+          ) : urlHistory.length === 0 ? (
+            <View style={{alignItems: 'center', paddingVertical: 60, paddingHorizontal: 24}}>
+              <Text style={{fontSize: 48, marginBottom: 12}}>{urlHistorySoloFallos ? '✅' : '📈'}</Text>
+              <Text style={{color: th.sub, fontSize: 16, textAlign: 'center'}}>
+                {urlHistorySoloFallos ? 'Sin fallos registrados' : 'Todavia no hay chequeos'}
+              </Text>
+              <Text style={{color: th.sub, fontSize: 13, marginTop: 6, textAlign: 'center', opacity: 0.7}}>
+                {urlHistorySoloFallos ? 'Ningun chequeo fallo en el periodo guardado.' : 'El historial se guarda desde el primer chequeo y se conserva 30 dias.'}
+              </Text>
+            </View>
+          ) : urlHistory.map((h: any, i: number) => {
+            const pasajero = h.is_up && h.attempts > 1;
+            const color = !h.is_up ? '#ff5252' : pasajero ? '#ff9800' : '#00e676';
+            return (
+              <View key={i} style={{backgroundColor: th.card, borderRadius: 10, marginBottom: 8, padding: 12, borderLeftWidth: 3, borderLeftColor: color}}>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{color: th.text, fontSize: 13, fontWeight: '600', flex: 1}}>{fmtFecha(h.checked_at)}</Text>
+                  {h.notified && <Text style={{fontSize: 12, marginRight: 8}}>{'🔔'}</Text>}
+                  <View style={{backgroundColor: color + '22', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 5}}>
+                    <Text style={{fontSize: 10, fontWeight: '700', color}}>{!h.is_up ? 'CAIDA' : pasajero ? 'PASAJERO' : 'OK'}</Text>
+                  </View>
+                </View>
+                <View style={{flexDirection: 'row', marginTop: 6}}>
+                  {h.status != null && <Text style={{color: th.sub, fontSize: 12, marginRight: 12}}>HTTP {h.status}</Text>}
+                  {h.response_ms != null && <Text style={{color: th.sub, fontSize: 12, marginRight: 12}}>{h.response_ms}ms</Text>}
+                  {h.attempts > 1 && <Text style={{color: '#ff9800', fontSize: 12}}>{h.attempts} intentos</Text>}
+                  <Text style={{color: th.sub, fontSize: 11, marginLeft: 'auto', opacity: 0.6}}>{timeSince(h.checked_at)}</Text>
+                </View>
+                {h.error && <Text style={{color: '#ff5252', fontSize: 11, marginTop: 5}}>{h.error}</Text>}
+              </View>
+            );
+          })}
+        </ScrollView>
+        <FloatingBackButton />
+      </View>
+    );
+  }
+
   if (showUrlMonitors) {
     return (
       <View style={{flex: 1, backgroundColor: th.bg}}>
@@ -981,7 +1083,10 @@ function AppContent() {
                 {u.last_error && <Text style={{color: '#ff5252', fontSize: 11, marginTop: 4}}>{u.last_error}</Text>}
               </View>
               <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
-                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center'}} onPress={async () => {
+                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center'}} onPress={() => abrirUrlHistory(u)}>
+                  <Text style={{color: '#00d4ff', fontSize: 12, fontWeight: '600'}}>{'📈'} Historial</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}} onPress={async () => {
                   if (u.is_shared) {
                     await apiRequest('/api/pending-changes', { method: 'POST', body: JSON.stringify({
                       change_type: 'edit', target_type: 'url', target_id: u.id, target_name: u.name || u.url, data: { is_active: !u.is_active }
