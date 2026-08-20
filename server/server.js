@@ -435,6 +435,23 @@ async function initDB() {
     )
   `);
 
+  // Historial de chequeos de URL: sin esto no habia forma de saber que fallo,
+  // porque last_error se borra en el primer chequeo exitoso posterior.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS url_check_history (
+      id SERIAL PRIMARY KEY,
+      url_id INTEGER REFERENCES url_monitors(id) ON DELETE CASCADE,
+      checked_at TIMESTAMP DEFAULT NOW(),
+      is_up BOOLEAN NOT NULL,
+      status INTEGER,
+      response_ms INTEGER,
+      error TEXT,
+      attempts INTEGER DEFAULT 1,
+      notified BOOLEAN DEFAULT false
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_url_check_history ON url_check_history (url_id, checked_at DESC)`).catch(() => {});
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_notifications (
       id SERIAL PRIMARY KEY,
@@ -3564,43 +3581,183 @@ app.delete('/api/url-monitors/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Historial de chequeos de una URL (dueno o tecnico con la URL compartida).
+// ?limit=N (max 1000) y ?only_failures=true para ver solo caidas y fallos transitorios.
+app.get('/api/url-monitors/:id/history', authenticateToken, async (req, res) => {
+  try {
+    const urlId = parseInt(req.params.id, 10);
+    if (!urlId) return res.status(400).json({ error: 'id invalido' });
+    const acceso = await pool.query(
+      `SELECT um.id FROM url_monitors um
+       LEFT JOIN url_shares us ON us.url_id = um.id AND us.user_id = $2
+       WHERE um.id = $1 AND (um.user_id = $2 OR us.user_id IS NOT NULL)`,
+      [urlId, req.user.id]
+    );
+    if (acceso.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
+    const filtro = req.query.only_failures === 'true' ? 'AND (is_up = false OR attempts > 1)' : '';
+    const result = await pool.query(
+      `SELECT checked_at, is_up, status, response_ms, error, attempts, notified
+       FROM url_check_history WHERE url_id = $1 ${filtro}
+       ORDER BY checked_at DESC LIMIT $2`,
+      [urlId, limit]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // URL monitor checker (runs every 60 seconds)
+// Un solo fallo NO dispara alarma: se reintenta URL_CHECK_RETRIES veces antes
+// de declarar la URL caida, para filtrar cortes transitorios (resets TCP,
+// 5xx momentaneos de CDN, hipos de DNS).
+const URL_CHECK_RETRIES = 3;
+const URL_CHECK_RETRY_DELAY_MS = 15000;
+const URL_CHECK_CONCURRENCY = 10;
+// UA de navegador real: los WAF/bot-management (Cloudflare y similares) suelen
+// responder 403 o challenge a User-Agents desconocidos, lo que se contaba como
+// caida aunque el sitio estuviera perfecto. X-Monitor permite identificar
+// nuestro trafico en los logs del sitio sin activar esas reglas.
+const URL_MONITOR_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 function followRedirects(urlStr, method, timeoutMs, maxRedirects) {
   const https = require('https');
   const http = require('http');
+  const totalTimeout = timeoutMs || 10000;
   return new Promise((resolve, reject) => {
     let redirects = 0;
+    let settled = false;
+    let current = null;
+    // Un unico timer para toda la cadena de redirecciones. Antes se creaba uno
+    // por salto sin limpiar el anterior, y el timer viejo rechazaba la promesa
+    // aunque la respuesta hubiera llegado bien.
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (current) current.destroy();
+      reject(new Error('Timeout'));
+    }, totalTimeout);
+    const finish = (err, val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err); else resolve(val);
+    };
     function doRequest(url) {
-      const urlObj = new URL(url);
+      let urlObj;
+      try { urlObj = new URL(url); } catch (e) { return finish(new Error('URL invalida: ' + url)); }
       const client = urlObj.protocol === 'https:' ? https : http;
       const opts = {
         method: method || 'GET',
-        timeout: timeoutMs || 10000,
-        headers: { 'User-Agent': 'ServerEyes/1.0 (URL Monitor)' },
-        rejectAuthorized: false
+        timeout: totalTimeout,
+        headers: {
+          'User-Agent': URL_MONITOR_UA,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'identity',
+          'Cache-Control': 'no-cache',
+          'X-Monitor': 'ServerEyes/1.0'
+        },
+        // Un certificado vencido o con cadena incompleta no es "sitio caido":
+        // eso ya lo vigila ssl_monitors con su propia alerta.
+        // (antes decia rejectAuthorized, que es un typo y no hacia nada)
+        rejectUnauthorized: false,
+        // Happy Eyeballs como un navegador: si el AAAA no responde, cae a IPv4
+        // en vez de fallar el chequeo.
+        autoSelectFamily: true
       };
-      const timer = setTimeout(() => reject(new Error('Timeout')), timeoutMs || 10000);
       const r = client.request(urlObj, opts, (res) => {
-        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirects < (maxRedirects || 5)) {
-          redirects++;
-          let next = res.headers.location;
-          if (next.startsWith('/')) next = urlObj.protocol + '//' + urlObj.host + next;
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
           res.resume();
+          // Un loop de redirecciones deja la pagina inservible para el visitante:
+          // es una caida, no un 302 sano. Antes se devolvia el 302 como "arriba".
+          if (redirects >= (maxRedirects || 5)) return finish(new Error('Demasiadas redirecciones (' + redirects + ')'));
+          redirects++;
+          let next = null;
+          try { next = new URL(res.headers.location, urlObj).href; } catch (e) { next = null; }
+          if (!next) return finish(new Error('Redirect invalido: ' + res.headers.location));
           doRequest(next);
           return;
         }
-        clearTimeout(timer);
-        let body = '';
-        res.on('data', c => body += c);
-        res.on('end', () => resolve({ status: res.statusCode, redirects }));
+        res.resume(); // drenamos sin acumular el body en memoria
+        res.on('end', () => finish(null, { status: res.statusCode, redirects }));
       });
-      r.on('error', (e) => { clearTimeout(timer); reject(e); });
+      current = r;
+      r.on('error', (e) => finish(e));
+      r.on('timeout', () => r.destroy(new Error('Timeout')));
       r.end();
     }
     doRequest(urlStr);
   });
 }
+
+// Un intento suelto contra la URL. Nunca lanza: devuelve el resultado.
+async function probeUrl(mon) {
+  const startTime = Date.now();
+  try {
+    const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, 5);
+    const isUp = result.status >= 200 && result.status < 400;
+    return {
+      isUp,
+      status: result.status,
+      ms: Date.now() - startTime,
+      error: isUp ? null : `HTTP ${result.status}`
+    };
+  } catch (err) {
+    return { isUp: false, status: null, ms: Date.now() - startTime, error: err.message || 'Error desconocido' };
+  }
+}
+
+async function checkUrlMonitor(mon) {
+  let probe = await probeUrl(mon);
+  let attempts = 1;
+  let lastError = probe.error;
+  while (!probe.isUp && attempts < URL_CHECK_RETRIES) {
+    await sleep(URL_CHECK_RETRY_DELAY_MS);
+    probe = await probeUrl(mon);
+    attempts++;
+    if (probe.error) lastError = probe.error;
+  }
+
+  const isUp = probe.isUp;
+  const wasUp = mon.is_up;
+  // Notificamos solo cuando cambia el estado y ya se confirmo con reintentos.
+  const notify = mon.notify_down && wasUp !== isUp;
+
+  await pool.query(
+    `UPDATE url_monitors SET last_status=$1, last_response_ms=$2, last_check=NOW(), last_error=$3,
+     is_up=$4, down_since=CASE WHEN $4=true THEN NULL ELSE COALESCE(down_since, NOW()) END
+     WHERE id=$5`,
+    [probe.status, probe.ms, isUp ? null : lastError, isUp, mon.id]
+  );
+
+  // Historial: queda registro aunque la URL se recupere. Guardamos tambien los
+  // fallos transitorios (isUp=true con attempts>1) para poder hacer post-mortem.
+  await pool.query(
+    `INSERT INTO url_check_history (url_id, is_up, status, response_ms, error, attempts, notified)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [mon.id, isUp, probe.status, probe.ms, lastError, attempts, notify]
+  ).catch(e => console.error('[URL-MONITOR] No se pudo guardar historial:', e.message));
+
+  if (notify && isUp) {
+    sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${probe.ms}ms)`, { type: 'url_up' });
+  } else if (notify && !isUp) {
+    sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url}: ${lastError} (${attempts} intentos)`, { type: 'url_down' });
+  }
+  if (!isUp) {
+    console.log(`[URL-MONITOR] CAIDA ${mon.url} -> ${lastError} tras ${attempts} intentos`);
+  } else if (attempts > 1) {
+    console.log(`[URL-MONITOR] Fallo transitorio en ${mon.url} (${lastError}), recupero en el intento ${attempts}`);
+  }
+}
+
+let urlCheckRunning = false;
 setInterval(async () => {
+  if (urlCheckRunning) return; // evitamos solapar ciclos: con reintentos un ciclo puede pasar los 60s
+  urlCheckRunning = true;
   try {
     const monitors = await pool.query(
       `SELECT um.*, u.id as owner_id FROM url_monitors um
@@ -3608,40 +3765,30 @@ setInterval(async () => {
        WHERE um.is_active = true
        AND (um.last_check IS NULL OR um.last_check < NOW() - (um.interval_seconds || ' seconds')::INTERVAL)`
     );
-    for (const mon of monitors.rows) {
-      const startTime = Date.now();
-      try {
-        const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, 5);
-        const expectedStatus = mon.expected_status || 200;
-        const isUp = result.status >= 200 && result.status < 400;
-        const wasDown = !mon.is_up;
-        await pool.query(
-          `UPDATE url_monitors SET last_status=$1, last_response_ms=$2, last_check=NOW(), last_error=NULL,
-           is_up=$3, down_since=CASE WHEN $3=true THEN NULL ELSE COALESCE(down_since, NOW()) END
-           WHERE id=$4`,
-          [result.status, Date.now() - startTime, isUp, mon.id]
-        );
-        if (wasDown && isUp && mon.notify_down) {
-          sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${Date.now() - startTime}ms)`, { type: 'url_up' });
-        } else if (!isUp && mon.is_up && mon.notify_down) {
-          sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url} respondio ${result.status}`, { type: 'url_down' });
-        }
-      } catch (err) {
-        const wasUp = mon.is_up;
-        await pool.query(
-          `UPDATE url_monitors SET last_check=NOW(), last_error=$1, last_response_ms=$2,
-           is_up=false, down_since=COALESCE(down_since, NOW()) WHERE id=$3`,
-          [err.message, Date.now() - startTime, mon.id]
-        );
-        if (wasUp && mon.notify_down) {
-          sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url}: ${err.message}`, { type: 'url_down' });
-        }
-      }
+    // En tandas: los reintentos hacen que un monitor caido tarde ~30s, y en
+    // serie eso retrasaba el chequeo de todos los demas.
+    for (let i = 0; i < monitors.rows.length; i += URL_CHECK_CONCURRENCY) {
+      const tanda = monitors.rows.slice(i, i + URL_CHECK_CONCURRENCY);
+      await Promise.all(tanda.map(mon =>
+        checkUrlMonitor(mon).catch(e => console.error(`[URL-MONITOR] Error en ${mon.url}:`, e.message))
+      ));
     }
   } catch (err) {
     console.error('[URL-MONITOR] Error:', err.message);
+  } finally {
+    urlCheckRunning = false;
   }
 }, 60000);
+
+// Purga diaria del historial de chequeos (retencion 30 dias)
+setInterval(async () => {
+  try {
+    const r = await pool.query(`DELETE FROM url_check_history WHERE checked_at < NOW() - INTERVAL '30 days'`);
+    if (r.rowCount > 0) console.log(`[URL-MONITOR] Historial purgado: ${r.rowCount} registros`);
+  } catch (err) {
+    console.error('[URL-MONITOR] Error purgando historial:', err.message);
+  }
+}, 24 * 60 * 60 * 1000);
 
 // ============== WEEKLY REPORT ==============
 
