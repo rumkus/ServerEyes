@@ -334,21 +334,39 @@ async function measureSpeed() {
   });
 }
 
+
+// ── Verificacion de origen ───────────────────────────────────────────────────
+// El servidor firma comandos y updates con HMAC-SHA256 usando la machine_key,
+// que solo conocemos nosotros y el. Sin esto, cualquiera que consiga responder
+// en lugar del servidor (DNS secuestrado, proxy, un server falso apuntado por
+// una config alterada) nos hace ejecutar lo que quiera.
+function firmaEsperada(machineKey, ...partes) {
+  return require('crypto').createHmac('sha256', String(machineKey))
+    .update(partes.join('\u0000')).digest('hex');
+}
+function firmaValida(recibida, esperada) {
+  if (!recibida || typeof recibida !== 'string' || recibida.length !== esperada.length) return false;
+  // Comparacion de tiempo constante
+  return require('crypto').timingSafeEqual(Buffer.from(recibida, 'utf8'), Buffer.from(esperada, 'utf8'));
+}
+
 // Auto-update: descarga nuevo exe, renombra viejo, pone nuevo en su lugar
-async function selfUpdate(url, newVersion, config) {
+async function selfUpdate(url, newVersion, config, sha256Esperado) {
   const newPath = path.join(EXE_DIR, 'servereyes-new.exe');
   const oldPath = path.join(EXE_DIR, 'servereyes-old.exe');
   const batPath = path.join(EXE_DIR, 'servereyes-update.bat');
 
   log(`Descargando actualizacion v${newVersion} desde ${url}`);
   try {
-    // Descargar archivo siguiendo redirects
+    // Descargar archivo: solo https, tambien en los redirects. Un salto a http
+    // permitiria sustituir el binario en transito.
     await new Promise((resolve, reject) => {
       const downloadFile = (downloadUrl, redirects) => {
         if (redirects > 5) { reject(new Error('Demasiados redirects')); return; }
-        const client = downloadUrl.startsWith('https') ? https : http;
-        client.get(downloadUrl, (res) => {
+        if (!/^https:\/\//i.test(downloadUrl)) { reject(new Error('Update rechazado: la descarga no es https -> ' + downloadUrl)); return; }
+        https.get(downloadUrl, (res) => {
           if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+            res.resume();
             downloadFile(res.headers.location, redirects + 1);
             return;
           }
@@ -370,7 +388,22 @@ async function selfUpdate(url, newVersion, config) {
       return;
     }
 
-    log(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), aplicando update...`);
+    // El hash lo publica el servidor junto con la version. Sin hash no
+    // aplicamos nada: preferimos quedarnos en la version vieja antes que
+    // ejecutar un binario que no podemos verificar.
+    if (!sha256Esperado) {
+      log('Update rechazado: el servidor no publico el sha256 del binario');
+      try { fs.unlinkSync(newPath); } catch {}
+      return;
+    }
+    const sha = require('crypto').createHash('sha256').update(fs.readFileSync(newPath)).digest('hex');
+    if (sha.toLowerCase() !== String(sha256Esperado).toLowerCase()) {
+      log(`Update rechazado: sha256 no coincide (esperado ${sha256Esperado}, bajado ${sha})`);
+      try { fs.unlinkSync(newPath); } catch {}
+      return;
+    }
+
+    log(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), hash verificado, aplicando update...`);
 
     // Estrategia: el bat renombra el exe actual (se puede renombrar un exe en uso),
     // mueve el nuevo al nombre original, y lo arranca.
@@ -445,8 +478,14 @@ async function sendHeartbeat(config) {
 
       // Chequear si hay actualizacion disponible
       if (res.data && res.data.update && res.data.update.url) {
-        log(`Actualizacion disponible: v${res.data.update.version}`);
-        await selfUpdate(res.data.update.url, res.data.update.version, config);
+        const up = res.data.update;
+        const esperada = firmaEsperada(config.machineKey, 'update', up.version, up.url, up.sha256 || '');
+        if (!firmaValida(up.sig, esperada)) {
+          log(`Update IGNORADO: firma invalida para v${up.version} (${up.url})`);
+        } else {
+          log(`Actualizacion disponible: v${up.version}`);
+          await selfUpdate(up.url, up.version, config, up.sha256);
+        }
       }
 
       // Chequear si el server pide speed test
@@ -481,6 +520,11 @@ async function sendHeartbeat(config) {
       // Ejecutar comandos remotos pendientes
       if (res.data && res.data.commands && res.data.commands.length > 0) {
         for (const cmd of res.data.commands) {
+          const esperada = firmaEsperada(config.machineKey, 'cmd', String(cmd.id), cmd.command);
+          if (!firmaValida(cmd.sig, esperada)) {
+            log(`Comando #${cmd.id} IGNORADO: firma invalida`);
+            continue;
+          }
           log(`Comando remoto #${cmd.id}: ${cmd.command}`);
           try {
             const { exec } = require('child_process');

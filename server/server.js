@@ -6,7 +6,18 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'servereyes-secret-key-change-in-production';
+// Sin default: un secreto hardcodeado hace que cualquiera pueda firmar tokens
+// validos si la variable falta en el entorno. Preferimos no arrancar.
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET_VIEJO = 'servereyes-secret-key-change-in-production';
+if (!JWT_SECRET || JWT_SECRET === JWT_SECRET_VIEJO) {
+  console.error('[FATAL] JWT_SECRET no esta definido (o sigue siendo el default publico).');
+  console.error('[FATAL] Genera uno con: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'base64url\'))"');
+  process.exit(1);
+}
+if (JWT_SECRET.length < 32) {
+  console.warn(`[SEGURIDAD] JWT_SECRET tiene solo ${JWT_SECRET.length} caracteres. Conviene rotarlo a 48+.`);
+}
 
 // Global error handlers to prevent crashes
 process.on('uncaughtException', (err) => {
@@ -15,6 +26,50 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] Unhandled rejection (no crash):', reason);
 });
+
+const crypto = require('crypto');
+
+// Firma HMAC con la machine_key, que solo conocen el servidor y ese agente.
+// El agente verifica antes de ejecutar un comando o aplicar un update, asi que
+// cualquiera que logre responderle en lugar del servidor (DNS secuestrado,
+// proxy, servidor falso) no puede inyectarle codigo.
+function firmarParaMaquina(machineKey, ...partes) {
+  return crypto.createHmac('sha256', String(machineKey)).update(partes.join('\u0000')).digest('hex');
+}
+
+// Cifrado en reposo de secretos de usuario (hoy: contraseñas SMTP).
+// Clave dedicada si existe SMTP_ENC_KEY; si no, derivada del JWT_SECRET.
+const SMTP_ENC_INFO = 'servereyes-smtp-v1';
+let _smtpKey = null;
+function claveSmtp() {
+  if (_smtpKey) return _smtpKey;
+  const base = process.env.SMTP_ENC_KEY || JWT_SECRET;
+  if (!process.env.SMTP_ENC_KEY) {
+    console.warn('[SEGURIDAD] SMTP_ENC_KEY no definida: se cifra con una clave derivada de JWT_SECRET.');
+    console.warn('[SEGURIDAD] Si rotas JWT_SECRET, los usuarios tendran que volver a cargar su clave SMTP.');
+  }
+  _smtpKey = Buffer.from(crypto.hkdfSync('sha256', Buffer.from(base), Buffer.alloc(0), Buffer.from(SMTP_ENC_INFO), 32));
+  return _smtpKey;
+}
+function cifrarSecreto(texto) {
+  if (!texto) return texto;
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', claveSmtp(), iv);
+  const ct = Buffer.concat([c.update(String(texto), 'utf8'), c.final()]);
+  return ['enc:v1', iv.toString('base64'), c.getAuthTag().toString('base64'), ct.toString('base64')].join(':');
+}
+function descifrarSecreto(valor) {
+  if (!valor || typeof valor !== 'string' || !valor.startsWith('enc:v1:')) return valor; // legado en claro
+  try {
+    const [, , ivB64, tagB64, ctB64] = valor.split(':');
+    const d = crypto.createDecipheriv('aes-256-gcm', claveSmtp(), Buffer.from(ivB64, 'base64'));
+    d.setAuthTag(Buffer.from(tagB64, 'base64'));
+    return Buffer.concat([d.update(Buffer.from(ctB64, 'base64')), d.final()]).toString('utf8');
+  } catch (e) {
+    console.error('[SEGURIDAD] No se pudo descifrar un secreto SMTP:', e.message);
+    return null;
+  }
+}
 
 // Email (Nodemailer)
 let emailTransporter = null;
@@ -74,8 +129,8 @@ async function sendEmailWithUserSMTP(user, subject, htmlBody, toOverride) {
       host: user.smtp_host, port: user.smtp_port || 587, secure: isSecure,
       ...(useTls ? { requireTLS: true } : {}),
       ...(secVal === 'none' ? { tls: { rejectUnauthorized: false } } : {}),
-      auth: { user: user.smtp_user, pass: user.smtp_pass }
-    } : { service: 'gmail', auth: { user: user.smtp_user, pass: user.smtp_pass } };
+      auth: { user: user.smtp_user, pass: descifrarSecreto(user.smtp_pass) }
+    } : { service: 'gmail', auth: { user: user.smtp_user, pass: descifrarSecreto(user.smtp_pass) } };
     const transport = nodemailer.createTransport(transportOpts);
 
     const recipient = toOverride || user.email;
@@ -294,6 +349,18 @@ async function initDB() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN DEFAULT false`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_user VARCHAR(255)`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_pass VARCHAR(255)`).catch(() => {});
+  // El texto cifrado es mas largo que el original: 255 no alcanza.
+  await pool.query(`ALTER TABLE users ALTER COLUMN smtp_pass TYPE TEXT`).catch(() => {});
+  // Cifrar las que quedaron guardadas en claro de antes.
+  try {
+    const enClaro = await pool.query("SELECT id, smtp_pass FROM users WHERE smtp_pass IS NOT NULL AND smtp_pass <> '' AND smtp_pass NOT LIKE 'enc:v1:%'");
+    for (const row of enClaro.rows) {
+      await pool.query('UPDATE users SET smtp_pass = $1 WHERE id = $2', [cifrarSecreto(row.smtp_pass), row.id]);
+    }
+    if (enClaro.rows.length > 0) console.log(`[SEGURIDAD] ${enClaro.rows.length} contraseña(s) SMTP cifradas en reposo`);
+  } catch (e) {
+    console.error('[SEGURIDAD] Error migrando contraseñas SMTP:', e.message);
+  }
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_from VARCHAR(255)`).catch(() => {});
   // Hacer admin al primer usuario
   await pool.query(`UPDATE users SET is_admin = true WHERE id = 1 AND is_admin = false`).catch(() => {});
@@ -665,35 +732,19 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Login via Clerk (desde la app movil)
-app.post('/api/auth/clerk-login', async (req, res) => {
-  try {
-    const { clerk_id, email } = req.body;
-    if (!clerk_id || !email) return res.status(400).json({ error: 'clerk_id y email requeridos' });
-
-    // Buscar usuario por clerk_id o email
-    let user = await pool.query('SELECT * FROM users WHERE clerk_id = $1 OR email = $2', [clerk_id, email]);
-
-    if (user.rows.length === 0) {
-      // Crear usuario nuevo desde Clerk
-      user = await pool.query(
-        'INSERT INTO users (clerk_id, email, nombre) VALUES ($1, $2, $3) RETURNING id, email, nombre',
-        [clerk_id, email, email.split('@')[0]]
-      );
-    } else {
-      // Actualizar clerk_id si no lo tenia
-      if (!user.rows[0].clerk_id) {
-        await pool.query('UPDATE users SET clerk_id = $1 WHERE id = $2', [clerk_id, user.rows[0].id]);
-      }
-    }
-
-    const u = user.rows[0];
-    const token = jwt.sign({ id: u.id, email: u.email }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ user: { id: u.id, email: u.email, nombre: u.nombre }, token });
-  } catch (error) {
-    console.error('Error en clerk-login:', error);
-    res.status(500).json({ error: 'Error interno' });
-  }
+// ELIMINADO: /api/auth/clerk-login
+//
+// Emitia un JWT de sesion a partir de un clerk_id y un email tomados del body,
+// sin verificar ningun token firmado por Clerk. Conocer un email alcanzaba para
+// obtener un token valido de esa cuenta, y desde ahi encolar comandos remotos
+// que los agentes ejecutan con exec(). Solo lo usaba mobile-expo, discontinuada.
+//
+// Si alguna vez vuelve a hacer falta login con Clerk: exigir el JWT de Clerk en
+// el header, verificarlo contra su JWKS, y usar el "sub" del token verificado
+// como identidad — nunca el email que manda el cliente.
+app.post('/api/auth/clerk-login', (req, res) => {
+  console.warn('[SEGURIDAD] Intento de uso de /api/auth/clerk-login (eliminado) desde', req.ip);
+  res.status(410).json({ error: 'Endpoint eliminado. Usa /api/auth/login.' });
 });
 
 // Cambiar contraseña
@@ -1094,41 +1145,13 @@ app.get('/api/machines/shared/:userId', authenticateToken, async (req, res) => {
   }
 });
 
-// DEBUG TEMPORAL - ELIMINAR
-app.get('/api/debug/shares', async (req, res) => {
-  try {
-    const shares = await pool.query('SELECT ms.machine_id, ms.share_history, ms.user_id, ms.shared_by, u.email as tech, m.machine_name FROM machine_shares ms LEFT JOIN users u ON ms.user_id = u.id LEFT JOIN machines m ON ms.machine_id = m.id ORDER BY ms.id DESC LIMIT 20');
-    res.json(shares.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/debug/force-history/:machineId', async (req, res) => {
-  try {
-    await pool.query('UPDATE machine_shares SET share_history = true WHERE machine_id = $1', [req.params.machineId]);
-    const check = await pool.query('SELECT machine_id, share_history, user_id FROM machine_shares WHERE machine_id = $1', [req.params.machineId]);
-    res.json({ updated: check.rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/debug/test-metrics/:machineId/:userId', async (req, res) => {
-  try {
-    const mid = req.params.machineId;
-    const uid = req.params.userId;
-    const machine = await pool.query('SELECT id, user_id FROM machines WHERE id = $1', [mid]);
-    const share = await pool.query('SELECT share_history FROM machine_shares WHERE machine_id = $1 AND user_id = $2', [mid, uid]);
-    const isOwner = machine.rows[0]?.user_id === parseInt(uid);
-    const hasShare = share.rows.length > 0;
-    const shareHistory = share.rows[0]?.share_history;
-    const metricsCount = await pool.query('SELECT COUNT(*) as cnt FROM metrics_history WHERE machine_id = $1 AND timestamp > NOW() - INTERVAL \'24 hours\'', [mid]);
-    const sample = await pool.query('SELECT timestamp, cpu_usage, ram_usage FROM metrics_history WHERE machine_id = $1 ORDER BY timestamp DESC LIMIT 3', [mid]);
-    res.json({
-      machine: machine.rows[0],
-      isOwner,
-      hasShare,
-      shareHistory,
-      metricsLast24h: parseInt(metricsCount.rows[0].cnt),
-      sampleMetrics: sample.rows
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+// ELIMINADOS: /api/debug/shares, /api/debug/force-history/:machineId y
+// /api/debug/test-metrics/:machineId/:userId
+//
+// Eran endpoints de diagnostico sin autenticacion. Exponian la relacion
+// usuario-maquina de toda la base, y force-history ademas escribia:
+// ponia share_history = true para todos los shares de una maquina, o sea que
+// cualquiera podia darse acceso al historial de metricas ajeno.
 
 // ============== PUSH NOTIFICATIONS ==============
 
@@ -1588,7 +1611,12 @@ app.post('/api/heartbeat', async (req, res) => {
         "SELECT id, command FROM remote_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT 5",
         [updatedMachine.id]
       );
-      pendingCommands = cmds.rows;
+      // Firmamos cada comando para que el agente pueda verificar que salio de
+      // este servidor antes de pasarselo a exec().
+      pendingCommands = cmds.rows.map(c => ({
+        ...c,
+        sig: firmarParaMaquina(machine_key, 'cmd', String(c.id), c.command)
+      }));
     } catch {}
 
     // Check backup pendiente
@@ -1607,6 +1635,19 @@ app.post('/api/heartbeat', async (req, res) => {
       pool.query('UPDATE machines SET backup_alert_sent = false WHERE id = $1', [updatedMachine.id]).catch(() => {});
     }
 
+    // El update lleva hash del binario y firma; y no se ofrece por http, para
+    // que nadie pueda sustituir el ejecutable en transito.
+    if (updateInfo) {
+      if (!/^https:\/\//i.test(updateInfo.url)) {
+        console.warn('[SEGURIDAD] Update no ofrecido: la URL no es https ->', updateInfo.url);
+        updateInfo = null;
+      } else {
+        const shaKey = (agent_type || 'agent') === 'client' ? 'client_sha256' : 'agent_sha256';
+        const shaRow = await pool.query('SELECT value FROM app_settings WHERE key = $1', [shaKey]).catch(() => null);
+        updateInfo.sha256 = shaRow?.rows?.[0]?.value || null;
+        updateInfo.sig = firmarParaMaquina(machine_key, 'update', updateInfo.version, updateInfo.url, updateInfo.sha256 || '');
+      }
+    }
     res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands, check_backup: checkBackup });
   } catch (error) {
     console.error('Error en heartbeat:', error.message, error.stack);
@@ -2029,8 +2070,12 @@ app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req,
     const downloadUrl = `${protocol}://${req.get('host')}/api/agent/download`;
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
+    // Hash del binario que acabamos de guardar: el agente lo verifica antes de
+    // reemplazar su propio ejecutable.
+    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256]);
 
-    res.json({ message: 'Agente subido', version, size: buffer.length, downloadUrl });
+    res.json({ message: 'Agente subido', version, size: buffer.length, downloadUrl, sha256 });
   } catch (error) {
     console.error('Error subiendo agente:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -2444,14 +2489,21 @@ app.get('/api/agent/version', authenticateToken, async (req, res) => {
   }
 });
 
-// Configurar version del agente
-app.post('/api/agent/version', authenticateToken, async (req, res) => {
+// Configurar version del agente.
+// Requiere admin: esta URL la descarga y ejecuta CADA agente instalado, asi que
+// con solo authenticateToken cualquier usuario registrado podia apuntar el
+// auto-update de todo el parque a un binario propio.
+app.post('/api/agent/version', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { version, url } = req.body;
+    const { version, url, sha256 } = req.body;
     if (!version || !url) return res.status(400).json({ error: 'version y url requeridos' });
+    if (!/^https:\/\//i.test(url)) return res.status(400).json({ error: 'La URL de update debe ser https' });
+    if (sha256 && !/^[a-f0-9]{64}$/i.test(sha256)) return res.status(400).json({ error: 'sha256 invalido' });
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [url]);
-    res.json({ message: 'Version actualizada', version, url });
+    if (sha256) await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256.toLowerCase()]);
+    logAudit(req.user.id, 'set_agent_version', 'app_settings', null, `${version} ${url}`, req.ip);
+    res.json({ message: 'Version actualizada', version, url, sha256: sha256 || null });
   } catch (error) {
     console.error('Error actualizando version agente:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -2492,7 +2544,7 @@ app.post('/api/auth/smtp', authenticateToken, async (req, res) => {
     );
     // Solo actualizar password si se envió (no vacío)
     if (smtp_pass) {
-      await pool.query('UPDATE users SET smtp_pass = $1 WHERE id = $2', [smtp_pass, req.user.id]);
+      await pool.query('UPDATE users SET smtp_pass = $1 WHERE id = $2', [cifrarSecreto(smtp_pass), req.user.id]);
     }
     res.json({ message: 'Configuracion SMTP guardada' });
   } catch (error) {

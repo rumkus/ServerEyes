@@ -23,12 +23,12 @@
   </div>
 
   <script>
-    const { ipcRenderer } = require('electron');
+    const api = window.serverEyes;
 
     let pollInterval = null;
 
     async function start() {
-      const result = await ipcRenderer.invoke('request-pairing');
+      const result = await api.requestPairing();
       const content = document.getElementById('content');
 
       if (!result.success) {
@@ -50,7 +50,7 @@
 
       // Consultar cada 2 segundos si fue confirmado
       pollInterval = setInterval(async () => {
-        const check = await ipcRenderer.invoke('check-pairing', code);
+        const check = await api.checkPairing(code);
         if (check.confirmed) {
           clearInterval(pollInterval);
           document.getElementById('status').className = 'status success';
