@@ -156,7 +156,10 @@ async function sendEmailWithUserSMTP(user, subject, htmlBody, toOverride) {
 // Firebase Admin
 let firebaseAdmin = null;
 try {
-  const admin = require('firebase-admin');
+  // firebase-admin 14 elimino la API con namespace (admin.credential.cert,
+  // admin.messaging()). La modular es la unica que queda.
+  const { initializeApp, cert } = require('firebase-admin/app');
+  const { getMessaging } = require('firebase-admin/messaging');
   const fs = require('fs');
   const serviceAccountPath = path.join(__dirname, 'firebase-service-account.json');
   let serviceAccount = null;
@@ -182,8 +185,10 @@ try {
       if (!serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
         console.error('Firebase private_key no tiene formato PEM valido');
       }
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-      firebaseAdmin = admin;
+      const fbApp = initializeApp({ credential: cert(serviceAccount) });
+      // Conservamos la forma .messaging().send() para no tocar los tres lugares
+      // del archivo que mandan push.
+      firebaseAdmin = { messaging: () => getMessaging(fbApp) };
       console.log('Firebase Admin inicializado');
     }
   } else {
@@ -388,6 +393,12 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  // Pagina de estado publica: apagada por defecto y con un slug impredecible.
+  // Antes /api/public/status devolvia el inventario de TODAS las organizaciones
+  // a cualquiera que abriera la URL.
+  await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS status_slug VARCHAR(64)`).catch(() => {});
+  await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS status_enabled BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_org_status_slug ON organizations (status_slug) WHERE status_slug IS NOT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'owner'`).catch(() => {});
 
@@ -3967,18 +3978,80 @@ app.post('/api/machines/:id/wol', authenticateToken, async (req, res) => {
 
 app.get('/status-page', (req, res) => res.sendFile(path.join(__dirname, 'public', 'status.html')));
 
-app.get('/api/public/status', async (req, res) => {
+// Sin slug no hay pagina: devolver el inventario global era la fuga.
+app.get('/api/public/status', (req, res) => {
+  res.status(400).json({ error: 'Falta el identificador de la pagina de estado' });
+});
+
+// Configuracion de la pagina de estado de mi organizacion
+app.get('/api/organization/status-page', authenticateToken, async (req, res) => {
   try {
+    const u = await pool.query('SELECT organization_id FROM users WHERE id = $1', [req.user.id]);
+    const orgId = u.rows[0]?.organization_id;
+    if (!orgId) return res.status(404).json({ error: 'No perteneces a ninguna organizacion' });
+    const org = await pool.query('SELECT status_slug, status_enabled, owner_id FROM organizations WHERE id = $1', [orgId]);
+    if (org.rows.length === 0) return res.status(404).json({ error: 'Organizacion no encontrada' });
+    const o = org.rows[0];
+    res.json({
+      enabled: o.status_enabled === true,
+      slug: o.status_slug || null,
+      url: o.status_slug ? `/status-page?s=${o.status_slug}` : null,
+      soy_owner: o.owner_id === req.user.id
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Prender/apagar la pagina, o rotar el slug. Solo el dueño de la organizacion.
+app.post('/api/organization/status-page', authenticateToken, async (req, res) => {
+  try {
+    const { enabled, rotar } = req.body;
+    const u = await pool.query('SELECT organization_id FROM users WHERE id = $1', [req.user.id]);
+    const orgId = u.rows[0]?.organization_id;
+    if (!orgId) return res.status(404).json({ error: 'No perteneces a ninguna organizacion' });
+    const org = await pool.query('SELECT status_slug, owner_id FROM organizations WHERE id = $1', [orgId]);
+    if (org.rows[0]?.owner_id !== req.user.id) return res.status(403).json({ error: 'Solo el dueño de la organizacion puede cambiar esto' });
+
+    let slug = org.rows[0].status_slug;
+    if (!slug || rotar) slug = crypto.randomBytes(16).toString('base64url');
+    await pool.query('UPDATE organizations SET status_slug = $1, status_enabled = $2 WHERE id = $3', [slug, enabled !== false, orgId]);
+    logAudit(req.user.id, 'config_status_page', 'organization', orgId, `enabled=${enabled !== false} rotar=${!!rotar}`, req.ip);
+    res.json({ enabled: enabled !== false, slug, url: `/status-page?s=${slug}` });
+  } catch (error) {
+    console.error('Error configurando status page:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.get('/api/public/status/:slug', async (req, res) => {
+  try {
+    const org = await pool.query(
+      'SELECT id FROM organizations WHERE status_slug = $1 AND status_enabled = true',
+      [req.params.slug]
+    );
+    // Mismo 404 si el slug no existe o si la pagina esta apagada: no confirmamos
+    // la existencia de organizaciones a quien vaya probando slugs.
+    if (org.rows.length === 0) return res.status(404).json({ error: 'Pagina de estado no encontrada' });
+    const orgId = org.rows[0].id;
+
     const result = await pool.query(
-      `SELECT m.machine_name, m.is_online, m.last_heartbeat, m.ping_ms, m.geo_city, m.geo_country,
-       u.organization_id FROM machines m
+      `SELECT m.machine_name, m.is_online, m.last_heartbeat, m.ping_ms, m.geo_city, m.geo_country
+       FROM machines m
        JOIN users u ON m.user_id = u.id
-       WHERE u.organization_id IS NOT NULL
-       ORDER BY m.machine_name`
+       WHERE u.organization_id = $1
+       ORDER BY m.machine_name`,
+      [orgId]
     );
 
+    // last_error queda afuera a proposito: suele traer hostnames y rutas
+    // internas, y esto lo ve cualquiera.
     const urlMonitors = await pool.query(
-      `SELECT name, url, is_up, last_response_ms, last_check, last_error FROM url_monitors WHERE is_active = true`
+      `SELECT um.name, um.url, um.is_up, um.last_response_ms, um.last_check
+       FROM url_monitors um
+       JOIN users u ON um.user_id = u.id
+       WHERE um.is_active = true AND u.organization_id = $1`,
+      [orgId]
     );
 
     const machines_list = result.rows.map(m => ({
@@ -3993,8 +4066,7 @@ app.get('/api/public/status', async (req, res) => {
       name: u.name || u.url,
       status: u.is_up ? 'operational' : 'down',
       response_ms: u.last_response_ms,
-      last_check: u.last_check,
-      error: u.is_up ? null : u.last_error
+      last_check: u.last_check
     }));
 
     const allUp = machines_list.every(m => m.status === 'operational') && urls.every(u => u.status === 'operational');
