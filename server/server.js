@@ -1919,20 +1919,30 @@ app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
 // Sparkline data: ultimos 12 puntos de CPU/RAM por maquina del usuario
 app.get('/api/machines/sparklines', authenticateToken, async (req, res) => {
   try {
+    // Las columnas de metrics_history son cpu_usage, ram_usage, ping_ms y
+    // timestamp. La consulta pedia cpu, ram, ping y time, que no existen, asi
+    // que este endpoint devolvia 500 siempre. Los alias mantienen la forma del
+    // JSON que espera el frontend.
     const result = await pool.query(
       `SELECT m.id, (
         SELECT json_agg(json_build_object('cpu', h.cpu, 'ram', h.ram, 'ping', h.ping) ORDER BY h.time)
-        FROM (SELECT cpu, ram, ping, time FROM metrics_history WHERE machine_id = m.id ORDER BY time DESC LIMIT 12) h
+        FROM (SELECT cpu_usage AS cpu, ram_usage AS ram, ping_ms AS ping, timestamp AS time
+              FROM metrics_history WHERE machine_id = m.id ORDER BY timestamp DESC LIMIT 12) h
       ) as points
       FROM machines m WHERE m.user_id = $1 AND m.is_online = true`,
       [req.user.id]
     );
     const data = {};
     for (const row of result.rows) {
-      if (row.points) data[row.id] = row.points.reverse();
+      // json_agg ya los devuelve del mas viejo al mas nuevo, que es como se
+      // dibuja una sparkline. El reverse() que habia aca los daba vuelta.
+      if (row.points) data[row.id] = row.points;
     }
     res.json(data);
   } catch (error) {
+    // Sin este log el error quedaba invisible: solo se veia un 500 en el
+    // navegador y nada del lado del servidor.
+    console.error('Error en sparklines:', error.message);
     res.status(500).json({ error: 'Error interno' });
   }
 });
