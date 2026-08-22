@@ -191,8 +191,22 @@ function measureSpeed() {
   });
 }
 
+// ── Verificacion de origen ───────────────────────────────────────────────────
+// El servidor firma comandos y updates con HMAC-SHA256 usando la machine_key,
+// que solo conocemos nosotros y el. Sin esto, cualquiera que consiga responder
+// en lugar del servidor (DNS secuestrado, proxy, un server falso apuntado por
+// una config alterada) nos hace ejecutar lo que quiera.
+function firmaEsperada(machineKey, ...partes) {
+  return require('crypto').createHmac('sha256', String(machineKey))
+    .update(partes.join('\u0000')).digest('hex');
+}
+function firmaValida(recibida, esperada) {
+  if (!recibida || typeof recibida !== 'string' || recibida.length !== esperada.length) return false;
+  return require('crypto').timingSafeEqual(Buffer.from(recibida, 'utf8'), Buffer.from(esperada, 'utf8'));
+}
+
 // Auto-update del client
-async function selfUpdateClient(url, newVersion) {
+async function selfUpdateClient(url, newVersion, sha256Esperado) {
   const { spawn } = require('child_process');
   const exePath = process.execPath; // ruta del electron exe
   const exeDir = path.dirname(exePath);
@@ -202,13 +216,15 @@ async function selfUpdateClient(url, newVersion) {
 
   clog(`Descargando v${newVersion} desde ${url}`);
 
-  // Descargar siguiendo redirects
+  // Descargar: solo https, tambien en los redirects. Un salto a http permitiria
+  // sustituir el binario en transito.
   await new Promise((resolve, reject) => {
     const downloadFile = (downloadUrl, redirects) => {
       if (redirects > 5) { reject(new Error('Demasiados redirects')); return; }
-      const client = downloadUrl.startsWith('https') ? https : http;
-      client.get(downloadUrl, (res) => {
+      if (!/^https:\/\//i.test(downloadUrl)) { reject(new Error('Update rechazado: la descarga no es https -> ' + downloadUrl)); return; }
+      https.get(downloadUrl, (res) => {
         if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+          res.resume();
           downloadFile(res.headers.location, redirects + 1); return;
         }
         if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
@@ -228,7 +244,21 @@ async function selfUpdateClient(url, newVersion) {
     return;
   }
 
-  clog(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), reiniciando...`);
+  // Sin hash publicado por el servidor no aplicamos nada: preferimos quedarnos
+  // en la version vieja antes que ejecutar un binario que no podemos verificar.
+  if (!sha256Esperado) {
+    clog('Update rechazado: el servidor no publico el sha256 del binario');
+    try { fs.unlinkSync(newPath); } catch {}
+    return;
+  }
+  const sha = require('crypto').createHash('sha256').update(fs.readFileSync(newPath)).digest('hex');
+  if (sha.toLowerCase() !== String(sha256Esperado).toLowerCase()) {
+    clog(`Update rechazado: sha256 no coincide (esperado ${sha256Esperado}, bajado ${sha})`);
+    try { fs.unlinkSync(newPath); } catch {}
+    return;
+  }
+
+  clog(`Descarga completa (${Math.round(stats.size / 1024 / 1024)}MB), hash verificado, reiniciando...`);
 
   const exeName = path.basename(exePath);
   const batContent = [
@@ -280,12 +310,17 @@ async function sendHeartbeat() {
 
     // Auto-update si hay version nueva
     if (res.ok && res.data && res.data.update && res.data.update.url) {
-      const { version, url } = res.data.update;
-      clog(`Update disponible: v${version}`);
-      if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Actualizando a v${version}...`);
-      try {
-        await selfUpdateClient(url, version);
-      } catch (e) { clog(`Update error: ${e.message}`); }
+      const { version, url, sha256, sig } = res.data.update;
+      const esperada = firmaEsperada(config.machineKey, 'update', version, url, sha256 || '');
+      if (!firmaValida(sig, esperada)) {
+        clog(`Update IGNORADO: firma invalida para v${version} (${url})`);
+      } else {
+        clog(`Update disponible: v${version}`);
+        if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Actualizando a v${version}...`);
+        try {
+          await selfUpdateClient(url, version, sha256);
+        } catch (e) { clog(`Update error: ${e.message}`); }
+      }
     }
 
     // Speed test si el servidor lo pide
@@ -303,6 +338,11 @@ async function sendHeartbeat() {
     // Ejecutar comandos remotos
     if (res.ok && res.data && res.data.commands && res.data.commands.length > 0) {
       for (const cmd of res.data.commands) {
+        const esperadaCmd = firmaEsperada(config.machineKey, 'cmd', String(cmd.id), cmd.command);
+        if (!firmaValida(cmd.sig, esperadaCmd)) {
+          clog(`Comando #${cmd.id} IGNORADO: firma invalida`);
+          continue;
+        }
         clog(`Comando remoto #${cmd.id}: ${cmd.command}`);
         try {
           const { exec } = require('child_process');
@@ -338,7 +378,13 @@ function openConfigWindow() {
     width: 480, height: 520,
     resizable: false, maximizable: false, minimizable: false,
     title: 'ServerEyes - Configuracion',
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
+    webPreferences: {
+      // Sin Node en el renderer: una inyeccion de HTML en estas pantallas ya no
+      // da acceso al sistema. El puente esta en preload.js.
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js')
+    }
   });
 
   configWindow.setMenuBarVisibility(false);
@@ -361,7 +407,13 @@ function openPairingWindow() {
     width: 400, height: 350,
     resizable: false, maximizable: false, minimizable: false,
     title: 'ServerEyes - Vincular equipo',
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
+    webPreferences: {
+      // Sin Node en el renderer: una inyeccion de HTML en estas pantallas ya no
+      // da acceso al sistema. El puente esta en preload.js.
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js')
+    }
   });
 
   pairingWindow.setMenuBarVisibility(false);

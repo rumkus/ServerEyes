@@ -15,7 +15,9 @@
       "output": "dist"
     },
     "win": {
-      "target": ["portable"],
+      "target": [
+        "portable"
+      ],
       "icon": "icon.ico",
       "signingHashAlgorithms": [],
       "signAndEditExecutable": false
@@ -31,7 +33,7 @@
     }
   },
   "devDependencies": {
-    "electron": "^32.0.0",
-    "electron-builder": "^24.13.3"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
   }
 }

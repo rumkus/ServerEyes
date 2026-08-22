@@ -128,11 +128,11 @@
   <div id="status" class="status"></div>
 
   <script>
-    const { ipcRenderer } = require('electron');
+    const api = window.serverEyes;
 
     // Cargar configuracion actual
     async function loadConfig() {
-      const config = await ipcRenderer.invoke('get-config');
+      const config = await api.getConfig();
       document.getElementById('serverUrl').value = config.serverUrl || '';
       document.getElementById('machineKey').value = config.machineKey || '';
       document.getElementById('machineName').value = config.machineName || '';
@@ -147,13 +147,13 @@
         heartbeatInterval: parseInt(document.getElementById('heartbeatInterval').value) || 30
       };
 
-      const result = await ipcRenderer.invoke('save-config', config);
+      const result = await api.saveConfig(config);
       showStatus('Configuracion guardada', 'success');
     }
 
     async function testConnection() {
       showStatus('Probando conexion...', '');
-      const result = await ipcRenderer.invoke('test-connection');
+      const result = await api.testConnection();
       showStatus(result.message, result.success ? 'success' : 'error');
     }
 

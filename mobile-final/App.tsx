@@ -7,7 +7,41 @@ import messaging from '@react-native-firebase/messaging';
 import { Platform, PermissionsAndroid, NativeModules, BackHandler } from 'react-native';
 import ReactNativeBiometrics from 'react-native-biometrics';
 import { NetworkInfo } from 'react-native-network-info';
+import * as Keychain from 'react-native-keychain';
 const { WidgetBridge, NetworkScanner: NativeScanner } = NativeModules;
+
+// Los tokens de sesion van al Keystore de Android, no a AsyncStorage.
+// AsyncStorage es texto plano dentro del sandbox de la app: se lee en un equipo
+// rooteado o desde un backup. La biometria no protegia nada mientras el secreto
+// que desbloquea la sesion estaba ahi al alcance de la mano.
+const TOKEN_SESION = 'servereyes_token';
+const TOKEN_BIO = 'se_bio_token';
+
+const almacenSeguro = {
+  async guardar(clave: string, valor: string) {
+    await Keychain.setInternetCredentials(clave, clave, valor);
+  },
+  async leer(clave: string): Promise<string | null> {
+    try {
+      const r = await Keychain.getInternetCredentials(clave);
+      return r ? r.password : null;
+    } catch { return null; }
+  },
+  async borrar(clave: string) {
+    try { await Keychain.resetInternetCredentials({ server: clave }); } catch {}
+  },
+  // Mover lo que haya quedado guardado en claro de versiones anteriores.
+  async migrarDesdeAsyncStorage(clave: string): Promise<string | null> {
+    try {
+      const viejo = await AsyncStorage.getItem(clave);
+      if (!viejo) return null;
+      await this.guardar(clave, viejo);
+      await AsyncStorage.removeItem(clave);
+      log.info(`Token ${clave} movido a almacenamiento seguro`);
+      return viejo;
+    } catch { return null; }
+  }
+};
 const rnBiometrics = new ReactNativeBiometrics();
 
 const API_URL = 'https://servereyes-production.up.railway.app';
@@ -461,8 +495,12 @@ function AppContent() {
         setBiometricAvailable(available);
       }).catch(() => {});
 
-      AsyncStorage.getItem('servereyes_token').then(async (saved) => {
-        const bioToken = await AsyncStorage.getItem('se_bio_token').catch(() => null);
+      (async () => {
+        return {
+          saved: await almacenSeguro.leer(TOKEN_SESION) || await almacenSeguro.migrarDesdeAsyncStorage(TOKEN_SESION),
+          bioToken: await almacenSeguro.leer(TOKEN_BIO) || await almacenSeguro.migrarDesdeAsyncStorage(TOKEN_BIO)
+        };
+      })().then(async ({ saved, bioToken }) => {
         setHasSavedCreds(!!bioToken);
         if (saved) {
           log.info('Token encontrado en storage');
@@ -482,11 +520,11 @@ function AppContent() {
   // Guardar token cuando cambia
   const setAndSaveToken = async (t: string | null) => {
     if (t) {
-      await AsyncStorage.setItem('servereyes_token', t);
+      await almacenSeguro.guardar(TOKEN_SESION, t);
       try { WidgetBridge?.setToken(t); } catch {}
     } else {
-      await AsyncStorage.removeItem('servereyes_token');
-      await AsyncStorage.removeItem('se_bio_token');
+      await almacenSeguro.borrar(TOKEN_SESION);
+      await almacenSeguro.borrar(TOKEN_BIO);
       try { WidgetBridge?.clearToken(); } catch {}
       setHasSavedCreds(false);
     }
@@ -494,23 +532,23 @@ function AppContent() {
   };
 
   const saveBiometricToken = async (t: string) => {
-    await AsyncStorage.setItem('se_bio_token', t);
+    await almacenSeguro.guardar(TOKEN_BIO, t);
     setHasSavedCreds(true);
   };
 
   const tryBiometricLogin = async () => {
     try {
-      const savedToken = await AsyncStorage.getItem('se_bio_token');
+      const savedToken = await almacenSeguro.leer(TOKEN_BIO);
       if (!savedToken) return;
       const result = await rnBiometrics.simplePrompt({ promptMessage: 'Desbloquear ServerEyes', cancelButtonText: 'Cancelar' });
       if (result.success) {
         const check = await apiRequest('/api/machines', {}, savedToken);
         if (check.ok || check.status !== 401) {
           setToken(savedToken);
-          await AsyncStorage.setItem('servereyes_token', savedToken);
+          await almacenSeguro.guardar(TOKEN_SESION, savedToken);
           try { WidgetBridge?.setToken(savedToken); } catch {}
         } else {
-          await AsyncStorage.removeItem('se_bio_token');
+          await almacenSeguro.borrar(TOKEN_BIO);
           setHasSavedCreds(false);
           showModal('🔒', 'Sesion expirada', 'Ingresa con tu email y contraseña');
         }
@@ -3900,7 +3938,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.11</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.12</Text>
             </View>
           </View>
         </TouchableOpacity>

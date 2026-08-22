@@ -54,9 +54,24 @@ function timeSince(ts) {
   if (s < 86400) return 'hace ' + Math.floor(s/3600) + 'h';
   return 'hace ' + Math.floor(s/86400) + 'd';
 }
+// Los nombres de maquinas y monitores los escribe el usuario y esta pagina es
+// publica: sin escapar, un nombre con HTML se ejecuta en el navegador de quien
+// la mire.
+function esc(t) {
+  return String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
 async function load() {
   try {
-    const r = await fetch('/api/public/status');
+    const slug = new URLSearchParams(location.search).get('s');
+    if (!slug) {
+      document.getElementById('content').innerHTML = '<div class="loading">Esta pagina de estado necesita un enlace con identificador.</div>';
+      return;
+    }
+    const r = await fetch('/api/public/status/' + encodeURIComponent(slug));
+    if (r.status === 404) {
+      document.getElementById('content').innerHTML = '<div class="loading">Pagina de estado no encontrada.</div>';
+      return;
+    }
     const d = await r.json();
     const labels = { operational: 'Todos los sistemas operativos', partial_outage: 'Interrupcion parcial', major_outage: 'Interrupcion mayor' };
     let html = `<div class="overall ${d.overall}">${d.overall === 'operational' ? '✅' : '⚠️'} ${labels[d.overall] || d.overall}</div>`;
@@ -66,8 +81,8 @@ async function load() {
         html += `<div class="item">
           <div class="dot ${m.status === 'operational' ? 'up' : 'down'}"></div>
           <div class="item-info">
-            <div class="item-name">${m.name}</div>
-            <div class="item-meta">${m.location || ''} ${m.ping ? '· ' + m.ping + 'ms' : ''} ${m.last_seen ? '· ' + timeSince(m.last_seen) : ''}</div>
+            <div class="item-name">${esc(m.name)}</div>
+            <div class="item-meta">${esc(m.location || '')} ${m.ping ? '· ' + Number(m.ping) + 'ms' : ''} ${m.last_seen ? '· ' + timeSince(m.last_seen) : ''}</div>
           </div>
           <span class="item-status ${m.status === 'operational' ? 'up' : 'down'}">${m.status === 'operational' ? 'Operativo' : 'Caido'}</span>
         </div>`;
@@ -79,8 +94,8 @@ async function load() {
         html += `<div class="item">
           <div class="dot ${u.status === 'operational' ? 'up' : 'down'}"></div>
           <div class="item-info">
-            <div class="item-name">${u.name}</div>
-            <div class="item-meta">${u.response_ms ? u.response_ms + 'ms' : ''} ${u.last_check ? '· ' + timeSince(u.last_check) : ''} ${u.error ? '· ' + u.error : ''}</div>
+            <div class="item-name">${esc(u.name)}</div>
+            <div class="item-meta">${u.response_ms ? Number(u.response_ms) + 'ms' : ''} ${u.last_check ? '· ' + timeSince(u.last_check) : ''}</div>
           </div>
           <span class="item-status ${u.status === 'operational' ? 'up' : 'down'}">${u.status === 'operational' ? 'Operativo' : 'Caido'}</span>
         </div>`;
