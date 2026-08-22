@@ -40,35 +40,58 @@ function firmarParaMaquina(machineKey, ...partes) {
 // Cifrado en reposo de secretos de usuario (hoy: contraseñas SMTP).
 // Clave dedicada si existe SMTP_ENC_KEY; si no, derivada del JWT_SECRET.
 const SMTP_ENC_INFO = 'servereyes-smtp-v1';
-let _smtpKey = null;
-function claveSmtp() {
-  if (_smtpKey) return _smtpKey;
-  const base = process.env.SMTP_ENC_KEY || JWT_SECRET;
-  if (!process.env.SMTP_ENC_KEY) {
+const derivarClaveSmtp = (base) =>
+  Buffer.from(crypto.hkdfSync('sha256', Buffer.from(base), Buffer.alloc(0), Buffer.from(SMTP_ENC_INFO), 32));
+
+// La primera clave de la lista es con la que ciframos; las demas solo sirven
+// para descifrar lo que quedo guardado con una clave anterior. Asi cambiar de
+// clave no deja ilegible nada: el arranque re-cifra lo viejo con la principal.
+let _clavesSmtp = null;
+function clavesSmtp() {
+  if (_clavesSmtp) return _clavesSmtp;
+  const claves = [];
+  if (process.env.SMTP_ENC_KEY) {
+    claves.push(derivarClaveSmtp(process.env.SMTP_ENC_KEY));
+    // Para rotar SMTP_ENC_KEY: dejar la anterior aca hasta el siguiente arranque.
+    if (process.env.SMTP_ENC_KEY_ANTERIOR) claves.push(derivarClaveSmtp(process.env.SMTP_ENC_KEY_ANTERIOR));
+    // Y la derivada del JWT, con la que se cifro antes de que existiera la variable.
+    claves.push(derivarClaveSmtp(JWT_SECRET));
+  } else {
     console.warn('[SEGURIDAD] SMTP_ENC_KEY no definida: se cifra con una clave derivada de JWT_SECRET.');
     console.warn('[SEGURIDAD] Si rotas JWT_SECRET, los usuarios tendran que volver a cargar su clave SMTP.');
+    claves.push(derivarClaveSmtp(JWT_SECRET));
   }
-  _smtpKey = Buffer.from(crypto.hkdfSync('sha256', Buffer.from(base), Buffer.alloc(0), Buffer.from(SMTP_ENC_INFO), 32));
-  return _smtpKey;
+  _clavesSmtp = claves;
+  return _clavesSmtp;
 }
 function cifrarSecreto(texto) {
   if (!texto) return texto;
   const iv = crypto.randomBytes(12);
-  const c = crypto.createCipheriv('aes-256-gcm', claveSmtp(), iv);
+  const c = crypto.createCipheriv('aes-256-gcm', clavesSmtp()[0], iv);
   const ct = Buffer.concat([c.update(String(texto), 'utf8'), c.final()]);
   return ['enc:v1', iv.toString('base64'), c.getAuthTag().toString('base64'), ct.toString('base64')].join(':');
 }
-function descifrarSecreto(valor) {
-  if (!valor || typeof valor !== 'string' || !valor.startsWith('enc:v1:')) return valor; // legado en claro
+// Devuelve el texto claro, o null si esa clave no es la correcta. El tag de
+// GCM hace que probar claves sea seguro: con la equivocada falla, no devuelve
+// basura.
+function descifrarConClave(valor, clave) {
   try {
     const [, , ivB64, tagB64, ctB64] = valor.split(':');
-    const d = crypto.createDecipheriv('aes-256-gcm', claveSmtp(), Buffer.from(ivB64, 'base64'));
+    const d = crypto.createDecipheriv('aes-256-gcm', clave, Buffer.from(ivB64, 'base64'));
     d.setAuthTag(Buffer.from(tagB64, 'base64'));
     return Buffer.concat([d.update(Buffer.from(ctB64, 'base64')), d.final()]).toString('utf8');
   } catch (e) {
-    console.error('[SEGURIDAD] No se pudo descifrar un secreto SMTP:', e.message);
     return null;
   }
+}
+function descifrarSecreto(valor) {
+  if (!valor || typeof valor !== 'string' || !valor.startsWith('enc:v1:')) return valor; // legado en claro
+  for (const clave of clavesSmtp()) {
+    const claro = descifrarConClave(valor, clave);
+    if (claro !== null) return claro;
+  }
+  console.error('[SEGURIDAD] No se pudo descifrar un secreto SMTP con ninguna clave conocida');
+  return null;
 }
 
 // Email (Nodemailer)
@@ -365,6 +388,26 @@ async function initDB() {
     if (enClaro.rows.length > 0) console.log(`[SEGURIDAD] ${enClaro.rows.length} contraseña(s) SMTP cifradas en reposo`);
   } catch (e) {
     console.error('[SEGURIDAD] Error migrando contraseñas SMTP:', e.message);
+  }
+  // Re-cifrar lo que haya quedado con una clave anterior. Pasa al definir
+  // SMTP_ENC_KEY por primera vez (estaba cifrado con la derivada del JWT) y en
+  // cada rotacion posterior. Sin esto, cambiar la clave dejaba las contraseñas
+  // ilegibles y el usuario se enteraba recien cuando no le llegaba un mail.
+  try {
+    const principal = clavesSmtp()[0];
+    const cifradas = await pool.query("SELECT id, smtp_pass FROM users WHERE smtp_pass LIKE 'enc:v1:%'");
+    let recifradas = 0, perdidas = 0;
+    for (const row of cifradas.rows) {
+      if (descifrarConClave(row.smtp_pass, principal) !== null) continue; // ya esta con la clave actual
+      const claro = descifrarSecreto(row.smtp_pass);
+      if (claro === null) { perdidas++; console.error(`[SEGURIDAD] Contraseña SMTP del usuario ${row.id} ilegible: tendra que volver a cargarla`); continue; }
+      await pool.query('UPDATE users SET smtp_pass = $1 WHERE id = $2', [cifrarSecreto(claro), row.id]);
+      recifradas++;
+    }
+    if (recifradas > 0) console.log(`[SEGURIDAD] ${recifradas} contraseña(s) SMTP re-cifradas con la clave actual`);
+    if (perdidas > 0) console.error(`[SEGURIDAD] ${perdidas} contraseña(s) SMTP no se pudieron recuperar`);
+  } catch (e) {
+    console.error('[SEGURIDAD] Error re-cifrando contraseñas SMTP:', e.message);
   }
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_from VARCHAR(255)`).catch(() => {});
   // Hacer admin al primer usuario
