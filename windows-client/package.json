@@ -1,6 +1,6 @@
 {
   "name": "servereyes-client",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ServerEyes - Cliente Windows de monitoreo",
   "main": "main.js",
   "scripts": {
@@ -19,7 +19,6 @@
         "portable"
       ],
       "icon": "icon.ico",
-      "signingHashAlgorithms": [],
       "signAndEditExecutable": false
     },
     "nsis": {

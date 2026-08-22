@@ -1645,7 +1645,7 @@ app.post('/api/heartbeat', async (req, res) => {
         const latestVersion = verRow.rows[0].value;
         const updateUrl = urlRow.rows[0].value;
         if (latestVersion && updateUrl && reportedVersion && isNewerVersion(reportedVersion, latestVersion)) {
-          updateInfo = { version: latestVersion, url: updateUrl };
+          updateInfo = { version: latestVersion, url: updateUrl, origen: type };
         }
       }
       // Fallback: si no hay version especifica para client, probar con agent
@@ -1653,7 +1653,9 @@ app.post('/api/heartbeat', async (req, res) => {
         const verRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
         const urlRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
         if (verRow2.rows.length > 0 && urlRow2.rows.length > 0 && verRow2.rows[0].value && urlRow2.rows[0].value && reportedVersion && isNewerVersion(reportedVersion, verRow2.rows[0].value)) {
-          updateInfo = { version: verRow2.rows[0].value, url: urlRow2.rows[0].value };
+          // Ojo: cae al binario del agente, asi que el hash tambien tiene que
+          // ser el del agente.
+          updateInfo = { version: verRow2.rows[0].value, url: urlRow2.rows[0].value, origen: 'agent' };
         }
       }
     } catch {}
@@ -1696,9 +1698,13 @@ app.post('/api/heartbeat', async (req, res) => {
         console.warn('[SEGURIDAD] Update no ofrecido: la URL no es https ->', updateInfo.url);
         updateInfo = null;
       } else {
-        const shaKey = (agent_type || 'agent') === 'client' ? 'client_sha256' : 'agent_sha256';
+        const shaKey = updateInfo.origen === 'client' ? 'client_sha256' : 'agent_sha256';
         const shaRow = await pool.query('SELECT value FROM app_settings WHERE key = $1', [shaKey]).catch(() => null);
         updateInfo.sha256 = shaRow?.rows?.[0]?.value || null;
+        if (!updateInfo.sha256) {
+          console.warn(`[SEGURIDAD] Update v${updateInfo.version} sin ${shaKey} publicado: los agentes nuevos lo van a rechazar`);
+        }
+        delete updateInfo.origen; // detalle interno, no va al agente
         updateInfo.sig = firmarParaMaquina(machine_key, 'update', updateInfo.version, updateInfo.url, updateInfo.sha256 || '');
       }
     }
@@ -2549,15 +2555,19 @@ app.get('/api/agent/version', authenticateToken, async (req, res) => {
 // auto-update de todo el parque a un binario propio.
 app.post('/api/agent/version', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { version, url, sha256 } = req.body;
+    const { version, url, sha256, tipo } = req.body;
     if (!version || !url) return res.status(400).json({ error: 'version y url requeridos' });
     if (!/^https:\/\//i.test(url)) return res.status(400).json({ error: 'La URL de update debe ser https' });
     if (sha256 && !/^[a-f0-9]{64}$/i.test(sha256)) return res.status(400).json({ error: 'sha256 invalido' });
-    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
-    await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [url]);
-    if (sha256) await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256.toLowerCase()]);
-    logAudit(req.user.id, 'set_agent_version', 'app_settings', null, `${version} ${url}`, req.ip);
-    res.json({ message: 'Version actualizada', version, url, sha256: sha256 || null });
+    if (tipo && tipo !== 'agent' && tipo !== 'client') return res.status(400).json({ error: "tipo debe ser 'agent' o 'client'" });
+    // El client de escritorio usa sus propias claves. Antes solo se leian: no
+    // habia forma de publicar una version del client sin tocar la base a mano.
+    const prefijo = tipo === 'client' ? 'client' : 'agent';
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2", [`${prefijo}_version`, version]);
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2", [`${prefijo}_url`, url]);
+    if (sha256) await pool.query("INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2", [`${prefijo}_sha256`, sha256.toLowerCase()]);
+    logAudit(req.user.id, 'set_agent_version', 'app_settings', null, `${prefijo} ${version} ${url}`, req.ip);
+    res.json({ message: 'Version actualizada', tipo: prefijo, version, url, sha256: sha256 || null });
   } catch (error) {
     console.error('Error actualizando version agente:', error);
     res.status(500).json({ error: 'Error interno' });
