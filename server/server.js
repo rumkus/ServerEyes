@@ -191,6 +191,17 @@ async function traerDuenio(userId) {
   return q.rows[0] || null;
 }
 
+// Al borrar un monitor no queda nada que justifique guardar las direcciones de
+// sus destinatarios.
+async function borrarDestinatarios(tipo, monitorId) {
+  try {
+    const r = await pool.query('DELETE FROM monitor_recipients WHERE tipo = $1 AND monitor_id = $2', [tipo, monitorId]);
+    if (r.rowCount > 0) console.log(`[AVISO] ${r.rowCount} destinatario(s) eliminado(s) con el monitor ${tipo}/${monitorId}`);
+  } catch (e) {
+    console.error('[AVISO] Error borrando destinatarios:', e.message);
+  }
+}
+
 // Solo los que aceptaron. Devuelve el token de cada uno para poner el enlace
 // de baja en el pie del aviso.
 async function destinatariosConfirmados(tipo, monitorId) {
@@ -767,6 +778,19 @@ async function initDB() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_token ON monitor_recipients (token)`).catch(() => {});
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_monitor ON monitor_recipients (tipo, monitor_id)`).catch(() => {});
+  // monitor_id no puede tener clave foranea porque apunta a dos tablas segun el
+  // tipo, asi que un monitor borrado deja destinatarios huerfanos: direcciones
+  // de gente guardadas sin ningun monitor que las justifique.
+  try {
+    const h = await pool.query(`
+      DELETE FROM monitor_recipients mr
+      WHERE (mr.tipo = 'url' AND NOT EXISTS (SELECT 1 FROM url_monitors u WHERE u.id = mr.monitor_id))
+         OR (mr.tipo = 'ssl' AND NOT EXISTS (SELECT 1 FROM ssl_monitors sm WHERE sm.id = mr.monitor_id))
+    `);
+    if (h.rowCount > 0) console.log(`[AVISO] ${h.rowCount} destinatario(s) huerfano(s) eliminado(s)`);
+  } catch (e) {
+    console.error('[AVISO] Error limpiando huerfanos:', e.message);
+  }
 
   // Historial de chequeos de URL: sin esto no habia forma de saber que fallo,
   // porque last_error se borra en el primer chequeo exitoso posterior.
@@ -1310,6 +1334,7 @@ async function resolvePendingChange(changeId, ownerId, doApply) {
       if (sets.length > 0) { vals.push(change.target_id); await pool.query(`UPDATE url_monitors SET ${sets.join(', ')} WHERE id = $${i}`, vals); }
     } else if (change.change_type === 'delete' && change.target_type === 'url') {
       await pool.query('DELETE FROM url_monitors WHERE id = $1 AND user_id = $2', [change.target_id, ownerId]);
+      await borrarDestinatarios('url', change.target_id);
     }
   }
 
@@ -3607,6 +3632,7 @@ app.post('/api/ssl-monitors', authenticateToken, async (req, res) => {
 app.delete('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
   try {
     await pool.query('DELETE FROM ssl_monitors WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    await borrarDestinatarios('ssl', req.params.id);
     res.json({ message: 'Eliminado' });
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
@@ -4124,6 +4150,7 @@ app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
 app.delete('/api/url-monitors/:id', authenticateToken, async (req, res) => {
   try {
     await pool.query('DELETE FROM url_monitors WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    await borrarDestinatarios('url', req.params.id);
     res.json({ message: 'Monitor eliminado' });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
