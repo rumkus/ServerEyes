@@ -133,7 +133,7 @@ async function sincronizarDestinatarios(tipo, monitorId, correos, owner, nombreM
   for (const email of nuevos) {
     const token = crypto.randomBytes(24).toString('hex');
     await pool.query(
-      'INSERT INTO monitor_recipients (tipo, monitor_id, email, token, agregado_por) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tipo, monitor_id, email) DO NOTHING',
+      'INSERT INTO monitor_recipients (tipo, monitor_id, email, token, agregado_por, lote) VALUES ($1, $2, $3, $4, $5, $4) ON CONFLICT (tipo, monitor_id, email) DO NOTHING',
       [tipo, monitorId, email, token, owner.id]
     );
     await pedirPermiso(owner, email, token, nombreMonitor, queSeVigila);
@@ -199,6 +199,51 @@ async function borrarDestinatarios(tipo, monitorId) {
     if (r.rowCount > 0) console.log(`[AVISO] ${r.rowCount} destinatario(s) eliminado(s) con el monitor ${tipo}/${monitorId}`);
   } catch (e) {
     console.error('[AVISO] Error borrando destinatarios:', e.message);
+  }
+}
+
+// Igual que pedirPermiso, pero por varios sitios a la vez: un mail, una lista,
+// un clic. Agregar a alguien a diez monitores no puede significar diez mails.
+async function pedirPermisoLote(owner, email, token, items) {
+  const base = urlPublica();
+  const quien = owner.nombre ? `${owner.nombre} (${owner.email})` : owner.email;
+  const filas = items.map(i =>
+    `<li style="margin-bottom:6px"><strong>${i.nombre}</strong><br><span style="color:#888;font-size:13px">${i.que}</span></li>`
+  ).join('');
+  const cuerpo = `
+    <p style="font-size:15px;color:#333;margin:0 0 14px">Hola,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 14px">
+      <strong>${quien}</strong> te agrego para que recibas los avisos de ${items.length === 1 ? 'este sitio' : `estos ${items.length} sitios`}
+      a traves de ServerEyes, un servicio que vigila sitios web y avisa cuando algo anda mal.
+    </p>
+    <div style="background:#f5f7fa;border-left:3px solid #2196F3;border-radius:0 8px 8px 0;padding:14px 16px;margin:16px 0">
+      <ul style="margin:0;padding-left:18px;font-size:14px;color:#333">${filas}</ul>
+    </div>
+    <p style="font-size:14px;color:#666;margin:0 0 14px">
+      Si aceptas, vas a recibir un mail unicamente cuando el estado cambie: cuando algo se caiga y cuando
+      vuelva a funcionar, o cuando un certificado este por vencer. No mandamos resumenes ni publicidad,
+      y podes darte de baja cuando quieras desde el pie de cualquier aviso.
+    </p>
+    <div style="text-align:center;margin:26px 0 18px">
+      <a href="${base}/notificaciones/confirmar/${token}"
+         style="display:inline-block;background:#2196F3;color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 28px;border-radius:8px">Si, quiero recibir ${items.length === 1 ? 'los avisos' : 'todos estos avisos'}</a>
+    </div>
+    <p style="text-align:center;margin:0 0 18px">
+      <a href="${base}/notificaciones/baja/${token}" style="color:#999;font-size:13px">No me interesa, no me escriban mas</a>
+    </p>
+    <p style="font-size:12px;color:#999;border-top:1px solid #eee;padding-top:14px;margin:0">
+      Hasta que aceptes no vas a recibir ningun aviso. Si no reconoces a ${owner.email}, ignora este mensaje
+      o usa el enlace de arriba para que no te volvamos a escribir.
+    </p>`;
+  try {
+    const asunto = items.length === 1
+      ? `${owner.nombre || owner.email} quiere avisarte sobre ${items[0].nombre}`
+      : `${owner.nombre || owner.email} quiere avisarte sobre ${items.length} sitios`;
+    if (owner.smtp_user && owner.smtp_pass) await sendEmailWithUserSMTP(owner, asunto, cuerpo, email);
+    else await sendEmail(email, asunto, cuerpo);
+    console.log(`[AVISO] Permiso pedido a ${email} por ${items.length} monitor(es)`);
+  } catch (e) {
+    console.error(`[AVISO] No se pudo pedir permiso a ${email}: ${e.message}`);
   }
 }
 
@@ -776,7 +821,12 @@ async function initDB() {
       UNIQUE (tipo, monitor_id, email)
     )
   `);
+  // Un alta masiva manda un solo mail por varios monitores: el lote los agrupa
+  // para que un unico clic confirme todos los que se pidieron juntos.
+  await pool.query(`ALTER TABLE monitor_recipients ADD COLUMN IF NOT EXISTS lote VARCHAR(64)`).catch(() => {});
+  await pool.query(`UPDATE monitor_recipients SET lote = token WHERE lote IS NULL`).catch(() => {});
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_token ON monitor_recipients (token)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_lote ON monitor_recipients (lote)`).catch(() => {});
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_monitor ON monitor_recipients (tipo, monitor_id)`).catch(() => {});
   // monitor_id no puede tener clave foranea porque apunta a dos tablas segun el
   // tipo, asi que un monitor borrado deja destinatarios huerfanos: direcciones
@@ -4493,6 +4543,95 @@ app.post('/api/machines/:id/wol', authenticateToken, async (req, res) => {
   }
 });
 
+// ── ASIGNACION MASIVA ──
+// Elegir una direccion y tildar en que monitores recibe, en vez de entrar a
+// cada monitor por separado.
+
+app.get('/api/notificaciones/destinatarios', authenticateToken, async (req, res) => {
+  try {
+    const urls = await pool.query('SELECT id, name, url FROM url_monitors WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    const ssls = await pool.query('SELECT id, name, hostname FROM ssl_monitors WHERE user_id = $1 ORDER BY hostname', [req.user.id]);
+    const dest = await pool.query(
+      'SELECT email, tipo, monitor_id, estado FROM monitor_recipients WHERE agregado_por = $1 ORDER BY email',
+      [req.user.id]
+    );
+    res.json({
+      urls: urls.rows.map(u => ({ id: u.id, nombre: u.name || u.url, detalle: u.url })),
+      ssls: ssls.rows.map(m => ({ id: m.id, nombre: m.name || m.hostname, detalle: m.hostname })),
+      destinatarios: dest.rows
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/notificaciones/asignar', authenticateToken, async (req, res) => {
+  try {
+    const { email, urls, ssls } = req.body;
+    const limpio = normalizarCorreos([email]);
+    if (limpio === null || limpio.error || limpio.length === 0) {
+      return res.status(400).json({ error: limpio && limpio.error ? limpio.error : 'Correo invalido' });
+    }
+    const correo = limpio[0];
+    const pedidosUrl = Array.isArray(urls) ? urls.map(Number).filter(Boolean) : [];
+    const pedidosSsl = Array.isArray(ssls) ? ssls.map(Number).filter(Boolean) : [];
+
+    // Solo monitores propios: los ids llegan del cliente.
+    const misUrls = (await pool.query('SELECT id, name, url FROM url_monitors WHERE user_id = $1 AND id = ANY($2)', [req.user.id, pedidosUrl])).rows;
+    const misSsls = (await pool.query('SELECT id, name, hostname FROM ssl_monitors WHERE user_id = $1 AND id = ANY($2)', [req.user.id, pedidosSsl])).rows;
+
+    const actuales = (await pool.query(
+      'SELECT tipo, monitor_id FROM monitor_recipients WHERE email = $1 AND agregado_por = $2', [correo, req.user.id]
+    )).rows;
+    const clave = (t, id) => `${t}:${id}`;
+    const yaEstaba = new Set(actuales.map(a => clave(a.tipo, a.monitor_id)));
+    const deseados = new Set([...misUrls.map(u => clave('url', u.id)), ...misSsls.map(m => clave('ssl', m.id))]);
+
+    // Sacar los destildados
+    let quitados = 0;
+    for (const a of actuales) {
+      if (!deseados.has(clave(a.tipo, a.monitor_id))) {
+        await pool.query('DELETE FROM monitor_recipients WHERE email = $1 AND agregado_por = $2 AND tipo = $3 AND monitor_id = $4',
+          [correo, req.user.id, a.tipo, a.monitor_id]);
+        quitados++;
+      }
+    }
+
+    // Agregar los nuevos, todos en el mismo lote
+    const nuevos = [];
+    const lote = crypto.randomBytes(24).toString('hex');
+    for (const u of misUrls) {
+      if (yaEstaba.has(clave('url', u.id))) continue;
+      nuevos.push({ tipo: 'url', id: u.id, nombre: u.name || u.url, que: `Que ${u.url} responda correctamente.` });
+    }
+    for (const m of misSsls) {
+      if (yaEstaba.has(clave('ssl', m.id))) continue;
+      nuevos.push({ tipo: 'ssl', id: m.id, nombre: m.name || m.hostname, que: `Que el certificado de ${m.hostname} no venza sin aviso.` });
+    }
+
+    if (nuevos.length > 0) {
+      for (const n of nuevos) {
+        await pool.query(
+          "INSERT INTO monitor_recipients (tipo, monitor_id, email, token, agregado_por, lote) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tipo, monitor_id, email) DO NOTHING",
+          [n.tipo, n.id, correo, crypto.randomBytes(24).toString('hex'), req.user.id, lote]
+        );
+      }
+      // El token del mail es el de la primera fila del lote: confirma todas.
+      const primera = await pool.query('SELECT token FROM monitor_recipients WHERE lote = $1 AND email = $2 LIMIT 1', [lote, correo]);
+      const duenio = await traerDuenio(req.user.id);
+      if (primera.rows[0] && duenio) {
+        await pedirPermisoLote(duenio, correo, primera.rows[0].token, nuevos);
+      }
+    }
+
+    logAudit(req.user.id, 'asignar_destinatario', 'monitor_recipients', null, `${correo}: +${nuevos.length} -${quitados}`, req.ip);
+    res.json({ email: correo, agregados: nuevos.length, quitados });
+  } catch (error) {
+    console.error('Error asignando destinatario:', error.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // ============== CONSENTIMIENTO DE DESTINATARIOS ==============
 //
 // Sin autenticacion a proposito: el destinatario no tiene cuenta. El token es
@@ -4524,17 +4663,26 @@ function paginaConsentimiento(icono, titulo, mensaje, color) {
 
 app.get('/notificaciones/confirmar/:token', async (req, res) => {
   try {
-    const q = await pool.query('SELECT id, email, estado, tipo, monitor_id FROM monitor_recipients WHERE token = $1', [req.params.token]);
+    const q = await pool.query('SELECT id, email, estado, tipo, monitor_id, lote FROM monitor_recipients WHERE token = $1', [req.params.token]);
     const r = q.rows[0];
     if (!r) return res.status(404).send(paginaConsentimiento('🔍', 'Enlace no valido',
       'Este enlace no corresponde a ninguna suscripcion. Puede que ya se haya eliminado.', '#ff9800'));
     if (r.estado === 'confirmado') return res.send(paginaConsentimiento('✅', 'Ya estabas confirmado',
       `${r.email} ya recibe estos avisos. No hace falta hacer nada mas.`, '#00e676'));
 
-    await pool.query("UPDATE monitor_recipients SET estado = 'confirmado', confirmado_at = NOW(), baja_at = NULL WHERE id = $1", [r.id]);
-    console.log(`[AVISO] ${r.email} confirmo ${r.tipo}/${r.monitor_id}`);
+    // Un clic confirma todo lo que se le pidio en el mismo mail. El email va en
+    // la condicion para que un token no pueda confirmar filas de otra persona.
+    const upd = await pool.query(
+      "UPDATE monitor_recipients SET estado = 'confirmado', confirmado_at = NOW(), baja_at = NULL WHERE lote = $1 AND email = $2 AND estado = 'pendiente'",
+      [r.lote || r.token, r.email]
+    );
+    const cuantos = upd.rowCount || 1;
+    console.log(`[AVISO] ${r.email} confirmo ${cuantos} monitor(es) del lote ${(r.lote || r.token).slice(0, 8)}`);
     res.send(paginaConsentimiento('✅', 'Listo, quedaste suscripto',
-      `A partir de ahora ${r.email} va a recibir un aviso cuando cambie el estado. Podes darte de baja cuando quieras desde el pie de cualquier mail.`, '#00e676'));
+      cuantos > 1
+        ? `A partir de ahora ${r.email} va a recibir los avisos de los ${cuantos} sitios. Podes darte de baja cuando quieras desde el pie de cualquier mail.`
+        : `A partir de ahora ${r.email} va a recibir un aviso cuando cambie el estado. Podes darte de baja cuando quieras desde el pie de cualquier mail.`,
+      '#00e676'));
   } catch (e) {
     console.error('Error confirmando destinatario:', e.message);
     res.status(500).send(paginaConsentimiento('⚠️', 'Error', 'No pudimos procesar tu confirmacion. Intenta de nuevo en unos minutos.', '#ff5252'));
@@ -4543,17 +4691,53 @@ app.get('/notificaciones/confirmar/:token', async (req, res) => {
 
 app.get('/notificaciones/baja/:token', async (req, res) => {
   try {
-    const q = await pool.query('SELECT id, email, estado FROM monitor_recipients WHERE token = $1', [req.params.token]);
+    const q = await pool.query('SELECT id, email, estado, agregado_por FROM monitor_recipients WHERE token = $1', [req.params.token]);
     const r = q.rows[0];
     if (!r) return res.status(404).send(paginaConsentimiento('🔍', 'Enlace no valido',
       'Este enlace no corresponde a ninguna suscripcion.', '#ff9800'));
 
     await pool.query("UPDATE monitor_recipients SET estado = 'baja', baja_at = NOW() WHERE id = $1", [r.id]);
-    console.log(`[AVISO] ${r.email} se dio de baja`);
+    console.log(`[AVISO] ${r.email} se dio de baja de un monitor`);
+
+    // Si sigue anotado en otros, hay que decirselo y darle una salida de una
+    // sola vez: si no, tendria que esperar a que se caiga cada sitio para
+    // encontrar el enlace de baja de cada uno.
+    const otros = await pool.query(
+      "SELECT COUNT(*)::int AS n FROM monitor_recipients WHERE email = $1 AND agregado_por = $2 AND estado <> 'baja'",
+      [r.email, r.agregado_por]
+    );
+    const n = otros.rows[0]?.n || 0;
+    const extra = n > 0
+      ? `<div style="margin-top:22px;border-top:1px solid #1a2a3a;padding-top:18px">
+           <p style="color:#8fa3b8;font-size:14px;margin:0 0 14px">Seguis anotado en <strong style="color:#fff">${n}</strong> sitio${n > 1 ? 's' : ''} mas de la misma persona.</p>
+           <a href="${urlPublica()}/notificaciones/baja-total/${req.params.token}"
+              style="display:inline-block;background:#ff5252;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 22px;border-radius:8px">No quiero recibir ninguno</a>
+         </div>`
+      : '';
     res.send(paginaConsentimiento('👋', 'Listo, no te escribimos mas',
-      `${r.email} no va a recibir mas avisos de este monitor. Si fue un error, pedile a quien te agrego que te vuelva a invitar.`, '#00d4ff'));
+      `${r.email} no va a recibir mas avisos de este monitor.` + extra, '#00d4ff'));
   } catch (e) {
     console.error('Error dando de baja:', e.message);
+    res.status(500).send(paginaConsentimiento('⚠️', 'Error', 'No pudimos procesar la baja. Intenta de nuevo en unos minutos.', '#ff5252'));
+  }
+});
+
+app.get('/notificaciones/baja-total/:token', async (req, res) => {
+  try {
+    const q = await pool.query('SELECT email, agregado_por FROM monitor_recipients WHERE token = $1', [req.params.token]);
+    const r = q.rows[0];
+    if (!r) return res.status(404).send(paginaConsentimiento('🔍', 'Enlace no valido',
+      'Este enlace no corresponde a ninguna suscripcion.', '#ff9800'));
+
+    const upd = await pool.query(
+      "UPDATE monitor_recipients SET estado = 'baja', baja_at = NOW() WHERE email = $1 AND agregado_por = $2 AND estado <> 'baja'",
+      [r.email, r.agregado_por]
+    );
+    console.log(`[AVISO] ${r.email} se dio de baja de TODO (${upd.rowCount} monitor(es))`);
+    res.send(paginaConsentimiento('👋', 'Listo, no te escribimos mas',
+      `${r.email} no va a recibir ningun aviso mas de esta persona. Se dio de baja de ${upd.rowCount} sitio${upd.rowCount === 1 ? '' : 's'}.`, '#00d4ff'));
+  } catch (e) {
+    console.error('Error en baja total:', e.message);
     res.status(500).send(paginaConsentimiento('⚠️', 'Error', 'No pudimos procesar la baja. Intenta de nuevo en unos minutos.', '#ff5252'));
   }
 });

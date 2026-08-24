@@ -1498,6 +1498,7 @@ function buildModal() {
     case 'urlhistory': return buildUrlHistoryModal();
     case 'editssl': return buildEditSslModal();
     case 'confirmar': return buildConfirmModal();
+    case 'asignar': return buildAsignarModal();
     case 'addmaintenance': return buildAddMaintenanceModal();
     case 'sla': return buildSlaModal();
     default: return '';
@@ -2706,6 +2707,7 @@ function buildUrlsView() {
     <div class="panel">
       <div class="panel-title"><span class="dot" style="background:#2196F3"></span>Monitoreo de URLs / HTTP<button class="help-btn" onclick="event.stopPropagation();showHelp('urls',this)">?</button></div>
       <button class="modal-btn sm" onclick="openAddUrlMonitor()" style="margin-bottom:14px">+ Agregar URL</button>
+      <button class="modal-btn sm" onclick="abrirAsignar()" style="margin-bottom:14px;margin-left:8px;background:#EDE7F6;color:#5E35B1">&#9993; Avisar a una persona</button>
       ${urlMonitors.length===0?'<p style="text-align:center;color:#ccc;padding:30px 0">Sin monitores configurados. Agregá una URL para empezar.</p>':
       `${barraSeleccion(urlsSeleccionadas.size, '🔒 Vigilar sus certificados SSL', 'crearSslDesdeUrl([...urlsSeleccionadas])', 'marcarTodasUrls(false)')}
       <table class="server-table"><thead><tr>
@@ -2886,6 +2888,114 @@ function buildConfirmModal() {
 
 // Los destinatarios no reciben nada hasta que aceptan, asi que mostrar solo
 // cuantos son seria enganioso: hay que decir en que estado esta cada uno.
+// ── Asignar una direccion a varios monitores de una ─────────────────────────
+let asignarDatos = null;
+let asignarSel = { urls: new Set(), ssls: new Set() };
+
+async function abrirAsignar(emailInicial) {
+  pauseRefresh();
+  activeModal = { type: 'asignar', email: emailInicial || '' };
+  asignarDatos = null;
+  asignarSel = { urls: new Set(), ssls: new Set() };
+  render();
+  const r = await api('/api/notificaciones/destinatarios');
+  if (r.ok) { asignarDatos = r.data; if (activeModal?.email) marcarSegunCorreo(activeModal.email); }
+  render();
+}
+
+// Al escribir una direccion que ya usa, se tildan solos los monitores donde ya
+// esta: asi la pantalla muestra el estado real y no obliga a recordarlo.
+function marcarSegunCorreo(email) {
+  asignarSel = { urls: new Set(), ssls: new Set() };
+  const e = (email || '').trim().toLowerCase();
+  if (!e || !asignarDatos) return;
+  asignarDatos.destinatarios.filter(d => d.email === e && d.estado !== 'baja').forEach(d => {
+    if (d.tipo === 'url') asignarSel.urls.add(d.monitor_id);
+    else asignarSel.ssls.add(d.monitor_id);
+  });
+}
+
+function alEscribirCorreoAsignar(v) {
+  activeModal.email = v;
+  marcarSegunCorreo(v);
+  const cont = document.getElementById('asignar-listas');
+  if (cont) cont.innerHTML = listasAsignar();
+}
+
+function tildarAsignar(tipo, id, tildado) {
+  const set = tipo === 'url' ? asignarSel.urls : asignarSel.ssls;
+  tildado ? set.add(id) : set.delete(id);
+  const cont = document.getElementById('asignar-listas');
+  if (cont) cont.innerHTML = listasAsignar();
+}
+
+function tildarTodosAsignar(tildado) {
+  asignarSel.urls = new Set(tildado ? asignarDatos.urls.map(u => u.id) : []);
+  asignarSel.ssls = new Set(tildado ? asignarDatos.ssls.map(m => m.id) : []);
+  const cont = document.getElementById('asignar-listas');
+  if (cont) cont.innerHTML = listasAsignar();
+}
+
+function listasAsignar() {
+  if (!asignarDatos) return '<p style="color:#999;text-align:center;padding:20px">Cargando...</p>';
+  const fila = (tipo, x, marcado) => `<label style="display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border2);cursor:pointer">
+    <input type="checkbox" ${marcado ? 'checked' : ''} onchange="tildarAsignar('${tipo}', ${x.id}, this.checked)"/>
+    <span style="flex:1;min-width:0">
+      <span style="font-size:13px;font-weight:600;color:var(--text)">${escHtml(x.nombre)}</span>
+      <span style="display:block;font-size:11px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(x.detalle)}</span>
+    </span></label>`;
+  const total = asignarSel.urls.size + asignarSel.ssls.size;
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <strong style="font-size:12px;color:#888">${total} seleccionado${total === 1 ? '' : 's'}</strong>
+      <span>
+        <button class="modal-btn sm" style="margin:0;padding:3px 10px;font-size:11px" onclick="tildarTodosAsignar(true)">Todos</button>
+        <button class="modal-btn sm ghost" style="margin:0;padding:3px 10px;font-size:11px" onclick="tildarTodosAsignar(false)">Ninguno</button>
+      </span>
+    </div>
+    ${asignarDatos.urls.length ? `<div style="font-size:11px;color:#888;margin:10px 0 2px">&#127760; Sitios</div>
+      ${asignarDatos.urls.map(u => fila('url', u, asignarSel.urls.has(u.id))).join('')}` : ''}
+    ${asignarDatos.ssls.length ? `<div style="font-size:11px;color:#888;margin:12px 0 2px">&#128274; Certificados</div>
+      ${asignarDatos.ssls.map(m => fila('ssl', m, asignarSel.ssls.has(m.id))).join('')}` : ''}`;
+}
+
+function buildAsignarModal() {
+  return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-header"><h2>✉ Avisar a una persona</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
+    <label class="modal-label">Correo</label>
+    <input class="modal-input" id="asignar-email" placeholder="cliente@empresa.com" value="${escHtml(activeModal.email || '')}"
+      oninput="alEscribirCorreoAsignar(this.value)"/>
+    <p style="font-size:11px;color:#888;margin:-6px 0 12px">
+      Tilda en que sitios recibe. Le llega <strong>un solo mail</strong> pidiendole permiso por todos juntos,
+      y con un clic acepta todos. Destildar lo saca.
+    </p>
+    <div id="asignar-listas" style="max-height:320px;overflow-y:auto;background:var(--bg);border-radius:8px;padding:8px 12px">${listasAsignar()}</div>
+    <button class="modal-btn" onclick="guardarAsignar()">Guardar</button>
+    <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
+  </div></div>`;
+}
+
+async function guardarAsignar() {
+  const email = document.getElementById('asignar-email')?.value?.trim();
+  if (!email) { await avisar('Falta el correo', 'Escribi la direccion a la que hay que avisar', '✉'); return; }
+  const r = await api('/api/notificaciones/asignar', {
+    method: 'POST',
+    body: JSON.stringify({ email, urls: [...asignarSel.urls], ssls: [...asignarSel.ssls] })
+  });
+  if (!r.ok) { await avisar('No se pudo guardar', r.data?.error || 'Error', '⚠️'); return; }
+  closeModal();
+  await loadUrlMonitors();
+  await loadSSLMonitors();
+  render();
+  const d = r.data;
+  await avisar('Listo',
+    d.agregados > 0
+      ? `Le mandamos un pedido de permiso a ${d.email} por ${d.agregados} sitio${d.agregados === 1 ? '' : 's'}. Va a recibir avisos recien cuando acepte.`
+      : `Se actualizo la lista de ${d.email}${d.quitados ? `: sacado de ${d.quitados}` : ', sin cambios'}.`,
+    '✉');
+}
+
 function resumenDestinatarios(lista) {
   if (!Array.isArray(lista) || lista.length === 0) return '';
   const cuenta = { confirmado: 0, pendiente: 0, baja: 0 };
