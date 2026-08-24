@@ -273,6 +273,11 @@ function AppContent() {
   const [sslEditando, setSslEditando] = useState<any>(null);
   const [sslDias, setSslDias] = useState('30, 14, 7, 1');
   const [urlCorreos, setUrlCorreos] = useState('');
+  const [asignarAbierto, setAsignarAbierto] = useState(false);
+  const [asignarDatos, setAsignarDatos] = useState<any>(null);
+  const [asignarEmail, setAsignarEmail] = useState('');
+  const [asignarUrls, setAsignarUrls] = useState<number[]>([]);
+  const [asignarSsls, setAsignarSsls] = useState<number[]>([]);
   const [sslCorreos, setSslCorreos] = useState('');
   const [urlName, setUrlName] = useState('');
   const [urlUrl, setUrlUrl] = useState('');
@@ -348,6 +353,7 @@ function AppContent() {
     if (menuOpen) { setMenuOpen(false); return true; }
     if (showAddUrl) { setShowAddUrl(false); return true; }
     if (showAddMaintenance) { setShowAddMaintenance(false); return true; }
+    if (asignarAbierto) { setAsignarAbierto(false); return true; }
     if (urlHistoryMonitor) { setUrlHistoryMonitor(null); return true; }
     if (showUrlMonitors) { setShowUrlMonitors(false); return true; }
     if (showMaintenance) { setShowMaintenance(false); return true; }
@@ -978,6 +984,47 @@ function AppContent() {
   // "a@b.com, c@d.com" -> ['a@b.com','c@d.com']. El servidor valida el formato.
   const correosDeTexto = (txt: string) => txt.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
 
+  // Asignar una direccion a varios monitores de una, en vez de entrar a cada
+  // monitor por separado. Un solo mail de permiso por todo lo que se tilde.
+  const marcarSegunCorreo = (email: string, datos: any) => {
+    const e = (email || '').trim().toLowerCase();
+    if (!e || !datos) { setAsignarUrls([]); setAsignarSsls([]); return; }
+    const suyos = (datos.destinatarios || []).filter((d: any) => d.email === e && d.estado !== 'baja');
+    setAsignarUrls(suyos.filter((d: any) => d.tipo === 'url').map((d: any) => d.monitor_id));
+    setAsignarSsls(suyos.filter((d: any) => d.tipo === 'ssl').map((d: any) => d.monitor_id));
+  };
+
+  const abrirAsignar = async () => {
+    setAsignarDatos(null);
+    setAsignarEmail('');
+    setAsignarUrls([]);
+    setAsignarSsls([]);
+    setAsignarAbierto(true);
+    const res = await apiRequest('/api/notificaciones/destinatarios', {}, token);
+    if (res.ok) setAsignarDatos(res.data);
+    else showModal('⚠️', 'Error', 'No se pudo traer la lista de monitores');
+  };
+
+  const alternar = (lista: number[], setLista: (v: number[]) => void, id: number) => {
+    setLista(lista.includes(id) ? lista.filter(x => x !== id) : [...lista, id]);
+  };
+
+  const guardarAsignar = async () => {
+    const email = asignarEmail.trim();
+    if (!email) { showModal('✉️', 'Falta el correo', 'Escribi la direccion a la que hay que avisar'); return; }
+    const res = await apiRequest('/api/notificaciones/asignar', {
+      method: 'POST', body: JSON.stringify({ email, urls: asignarUrls, ssls: asignarSsls })
+    }, token);
+    if (!res.ok) { showModal('⚠️', 'Error', res.data?.error || 'No se pudo guardar'); return; }
+    setAsignarAbierto(false);
+    await loadUrlMonitors();
+    await loadSSLMonitors();
+    const d = res.data;
+    showModal('✉️', 'Listo', d.agregados > 0
+      ? `Le mandamos un pedido de permiso a ${d.email} por ${d.agregados} sitio${d.agregados === 1 ? '' : 's'}. Va a recibir avisos recien cuando acepte.`
+      : `Se actualizo la lista de ${d.email}${d.quitados ? `: sacado de ${d.quitados}` : ', sin cambios'}.`);
+  };
+
   // Pasar de una lista a la otra. Crean el equivalente sin borrar el original.
   const vigilarSslDeUrl = async (u: any) => {
     let hostname: string | null = null;
@@ -1105,6 +1152,84 @@ function AppContent() {
     );
   }
 
+  if (asignarAbierto) {
+    const total = asignarUrls.length + asignarSsls.length;
+    const Fila = ({ tipo, x, marcado }: any) => (
+      <TouchableOpacity
+        onPress={() => tipo === 'url'
+          ? alternar(asignarUrls, setAsignarUrls, x.id)
+          : alternar(asignarSsls, setAsignarSsls, x.id)}
+        style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: th.border}}>
+        <View style={{width: 22, height: 22, borderRadius: 5, borderWidth: 2, marginRight: 12,
+          borderColor: marcado ? '#00d4ff' : th.sub, backgroundColor: marcado ? '#00d4ff' : 'transparent',
+          alignItems: 'center', justifyContent: 'center'}}>
+          {marcado && <Text style={{color: '#0a1628', fontSize: 14, fontWeight: '800'}}>{'✓'}</Text>}
+        </View>
+        <View style={{flex: 1}}>
+          <Text style={{color: th.text, fontSize: 14, fontWeight: '600'}} numberOfLines={1}>{x.nombre}</Text>
+          <Text style={{color: th.sub, fontSize: 11}} numberOfLines={1}>{x.detalle}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Avisar a una persona" subtitle={total > 0 ? `${total} seleccionado${total === 1 ? '' : 's'}` : undefined} />
+        <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 40}}>
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Correo</Text>
+          <TextInput style={s.input} value={asignarEmail}
+            onChangeText={(v) => { setAsignarEmail(v); marcarSegunCorreo(v, asignarDatos); }}
+            placeholder="cliente@empresa.com" placeholderTextColor="#555"
+            autoCapitalize="none" keyboardType="email-address" />
+          <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14, lineHeight: 15}}>
+            Tilda en que sitios recibe. Le llega un solo mail pidiendole permiso por todos juntos, y con un
+            clic acepta todos. Destildar lo saca.
+          </Text>
+
+          {!asignarDatos ? (
+            <View style={{alignItems: 'center', paddingVertical: 40}}><ActivityIndicator color="#00d4ff" /></View>
+          ) : (
+            <>
+              <View style={{flexDirection: 'row', gap: 8, marginBottom: 10}}>
+                <TouchableOpacity style={{flex: 1, backgroundColor: th.card, borderRadius: 8, padding: 8, alignItems: 'center'}}
+                  onPress={() => { setAsignarUrls(asignarDatos.urls.map((u: any) => u.id)); setAsignarSsls(asignarDatos.ssls.map((m: any) => m.id)); }}>
+                  <Text style={{color: '#00d4ff', fontSize: 12, fontWeight: '600'}}>Todos</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{flex: 1, backgroundColor: th.card, borderRadius: 8, padding: 8, alignItems: 'center'}}
+                  onPress={() => { setAsignarUrls([]); setAsignarSsls([]); }}>
+                  <Text style={{color: th.sub, fontSize: 12, fontWeight: '600'}}>Ninguno</Text>
+                </TouchableOpacity>
+              </View>
+
+              {asignarDatos.urls.length > 0 && (
+                <>
+                  <Text style={{color: th.sub, fontSize: 11, marginTop: 6, marginBottom: 2}}>{'🌐'} Sitios</Text>
+                  {asignarDatos.urls.map((u: any) => (
+                    <Fila key={'u' + u.id} tipo="url" x={u} marcado={asignarUrls.includes(u.id)} />
+                  ))}
+                </>
+              )}
+              {asignarDatos.ssls.length > 0 && (
+                <>
+                  <Text style={{color: th.sub, fontSize: 11, marginTop: 14, marginBottom: 2}}>{'🔒'} Certificados</Text>
+                  {asignarDatos.ssls.map((m: any) => (
+                    <Fila key={'s' + m.id} tipo="ssl" x={m} marcado={asignarSsls.includes(m.id)} />
+                  ))}
+                </>
+              )}
+            </>
+          )}
+
+          <TouchableOpacity style={s.btn} onPress={guardarAsignar}>
+            <Text style={s.btnTxt}>Guardar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setAsignarAbierto(false)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+        </ScrollView>
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
+      </View>
+    );
+  }
+
   if (urlHistoryMonitor) {
     const mon = urlHistoryMonitor;
     const caidas = urlHistory.filter((h: any) => !h.is_up).length;
@@ -1189,6 +1314,10 @@ function AppContent() {
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Monitoreo de URLs" subtitle={`${urlMonitors.length} monitores`} />
+        <TouchableOpacity style={{backgroundColor: '#3d2a5c', borderRadius: 8, padding: 10, marginHorizontal: 16, marginBottom: 8, alignItems: 'center'}}
+          onPress={abrirAsignar}>
+          <Text style={{color: '#b388ff', fontSize: 13, fontWeight: '600'}}>{'✉'} Avisar a una persona</Text>
+        </TouchableOpacity>
         <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 100}}>
           {urlMonitors.length === 0 ? (
             <View style={{alignItems: 'center', paddingVertical: 60}}>
@@ -4110,7 +4239,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.6.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.7.0</Text>
             </View>
           </View>
         </TouchableOpacity>
