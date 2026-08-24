@@ -252,9 +252,8 @@ function renderAgent() {
         <div class="row"><span class="lbl">Subido:</span><span class="val">${fmtDate(a.uploaded_at)}</span></div>
         ${a.changelog ? '<div class="row"><span class="lbl">Cambios:</span><span class="val">' + a.changelog + '</span></div>' : ''}
         <div class="row"><span class="lbl">URL descarga:</span><span class="val" style="font-size:11px;color:#00d4ff">${API}/api/agent/download</span></div>
+        ${data.agentSha256 ? `<div class="row"><span class="lbl">sha256:</span><span class="val" style="font-size:10px;color:#888;word-break:break-all">${data.agentSha256}</span></div>` : ''}
       </div>` : '<p style="color:#888;margin-bottom:16px">No hay agente subido todavia</p>'}
-      ${data.agentSha256 ? `<div class="row"><span class="lbl">sha256:</span><span class="val" style="font-size:10px;color:#888;word-break:break-all">${data.agentSha256}</span></div>` : ''}
-
       <h2 class="orange" style="margin-top:24px">&#128187; Client de Escritorio</h2>
       ${data.latestClient ? `<div class="agent-info">
         <div class="row"><span class="lbl">Version configurada:</span><span class="val" style="color:#00e676">${data.configuredClientVersion || '---'}</span></div>
