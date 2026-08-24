@@ -298,7 +298,11 @@ function renderAgent() {
     </div>
 
     <div class="section"><h2>&#128218; Historial de Versiones</h2>
+      <div style="color:#888;font-size:12px;margin-bottom:6px">&#128241; Agente</div>
       <div id="history-list"><p style="color:#888">Cargando...</p></div>
+      <div style="color:#888;font-size:12px;margin:16px 0 6px">&#128187; Client de escritorio</div>
+      <div id="history-list-client"><p style="color:#888">Cargando...</p></div>
+      <div style="color:#666;font-size:11px;margin-top:8px">Del client se conservan las ultimas 3 versiones: cada una ocupa unos 89 MB en la base.</div>
     </div>`;
 }
 
@@ -402,20 +406,25 @@ async function doUpload() {
   reader.readAsDataURL(selectedFile);
 }
 
+function pintarHistorial(idContenedor, filas) {
+  const el = document.getElementById(idContenedor);
+  if (!el) return;
+  el.innerHTML = (!Array.isArray(filas) || filas.length === 0) ? '<p style="color:#888">Sin historial</p>' :
+    filas.map(h => `<div class="history-item">
+      <span class="ver">v${h.version}</span>
+      <span class="log">${h.changelog || ''}</span>
+      <span class="size">${fmtSize(h.file_size)}</span>
+      <span class="date">${fmtDate(h.uploaded_at)}</span>
+    </div>`).join('');
+}
+
 async function loadHistory() {
-  const res = await api('/api/admin/agent/history');
-  if (res.ok) {
-    const el = document.getElementById('history-list');
-    if (el) {
-      el.innerHTML = res.data.length === 0 ? '<p style="color:#888">Sin historial</p>' :
-        res.data.map(h => `<div class="history-item">
-          <span class="ver">v${h.version}</span>
-          <span class="log">${h.changelog || ''}</span>
-          <span class="size">${fmtSize(h.file_size)}</span>
-          <span class="date">${fmtDate(h.uploaded_at)}</span>
-        </div>`).join('');
-    }
-  }
+  const [agente, client] = await Promise.all([
+    api('/api/admin/agent/history'),
+    api('/api/admin/client/history')
+  ]);
+  if (agente.ok) pintarHistorial('history-list', agente.data);
+  if (client.ok) pintarHistorial('history-list-client', client.data);
 }
 
 function renderSystem() {

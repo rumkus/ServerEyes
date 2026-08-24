@@ -2630,6 +2630,17 @@ app.get('/api/admin/agent/history', authenticateToken, requireAdmin, async (req,
   }
 });
 
+// Espejo del historial del agente. Del client se conservan las ultimas 3
+// versiones (cada una pesa ~89 MB), asi que la lista es corta por diseño.
+app.get('/api/admin/client/history', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, version, filename, file_size, changelog, uploaded_at FROM client_files ORDER BY uploaded_at DESC LIMIT 20');
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // ============== GESTION DE AGENTE ==============
 
 // Obtener version del agente
