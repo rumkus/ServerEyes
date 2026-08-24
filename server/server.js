@@ -3318,12 +3318,21 @@ app.delete('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
 
 app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
   try {
-    const { alert_days, name } = req.body;
+    const { alert_days, name, hostname } = req.body;
     const fields = [];
     const vals = [];
     let idx = 1;
-    if (alert_days !== undefined) { fields.push(`alert_days = $${idx++}`); vals.push(JSON.stringify(alert_days)); }
-    if (name !== undefined) { fields.push(`name = $${idx++}`); vals.push(name); }
+    if (alert_days !== undefined) { fields.push(`alert_days = ${idx++}`); vals.push(JSON.stringify(alert_days)); }
+    if (name !== undefined) { fields.push(`name = ${idx++}`); vals.push(name); }
+    if (hostname !== undefined) {
+      // Aceptamos que peguen una URL entera y nos quedamos con el host.
+      let limpio = String(hostname).trim().replace(/^[a-z]+:\/\//i, '').split('/')[0].split(':')[0];
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(limpio)) return res.status(400).json({ error: 'Hostname invalido' });
+      fields.push(`hostname = ${idx++}`); vals.push(limpio.toLowerCase());
+      // Lo chequeado corresponde al host anterior: se limpia para que el
+      // proximo ciclo lo vuelva a mirar en vez de mostrar datos de otro dominio.
+      fields.push('last_check = NULL', 'last_days_left = NULL', 'last_issuer = NULL', 'last_expiry = NULL', 'last_status = NULL', 'last_alerted_days = NULL');
+    }
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
     vals.push(req.params.id, req.user.id);
     await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx}`, vals);

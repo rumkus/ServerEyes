@@ -436,11 +436,66 @@ function logout() {
 // ── RENDER MAIN ──
 function pauseRefresh() { if(refreshInterval){clearInterval(refreshInterval);refreshInterval=null;} }
 function resumeRefresh() { if(!refreshInterval){refreshInterval=setInterval(()=>{loadMachines();loadUrlMonitors(true);},10000);} }
+// render() reconstruye toda la pagina con innerHTML, asi que borra cualquier
+// campo a medio escribir. El refresco automatico corre cada 10s: si estabas
+// tipeando una URL o un dominio SSL, se te vaciaba en la cara.
+let renderPendiente = false;
+
+function editandoAlgo() {
+  const el = document.activeElement;
+  if (!el) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
+}
+
+// Los refrescos automaticos se posponen mientras haya un campo con foco.
+function renderSiNoEstasEscribiendo() {
+  if (editandoAlgo()) { renderPendiente = true; return; }
+  render();
+}
+
+// Al salir del campo, si quedo un refresco pendiente lo aplicamos.
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    if (renderPendiente && !editandoAlgo()) { renderPendiente = false; render(); }
+  }, 200);
+});
+
+// Red de seguridad: si igual hay que redibujar (por ejemplo porque el usuario
+// hizo click en un boton), conservamos lo tipeado y donde estaba el cursor.
+function capturarCampos() {
+  const estado = {};
+  document.querySelectorAll('#app input[id], #app textarea[id], #app select[id]').forEach(el => {
+    if (el.type === 'hidden') return;
+    estado[el.id] = {
+      valor: el.value,
+      foco: el === document.activeElement,
+      inicio: el.selectionStart,
+      fin: el.selectionEnd
+    };
+  });
+  return estado;
+}
+function restaurarCampos(estado) {
+  for (const id of Object.keys(estado)) {
+    const c = estado[id];
+    const el = document.getElementById(id);
+    // Solo reponemos si el redibujado lo dejo vacio: no pisamos valores nuevos.
+    if (!el || !c.valor || el.value) continue;
+    el.value = c.valor;
+    if (c.foco) {
+      el.focus();
+      try { el.setSelectionRange(c.inicio, c.fin); } catch (e) {}
+    }
+  }
+}
+
 function render() {
   if (notifDropdownOpen) return;
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
+  const campos = capturarCampos();
   el.innerHTML = buildLayout();
+  restaurarCampos(campos);
   attachEvents();
   if (activeNav === 'noc') {
     setTimeout(initInlineMap, 120);
@@ -1423,6 +1478,7 @@ function buildModal() {
     case 'backup': return renderBackupModal();
     case 'addurl': return buildAddUrlModal();
     case 'urlhistory': return buildUrlHistoryModal();
+    case 'editssl': return buildEditSslModal();
     case 'addmaintenance': return buildAddMaintenanceModal();
     case 'sla': return buildSlaModal();
     default: return '';
@@ -2462,7 +2518,7 @@ async function loadMachines() {
     _lastMachinesJson = newJson;
     machines=r.data;
     if (activeModal || notifDropdownOpen || activeNav === 'ajustes') { if (changed) updateHeaderBadge(); }
-    else if (changed) render();
+    else if (changed) renderSiNoEstasEscribiendo();
   }
   else if(r.status===401){logout();}
 }
@@ -2623,7 +2679,7 @@ async function loadUrlMonitors(silent) {
     const changed = newJson !== _lastUrlMonitorsJson;
     _lastUrlMonitorsJson = newJson;
     urlMonitors = r.data;
-    if (!silent && changed && !activeModal && !notifDropdownOpen && activeNav !== 'ajustes') render();
+    if (!silent && changed && !activeModal && !notifDropdownOpen && activeNav !== 'ajustes') renderSiNoEstasEscribiendo();
   }
 }
 function buildUrlsView() {
@@ -2648,6 +2704,7 @@ function buildUrlsView() {
         <td onclick="event.stopPropagation()">
           <div style="display:flex;gap:4px">
             <button class="modal-btn sm" style="background:#E3F2FD;color:#1976D2;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="openUrlHistory(${u.id})">📈 Historial</button>
+            <button class="modal-btn sm" style="background:#EDE7F6;color:#5E35B1;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="openEditUrlMonitor(${u.id})">✏ Editar</button>
             <button class="modal-btn sm" style="background:${u.is_active?'#FFF3E0':'#E8F5E9'};color:${u.is_active?'#FF9800':'#4CAF50'};padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="toggleUrlMonitor(${u.id},${u.is_active})">${u.is_active?'Pausar':'Activar'}</button>
             ${u.url.startsWith('https')?`<button class="modal-btn sm" style="background:#E0F7FA;color:#00838F;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="checkSSL('${new URL(u.url).hostname}')">🔒 SSL</button>`:''}
             <button class="modal-btn sm" style="background:#FFEBEE;color:#F44336;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="deleteUrlMonitor(${u.id})">Eliminar</button>
@@ -2691,7 +2748,8 @@ function renderSSLList() {
       </div>
       <div style="display:flex;gap:4px;align-items:center">
         <button class="modal-btn sm" style="padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="checkSSL('${s.hostname}')">Verificar</button>
-        <button class="modal-btn sm" style="padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="editSSLDays(${s.id})">⚙ Dias</button>
+        <button class="modal-btn sm" style="background:#EDE7F6;color:#5E35B1;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="openEditSsl(${s.id})">✏ Editar</button>
+        <button class="modal-btn sm" style="background:#E8F5E9;color:#2E7D32;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="crearUrlDesdeSsl(${s.id})" title="Vigilar tambien que el sitio responda">→ URL</button>
         <button class="modal-btn sm" style="background:#FFEBEE;color:#F44336;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="deleteSSLMonitor(${s.id})">✕</button>
       </div>
     </div>`;
@@ -2735,7 +2793,10 @@ async function saveUrlMonitor() {
     interval_seconds: parseInt(document.getElementById('um-interval')?.value) || 300
   };
   if (!data.url) { alert('URL requerida'); return; }
-  const r = await api('/api/url-monitors', { method: 'POST', body: JSON.stringify(data) });
+  const editando = activeModal && activeModal.editId;
+  const r = editando
+    ? await api('/api/url-monitors/' + editando, { method: 'PUT', body: JSON.stringify(data) })
+    : await api('/api/url-monitors', { method: 'POST', body: JSON.stringify(data) });
   if (r.ok) { closeModal(); loadUrlMonitors(); }
   else alert(r.data?.error || 'Error');
 }
@@ -2940,27 +3001,103 @@ async function sendWol(id) {
 }
 
 function buildAddUrlModal() {
+  // El mismo modal agrega y edita: con activeModal.editId cargamos los valores.
+  const m = activeModal.editId ? urlMonitors.find(x => x.id === activeModal.editId) : null;
+  const intervalo = m ? (m.interval_seconds || 300) : 300;
   return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
   <div class="modal-box">
-    <div class="modal-header"><h2>🌐 Agregar Monitor URL</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
+    <div class="modal-header"><h2>🌐 ${m ? 'Editar' : 'Agregar'} Monitor URL</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
     <label class="modal-label">URL del sitio</label>
-    <input class="modal-input" id="um-url" placeholder="https://ejemplo.com"/>
+    <input class="modal-input" id="um-url" placeholder="https://ejemplo.com" value="${m ? escHtml(m.url) : ''}"/>
     <label class="modal-label">Nombre (para identificarlo)</label>
-    <input class="modal-input" id="um-name" placeholder="Mi sitio web"/>
+    <input class="modal-input" id="um-name" placeholder="Mi sitio web" value="${m ? escHtml(m.name || '') : ''}"/>
     <label class="modal-label">Verificar cada</label>
     <div class="chip-row" style="margin-bottom:12px">
-      <button class="chip" onclick="document.getElementById('um-interval').value=60" style="font-size:12px">1 min</button>
-      <button class="chip" onclick="document.getElementById('um-interval').value=300" style="font-size:12px;background:#2196F3;color:#fff">5 min</button>
-      <button class="chip" onclick="document.getElementById('um-interval').value=600" style="font-size:12px">10 min</button>
-      <button class="chip" onclick="document.getElementById('um-interval').value=1800" style="font-size:12px">30 min</button>
+      ${[[60,'1 min'],[300,'5 min'],[600,'10 min'],[1800,'30 min']].map(([v,t]) => `
+        <button class="chip chip-intervalo" style="font-size:12px;${intervalo === v ? 'background:#2196F3;color:#fff' : ''}"
+          onclick="document.getElementById('um-interval').value=${v};document.querySelectorAll('.chip-intervalo').forEach(c=>{c.style.background='';c.style.color=''});this.style.background='#2196F3';this.style.color='#fff'">${t}</button>`).join('')}
     </div>
-    <input type="hidden" id="um-interval" value="300"/>
-    <input type="hidden" id="um-method" value="GET"/>
-    <input type="hidden" id="um-status" value="200"/>
-    <input type="hidden" id="um-timeout" value="10000"/>
-    <button class="modal-btn" onclick="saveUrlMonitor()">Agregar monitor</button>
+    <input type="hidden" id="um-interval" value="${intervalo}"/>
+    <input type="hidden" id="um-method" value="${m ? escHtml(m.method || 'GET') : 'GET'}"/>
+    <input type="hidden" id="um-status" value="${m ? (m.expected_status || 200) : 200}"/>
+    <input type="hidden" id="um-timeout" value="${m ? (m.timeout_ms || 10000) : 10000}"/>
+    <button class="modal-btn" onclick="saveUrlMonitor()">${m ? 'Guardar cambios' : 'Agregar monitor'}</button>
+    ${m ? `<button class="modal-btn ghost" onclick="crearSslDesdeUrl(${m.id})">🔒 Vigilar tambien su certificado SSL</button>` : ''}
     <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
   </div></div>`;
+}
+
+function openEditUrlMonitor(id) {
+  pauseRefresh();
+  activeModal = { type: 'addurl', editId: id };
+  render();
+}
+
+// ── Modal de SSL: editar dominio, nombre y dias de aviso ─────────────────────
+function openEditSsl(id) {
+  pauseRefresh();
+  activeModal = { type: 'editssl', id };
+  render();
+}
+function buildEditSslModal() {
+  const m = sslMonitors.find(x => x.id === activeModal.id);
+  if (!m) return '';
+  const dias = (m.alert_days || [30,14,7,1]).join(', ');
+  return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-header"><h2>🔒 Editar Monitor SSL</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
+    <label class="modal-label">Dominio</label>
+    <input class="modal-input" id="sm-hostname" placeholder="ejemplo.com" value="${escHtml(m.hostname)}"/>
+    <p style="font-size:11px;color:#888;margin:-6px 0 10px">Si cambias el dominio, lo chequeado hasta ahora se descarta y se vuelve a verificar.</p>
+    <label class="modal-label">Nombre (opcional)</label>
+    <input class="modal-input" id="sm-name" placeholder="Mi sitio" value="${escHtml(m.name || '')}"/>
+    <label class="modal-label">Avisar estos dias antes de vencer</label>
+    <input class="modal-input" id="sm-dias" placeholder="30, 14, 7, 1" value="${escHtml(dias)}"/>
+    <button class="modal-btn" onclick="saveSslMonitor()">Guardar cambios</button>
+    <button class="modal-btn ghost" onclick="crearUrlDesdeSsl(${m.id})">🌐 Vigilar tambien que el sitio responda</button>
+    <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
+  </div></div>`;
+}
+async function saveSslMonitor() {
+  const hostname = document.getElementById('sm-hostname')?.value?.trim();
+  const name = document.getElementById('sm-name')?.value?.trim();
+  const diasTxt = document.getElementById('sm-dias')?.value || '';
+  if (!hostname) { alert('Ingresa el dominio'); return; }
+  const alert_days = diasTxt.split(',').map(x => parseInt(x.trim())).filter(n => !isNaN(n) && n > 0).sort((a,b) => b-a);
+  if (alert_days.length === 0) { alert('Ingresa al menos un numero de dias'); return; }
+  const r = await api('/api/ssl-monitors/' + activeModal.id, {
+    method: 'PUT', body: JSON.stringify({ hostname, name: name || null, alert_days })
+  });
+  if (r.ok) { closeModal(); loadSSLMonitors(); }
+  else alert(r.data?.error || 'Error');
+}
+
+// ── Pasar de una lista a la otra ─────────────────────────────────────────────
+// Crean el monitor equivalente sin borrar el original: si despues no lo queres,
+// lo eliminas de la otra lista.
+async function crearSslDesdeUrl(id) {
+  const u = urlMonitors.find(x => x.id === id);
+  if (!u) return;
+  let hostname;
+  try { hostname = new URL(u.url).hostname; } catch (e) { alert('No pude sacar el dominio de esa URL'); return; }
+  if (sslMonitors.some(s => s.hostname === hostname)) { alert('Ya tenes un monitor SSL para ' + hostname); return; }
+  if (!confirm('Agregar un monitor de certificado SSL para ' + hostname + '?\n\nEl monitor de URL queda como esta.')) return;
+  const r = await api('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name: u.name || hostname }) });
+  if (r.ok) { closeModal(); activeNav = 'urls'; await loadSSLMonitors(); render(); }
+  else alert(r.data?.error || 'Error');
+}
+async function crearUrlDesdeSsl(id) {
+  const m = sslMonitors.find(x => x.id === id);
+  if (!m) return;
+  const url = 'https://' + m.hostname + '/';
+  if (urlMonitors.some(u => u.url === url)) { alert('Ya tenes un monitor de URL para ' + url); return; }
+  if (!confirm('Agregar un monitor de URL para ' + url + '?\n\nEl monitor SSL queda como esta.')) return;
+  const r = await api('/api/url-monitors', {
+    method: 'POST',
+    body: JSON.stringify({ url, name: m.name || m.hostname, method: 'GET', expected_status: 200, timeout_ms: 10000, interval_seconds: 300 })
+  });
+  if (r.ok) { closeModal(); await loadUrlMonitors(); render(); }
+  else alert(r.data?.error || 'Error');
 }
 
 function buildAddMaintenanceModal() {
