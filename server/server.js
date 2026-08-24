@@ -3004,7 +3004,7 @@ app.post('/api/auth/smtp/test', authenticateToken, async (req, res) => {
 // Test email (admin only)
 app.post('/api/admin/test-email', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    if (!emailTransporter) return res.status(400).json({ error: 'Email no configurado. Agrega SMTP_USER y SMTP_PASS en Railway.' });
+    if (!await transporteGlobal()) return res.status(400).json({ error: 'Email no configurado. Cargalo en Admin > Sistema > Email del sistema.' });
     const user = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
     await sendEmail(user.rows[0].email, 'Test', '<p style="color:#333">Email de prueba desde ServerEyes. Funciona correctamente!</p>');
     res.json({ message: 'Email enviado a ' + user.rows[0].email });
@@ -3793,12 +3793,15 @@ app.post('/api/notifications/:id/read', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/status', (req, res) => {
+app.get('/api/status', async (req, res) => {
+  // transporteGlobal() cachea, asi que esto no rearma nada en cada consulta.
+  let email = 'disabled';
+  try { email = (await transporteGlobal()) ? 'active' : 'disabled'; } catch (e) {}
   res.json({
     status: 'ServerEyes running',
     timestamp: new Date().toISOString(),
     firebase: firebaseAdmin ? 'active' : 'disabled',
-    email: emailTransporter ? 'active' : 'disabled',
+    email,
     version: '1.0.0'
   });
 });
