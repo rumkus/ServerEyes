@@ -110,23 +110,128 @@ function normalizarCorreos(lista) {
   return limpios;
 }
 
+// La URL con la que se arman los enlaces de los mails. Cuando el dominio
+// propio apunte al servicio, alcanza con definir PUBLIC_URL.
+function urlPublica() {
+  return (process.env.PUBLIC_URL || 'https://servereyes-production.up.railway.app').replace(/\/+$/, '');
+}
+
+// Pone la lista de destinatarios de un monitor en el estado que pidio el dueño.
+// Los nuevos entran como pendientes y reciben el pedido de permiso; los que
+// saco se eliminan. A los que ya estaban no se los vuelve a molestar.
+async function sincronizarDestinatarios(tipo, monitorId, correos, owner, nombreMonitor, queSeVigila) {
+  const deseados = Array.isArray(correos) ? correos : [];
+  const actuales = await pool.query('SELECT email, estado FROM monitor_recipients WHERE tipo = $1 AND monitor_id = $2', [tipo, monitorId]);
+  const yaEstaban = actuales.rows.map(r => r.email);
+
+  const sacados = yaEstaban.filter(e => !deseados.includes(e));
+  if (sacados.length > 0) {
+    await pool.query('DELETE FROM monitor_recipients WHERE tipo = $1 AND monitor_id = $2 AND email = ANY($3)', [tipo, monitorId, sacados]);
+  }
+
+  const nuevos = deseados.filter(e => !yaEstaban.includes(e));
+  for (const email of nuevos) {
+    const token = crypto.randomBytes(24).toString('hex');
+    await pool.query(
+      'INSERT INTO monitor_recipients (tipo, monitor_id, email, token, agregado_por) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tipo, monitor_id, email) DO NOTHING',
+      [tipo, monitorId, email, token, owner.id]
+    );
+    await pedirPermiso(owner, email, token, nombreMonitor, queSeVigila);
+  }
+  return { agregados: nuevos.length, quitados: sacados.length };
+}
+
+// El mail que decide todo: quien lo agrego, que se vigila, que le va a llegar,
+// y los dos botones. Sin esto, la persona recibe alertas que nunca pidio.
+async function pedirPermiso(owner, email, token, nombreMonitor, queSeVigila) {
+  const base = urlPublica();
+  const quien = owner.nombre ? `${owner.nombre} (${owner.email})` : owner.email;
+  const cuerpo = `
+    <p style="font-size:15px;color:#333;margin:0 0 14px">Hola,</p>
+    <p style="font-size:15px;color:#333;margin:0 0 14px">
+      <strong>${quien}</strong> te agrego para que recibas los avisos de <strong>${nombreMonitor}</strong>
+      a traves de ServerEyes, un servicio que vigila sitios web y avisa cuando algo anda mal.
+    </p>
+    <div style="background:#f5f7fa;border-left:3px solid #2196F3;border-radius:0 8px 8px 0;padding:14px 16px;margin:16px 0">
+      <p style="margin:0 0 6px;font-size:13px;color:#666"><strong>Que se vigila</strong></p>
+      <p style="margin:0;font-size:14px;color:#333">${queSeVigila}</p>
+    </div>
+    <p style="font-size:14px;color:#666;margin:0 0 14px">
+      Si aceptas, vas a recibir un mail unicamente cuando el estado cambie: cuando se caiga y cuando
+      vuelva a funcionar, o cuando el certificado este por vencer. No mandamos resumenes ni publicidad,
+      y podes darte de baja cuando quieras desde el pie de cualquier aviso.
+    </p>
+    <div style="text-align:center;margin:26px 0 18px">
+      <a href="${base}/notificaciones/confirmar/${token}"
+         style="display:inline-block;background:#2196F3;color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 28px;border-radius:8px">Si, quiero recibir los avisos</a>
+    </div>
+    <p style="text-align:center;margin:0 0 18px">
+      <a href="${base}/notificaciones/baja/${token}" style="color:#999;font-size:13px">No me interesa, no me escriban mas</a>
+    </p>
+    <p style="font-size:12px;color:#999;border-top:1px solid #eee;padding-top:14px;margin:0">
+      Hasta que aceptes no vas a recibir ningun aviso. Si no reconoces a ${owner.email}, ignora este mensaje
+      o usa el enlace de arriba para que no te volvamos a escribir.
+    </p>`;
+  try {
+    const asunto = `${owner.nombre || owner.email} quiere avisarte sobre ${nombreMonitor}`;
+    if (owner.smtp_user && owner.smtp_pass) await sendEmailWithUserSMTP(owner, asunto, cuerpo, email);
+    else await sendEmail(email, asunto, cuerpo);
+    console.log(`[AVISO] Permiso pedido a ${email} para ${nombreMonitor}`);
+  } catch (e) {
+    console.error(`[AVISO] No se pudo pedir permiso a ${email}: ${e.message}`);
+  }
+}
+
+const SUB_DESTINATARIOS_URL = `,
+       (SELECT json_agg(json_build_object('email', mr.email, 'estado', mr.estado) ORDER BY mr.email)
+        FROM monitor_recipients mr WHERE mr.tipo = 'url' AND mr.monitor_id = um.id) as destinatarios`;
+
+async function traerDuenio(userId) {
+  const q = await pool.query('SELECT id, email, nombre, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [userId]);
+  return q.rows[0] || null;
+}
+
+// Solo los que aceptaron. Devuelve el token de cada uno para poner el enlace
+// de baja en el pie del aviso.
+async function destinatariosConfirmados(tipo, monitorId) {
+  try {
+    const q = await pool.query(
+      "SELECT email, token FROM monitor_recipients WHERE tipo = $1 AND monitor_id = $2 AND estado = 'confirmado'",
+      [tipo, monitorId]
+    );
+    return q.rows;
+  } catch (e) {
+    console.error('[AVISO] Error leyendo destinatarios:', e.message);
+    return [];
+  }
+}
+
 // Manda el aviso a los destinatarios extra, usando el SMTP del dueño si lo
 // tiene configurado. Nunca corta el flujo: si un envio falla, se loguea.
-async function avisarAExtras(ownerId, correos, asunto, cuerpoHtml) {
-  if (!Array.isArray(correos) || correos.length === 0) return;
+async function avisarAExtras(ownerId, tipo, monitorId, asunto, cuerpoHtml) {
+  const destinatarios = await destinatariosConfirmados(tipo, monitorId);
+  if (destinatarios.length === 0) return;
   try {
     const q = await pool.query('SELECT email, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [ownerId]);
     const u = q.rows[0];
     if (!u) return;
-    for (const destino of correos) {
+    const base = urlPublica();
+    for (const d of destinatarios) {
+      // El enlace de baja va en cada aviso: es la unica forma que tiene el
+      // destinatario de salirse sin pedirselo al dueño del monitor.
+      const conPie = cuerpoHtml + `
+        <p style="font-size:12px;color:#999;border-top:1px solid #eee;padding-top:14px;margin-top:22px">
+          Recibis esto porque aceptaste los avisos de este sitio.
+          <a href="${base}/notificaciones/baja/${d.token}" style="color:#999">Darme de baja</a>
+        </p>`;
       try {
-        if (u.smtp_user && u.smtp_pass) await sendEmailWithUserSMTP(u, asunto, cuerpoHtml, destino);
-        else await sendEmail(destino, asunto, cuerpoHtml);
+        if (u.smtp_user && u.smtp_pass) await sendEmailWithUserSMTP(u, asunto, conPie, d.email);
+        else await sendEmail(d.email, asunto, conPie);
       } catch (e) {
-        console.error(`[AVISO] No se pudo avisar a ${destino}: ${e.message}`);
+        console.error(`[AVISO] No se pudo avisar a ${d.email}: ${e.message}`);
       }
     }
-    console.log(`[AVISO] ${asunto} -> ${correos.length} destinatario(s) extra`);
+    console.log(`[AVISO] ${asunto} -> ${destinatarios.length} destinatario(s) confirmado(s)`);
   } catch (e) {
     console.error('[AVISO] Error avisando a extras:', e.message);
   }
@@ -614,6 +719,27 @@ async function initDB() {
   // los avisos de su propio sitio, sin darle acceso a la cuenta.
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
   await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
+
+  // Nadie recibe avisos por haber sido cargado en una lista: primero se le
+  // pide permiso y recien cuando acepta pasa a confirmado. La baja la puede
+  // hacer solo, desde el pie de cualquier aviso, sin depender del dueño.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS monitor_recipients (
+      id SERIAL PRIMARY KEY,
+      tipo VARCHAR(10) NOT NULL,
+      monitor_id INTEGER NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      estado VARCHAR(12) NOT NULL DEFAULT 'pendiente',
+      token VARCHAR(64) NOT NULL,
+      agregado_por INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      confirmado_at TIMESTAMP,
+      baja_at TIMESTAMP,
+      UNIQUE (tipo, monitor_id, email)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_token ON monitor_recipients (token)`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_recipients_monitor ON monitor_recipients (tipo, monitor_id)`).catch(() => {});
 
   // Historial de chequeos de URL: sin esto no habia forma de saber que fallo,
   // porque last_error se borra en el primer chequeo exitoso posterior.
@@ -2088,7 +2214,7 @@ setInterval(async () => {
       const matchedDay = alertDays.sort((a, b) => b - a).find(d => result.days_left <= d);
       if (matchedDay !== undefined && matchedDay !== mon.last_alerted_days) {
         sendPush(mon.user_id, `🔒 SSL: ${mon.name || mon.hostname}`, `Certificado vence en ${result.days_left} dias (${result.expires_at.toLocaleDateString('es')})`, { type: 'ssl_alert' });
-        avisarAExtras(mon.user_id, mon.notify_emails, `🔒 El certificado de ${mon.name || mon.hostname} vence en ${result.days_left} dias`,
+        avisarAExtras(mon.user_id, 'ssl', mon.id, `🔒 El certificado de ${mon.name || mon.hostname} vence en ${result.days_left} dias`,
           `<p style="font-size:15px;color:#333">El certificado SSL de <strong>${mon.hostname}</strong> vence en <strong>${result.days_left} dias</strong>.</p>
            <p style="color:#666">Fecha de vencimiento: ${result.expires_at.toLocaleDateString('es')}<br>Emisor: ${result.issuer || '?'}</p>
            <p style="color:#666">Conviene renovarlo antes para que los visitantes no vean la advertencia del navegador.</p>`);
@@ -3358,7 +3484,10 @@ app.get('/api/network-scan/result/:machineId', authenticateToken, async (req, re
 // ── SSL MONITORS CRUD ──
 app.get('/api/ssl-monitors', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM ssl_monitors WHERE user_id = $1 ORDER BY hostname', [req.user.id]);
+    const result = await pool.query(`SELECT sm.*,
+       (SELECT json_agg(json_build_object('email', mr.email, 'estado', mr.estado) ORDER BY mr.email)
+        FROM monitor_recipients mr WHERE mr.tipo = 'ssl' AND mr.monitor_id = sm.id) as destinatarios
+       FROM ssl_monitors sm WHERE sm.user_id = $1 ORDER BY sm.hostname`, [req.user.id]);
     res.json(result.rows);
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
@@ -3376,6 +3505,11 @@ app.post('/api/ssl-monitors', authenticateToken, async (req, res) => {
       'INSERT INTO ssl_monitors (user_id, hostname, name, alert_days, notify_emails) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [req.user.id, h, name || h, JSON.stringify(days), JSON.stringify(correos)]
     );
+    const duenio = await traerDuenio(req.user.id);
+    if (duenio) {
+      await sincronizarDestinatarios('ssl', result.rows[0].id, correos, duenio,
+        name || h, `Que el certificado de seguridad de ${h} no venza sin aviso.`);
+    }
     res.status(201).json(result.rows[0]);
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
@@ -3413,6 +3547,14 @@ app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
     vals.push(req.params.id, req.user.id);
     await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = ${idx++} AND user_id = ${idx}`, vals);
+    if (notify_emails !== undefined) {
+      const m = await pool.query('SELECT id, hostname, name FROM ssl_monitors WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+      const duenio = await traerDuenio(req.user.id);
+      if (m.rows[0] && duenio) {
+        await sincronizarDestinatarios('ssl', m.rows[0].id, normalizarCorreos(notify_emails), duenio,
+          m.rows[0].name || m.rows[0].hostname, `Que el certificado de seguridad de ${m.rows[0].hostname} no venza sin aviso.`);
+      }
+    }
     res.json({ message: 'Actualizado' });
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
@@ -3813,9 +3955,10 @@ function isInMaintenance(machineId, userId) {
 
 app.get('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
-    const own = await pool.query('SELECT *, false as is_shared FROM url_monitors WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    const own = await pool.query(`SELECT um.*, false as is_shared${SUB_DESTINATARIOS_URL}
+       FROM url_monitors um WHERE um.user_id = $1 ORDER BY um.created_at DESC`, [req.user.id]);
     const shared = await pool.query(
-      `SELECT um.*, true as is_shared, u.email as owner_email, u.nombre as owner_name
+      `SELECT um.*, true as is_shared, u.email as owner_email, u.nombre as owner_name${SUB_DESTINATARIOS_URL}
        FROM url_monitors um
        JOIN url_shares us ON us.url_id = um.id
        LEFT JOIN users u ON um.user_id = u.id
@@ -3840,6 +3983,11 @@ app.post('/api/url-monitors', authenticateToken, async (req, res) => {
       'INSERT INTO url_monitors (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
       [req.user.id, url, name || url, method || 'GET', expected_status || 200, timeout_ms || 10000, interval_seconds || 300, JSON.stringify(correos)]
     );
+    const duenio = await traerDuenio(req.user.id);
+    if (duenio) {
+      await sincronizarDestinatarios('url', result.rows[0].id, correos, duenio,
+        name || url, `Que el sitio ${url} responda correctamente, con un chequeo cada pocos minutos.`);
+    }
     logAudit(req.user.id, 'create_url_monitor', 'url_monitor', result.rows[0].id, url, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
@@ -3866,6 +4014,14 @@ app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
        correos === null ? null : JSON.stringify(correos)]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
+    if (correos !== null) {
+      const duenio = await traerDuenio(req.user.id);
+      const m = result.rows[0];
+      if (duenio) {
+        await sincronizarDestinatarios('url', m.id, correos, duenio,
+          m.name || m.url, `Que el sitio ${m.url} responda correctamente, con un chequeo cada pocos minutos.`);
+      }
+    }
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
@@ -4044,12 +4200,12 @@ async function checkUrlMonitor(mon) {
 
   if (notify && isUp) {
     sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${probe.ms}ms)`, { type: 'url_up' });
-    avisarAExtras(mon.owner_id, mon.notify_emails, `✅ ${mon.name || mon.url} volvio a funcionar`,
+    avisarAExtras(mon.owner_id, 'url', mon.id, `✅ ${mon.name || mon.url} volvio a funcionar`,
       `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> volvio a responder normalmente.</p>
        <p style="color:#666">Tiempo de respuesta: ${probe.ms}ms<br>URL: ${mon.url}</p>`);
   } else if (notify && !isUp) {
     sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url}: ${lastError} (${attempts} intentos)`, { type: 'url_down' });
-    avisarAExtras(mon.owner_id, mon.notify_emails, `🚨 ${mon.name || mon.url} no responde`,
+    avisarAExtras(mon.owner_id, 'url', mon.id, `🚨 ${mon.name || mon.url} no responde`,
       `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> no esta respondiendo.</p>
        <p style="color:#666">Detalle: ${lastError}<br>URL: ${mon.url}<br>Se reintento ${attempts} veces antes de avisar.</p>`);
   }
@@ -4214,6 +4370,71 @@ app.post('/api/machines/:id/wol', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error WOL:', error);
     res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ============== CONSENTIMIENTO DE DESTINATARIOS ==============
+//
+// Sin autenticacion a proposito: el destinatario no tiene cuenta. El token es
+// aleatorio de 24 bytes y solo sirve para su propia suscripcion.
+
+function paginaConsentimiento(icono, titulo, mensaje, color) {
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>ServerEyes</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a1628;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:20px}
+  .caja{background:#0d1b2a;border-radius:16px;padding:40px 32px;max-width:460px;text-align:center;
+    box-shadow:0 8px 40px rgba(0,0,0,.4)}
+  .icono{font-size:52px;line-height:1;margin-bottom:16px}
+  h1{color:${color};font-size:21px;margin:0 0 12px}
+  p{color:#8fa3b8;font-size:15px;line-height:1.6;margin:0}
+  .pie{color:#4a5f75;font-size:12px;margin-top:26px;border-top:1px solid #1a2a3a;padding-top:16px}
+</style></head><body>
+  <div class="caja">
+    <div class="icono">${icono}</div>
+    <h1>${titulo}</h1>
+    <p>${mensaje}</p>
+    <div class="pie">ServerEyes — monitoreo de sitios y servidores</div>
+  </div>
+</body></html>`;
+}
+
+app.get('/notificaciones/confirmar/:token', async (req, res) => {
+  try {
+    const q = await pool.query('SELECT id, email, estado, tipo, monitor_id FROM monitor_recipients WHERE token = $1', [req.params.token]);
+    const r = q.rows[0];
+    if (!r) return res.status(404).send(paginaConsentimiento('🔍', 'Enlace no valido',
+      'Este enlace no corresponde a ninguna suscripcion. Puede que ya se haya eliminado.', '#ff9800'));
+    if (r.estado === 'confirmado') return res.send(paginaConsentimiento('✅', 'Ya estabas confirmado',
+      `${r.email} ya recibe estos avisos. No hace falta hacer nada mas.`, '#00e676'));
+
+    await pool.query("UPDATE monitor_recipients SET estado = 'confirmado', confirmado_at = NOW(), baja_at = NULL WHERE id = $1", [r.id]);
+    console.log(`[AVISO] ${r.email} confirmo ${r.tipo}/${r.monitor_id}`);
+    res.send(paginaConsentimiento('✅', 'Listo, quedaste suscripto',
+      `A partir de ahora ${r.email} va a recibir un aviso cuando cambie el estado. Podes darte de baja cuando quieras desde el pie de cualquier mail.`, '#00e676'));
+  } catch (e) {
+    console.error('Error confirmando destinatario:', e.message);
+    res.status(500).send(paginaConsentimiento('⚠️', 'Error', 'No pudimos procesar tu confirmacion. Intenta de nuevo en unos minutos.', '#ff5252'));
+  }
+});
+
+app.get('/notificaciones/baja/:token', async (req, res) => {
+  try {
+    const q = await pool.query('SELECT id, email, estado FROM monitor_recipients WHERE token = $1', [req.params.token]);
+    const r = q.rows[0];
+    if (!r) return res.status(404).send(paginaConsentimiento('🔍', 'Enlace no valido',
+      'Este enlace no corresponde a ninguna suscripcion.', '#ff9800'));
+
+    await pool.query("UPDATE monitor_recipients SET estado = 'baja', baja_at = NOW() WHERE id = $1", [r.id]);
+    console.log(`[AVISO] ${r.email} se dio de baja`);
+    res.send(paginaConsentimiento('👋', 'Listo, no te escribimos mas',
+      `${r.email} no va a recibir mas avisos de este monitor. Si fue un error, pedile a quien te agrego que te vuelva a invitar.`, '#00d4ff'));
+  } catch (e) {
+    console.error('Error dando de baja:', e.message);
+    res.status(500).send(paginaConsentimiento('⚠️', 'Error', 'No pudimos procesar la baja. Intenta de nuevo en unos minutos.', '#ff5252'));
   }
 });
 

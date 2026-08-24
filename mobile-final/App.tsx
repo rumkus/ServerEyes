@@ -962,6 +962,19 @@ function AppContent() {
     } catch {}
   };
 
+  // No reciben nada hasta aceptar, asi que hay que mostrar el estado de cada
+  // uno y no solo cuantos son.
+  const resumenDestinatarios = (lista: any[]) => {
+    if (!Array.isArray(lista) || lista.length === 0) return null;
+    const c = { confirmado: 0, pendiente: 0, baja: 0 } as any;
+    lista.forEach((d: any) => { if (c[d.estado] !== undefined) c[d.estado]++; });
+    const partes: string[] = [];
+    if (c.confirmado) partes.push(`${c.confirmado} confirmado${c.confirmado > 1 ? 's' : ''}`);
+    if (c.pendiente) partes.push(`${c.pendiente} sin confirmar`);
+    if (c.baja) partes.push(`${c.baja} de baja`);
+    return partes.join(' · ');
+  };
+
   // "a@b.com, c@d.com" -> ['a@b.com','c@d.com']. El servidor valida el formato.
   const correosDeTexto = (txt: string) => txt.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
 
@@ -1041,7 +1054,7 @@ function AppContent() {
             placeholder="cliente@empresa.com, soporte@empresa.com" placeholderTextColor="#555"
             autoCapitalize="none" keyboardType="email-address" />
           <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14}}>
-            Ademas de vos, estos reciben el aviso por mail cuando el sitio se cae o vuelve.
+            A cada uno le llega un mail pidiendole permiso, con tu nombre y que se vigila. No recibe alertas hasta que acepta, y puede darse de baja solo.
           </Text>
           {!urlEditId && (
             <TouchableOpacity onPress={() => setUrlVigilarSsl(!urlVigilarSsl)}
@@ -1201,8 +1214,8 @@ function AppContent() {
                   <Text style={{color: '#555', fontSize: 12, marginLeft: 'auto'}}>{u.last_check ? timeSince(u.last_check) : 'Nunca'}</Text>
                 </View>
                 {u.last_error && <Text style={{color: '#ff5252', fontSize: 11, marginTop: 4}}>{u.last_error}</Text>}
-                {(u.notify_emails || []).length > 0 && (
-                  <Text style={{color: th.sub, fontSize: 10, marginTop: 4}}>{'✉'} avisa a {(u.notify_emails || []).length}: {(u.notify_emails || []).join(', ')}</Text>
+                {resumenDestinatarios(u.destinatarios) && (
+                  <Text style={{color: th.sub, fontSize: 10, marginTop: 4}}>{'✉'} {resumenDestinatarios(u.destinatarios)}</Text>
                 )}
               </View>
               <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
@@ -2002,7 +2015,7 @@ function AppContent() {
             placeholder="cliente@empresa.com" placeholderTextColor="#555"
             autoCapitalize="none" keyboardType="email-address" />
           <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14}}>
-            Ademas de vos, estos reciben el aviso de vencimiento por mail.
+            A cada uno le llega un mail pidiendole permiso. No recibe alertas hasta que acepta, y puede darse de baja solo.
           </Text>
           <TouchableOpacity style={s.btn} onPress={async () => {
             const host = sslHostname.trim().replace(/^https?:\/\//i, '').split('/')[0];
@@ -2092,8 +2105,8 @@ function AppContent() {
                   <Text style={{color: th.sub, fontSize: 11}}>Emisor: {mon.last_issuer || '?'}</Text>
                   {mon.last_expiry && <Text style={{color: th.sub, fontSize: 11}}>Vence: {new Date(mon.last_expiry).toLocaleDateString('es')}</Text>}
                 </View>
-                {(mon.notify_emails || []).length > 0 && (
-                  <Text style={{color: th.sub, fontSize: 10, marginBottom: 4}}>{'✉'} avisa a {(mon.notify_emails || []).length}: {(mon.notify_emails || []).join(', ')}</Text>
+                {resumenDestinatarios(mon.destinatarios) && (
+                  <Text style={{color: th.sub, fontSize: 10, marginBottom: 4}}>{'✉'} {resumenDestinatarios(mon.destinatarios)}</Text>
                 )}
                 <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8}}>
                   <Text style={{color: th.sub, fontSize: 10}}>Alertas:</Text>
@@ -4097,7 +4110,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.5.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.6.0</Text>
             </View>
           </View>
         </TouchableOpacity>
