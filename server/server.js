@@ -2125,12 +2125,22 @@ app.get('/api/admin/overview', authenticateToken, requireAdmin, async (req, res)
     const onlineMachines = machines.rows.filter(m => m.is_online).length;
     const agentFile = await pool.query('SELECT id, version, filename, file_size, changelog, uploaded_at FROM agent_files ORDER BY uploaded_at DESC LIMIT 1');
     const ver = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
+    // Lo mismo para el client de escritorio: hasta ahora se podia publicar pero
+    // no habia forma de ver desde el panel que version habia quedado.
+    const clientFile = await pool.query('SELECT id, version, filename, file_size, changelog, uploaded_at FROM client_files ORDER BY uploaded_at DESC LIMIT 1').catch(() => ({ rows: [] }));
+    const verClient = await pool.query("SELECT value FROM app_settings WHERE key = 'client_version'").catch(() => ({ rows: [] }));
+    const shaAgent = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_sha256'").catch(() => ({ rows: [] }));
+    const shaClient = await pool.query("SELECT value FROM app_settings WHERE key = 'client_sha256'").catch(() => ({ rows: [] }));
     res.json({
       stats: { totalUsers, totalMachines, onlineMachines, offlineMachines: totalMachines - onlineMachines },
       users: users.rows,
       machines: machines.rows,
       latestAgent: agentFile.rows[0] || null,
-      configuredVersion: ver.rows[0]?.value || null
+      configuredVersion: ver.rows[0]?.value || null,
+      latestClient: clientFile.rows[0] || null,
+      configuredClientVersion: verClient.rows[0]?.value || null,
+      agentSha256: shaAgent.rows[0]?.value || null,
+      clientSha256: shaClient.rows[0]?.value || null
     });
   } catch (error) {
     console.error('Error en admin overview:', error);

@@ -253,6 +253,19 @@ function renderAgent() {
         ${a.changelog ? '<div class="row"><span class="lbl">Cambios:</span><span class="val">' + a.changelog + '</span></div>' : ''}
         <div class="row"><span class="lbl">URL descarga:</span><span class="val" style="font-size:11px;color:#00d4ff">${API}/api/agent/download</span></div>
       </div>` : '<p style="color:#888;margin-bottom:16px">No hay agente subido todavia</p>'}
+      ${data.agentSha256 ? `<div class="row"><span class="lbl">sha256:</span><span class="val" style="font-size:10px;color:#888;word-break:break-all">${data.agentSha256}</span></div>` : ''}
+
+      <h2 class="orange" style="margin-top:24px">&#128187; Client de Escritorio</h2>
+      ${data.latestClient ? `<div class="agent-info">
+        <div class="row"><span class="lbl">Version configurada:</span><span class="val" style="color:#00e676">${data.configuredClientVersion || '---'}</span></div>
+        <div class="row"><span class="lbl">Archivo:</span><span class="val">${data.latestClient.filename}</span></div>
+        <div class="row"><span class="lbl">Tamano:</span><span class="val">${fmtSize(data.latestClient.file_size)}</span></div>
+        <div class="row"><span class="lbl">Subido:</span><span class="val">${fmtDate(data.latestClient.uploaded_at)}</span></div>
+        ${data.latestClient.changelog ? '<div class="row"><span class="lbl">Cambios:</span><span class="val">' + data.latestClient.changelog + '</span></div>' : ''}
+        <div class="row"><span class="lbl">URL descarga:</span><span class="val" style="font-size:11px;color:#00d4ff">${API}/api/client/download</span></div>
+        ${data.clientSha256 ? `<div class="row"><span class="lbl">sha256:</span><span class="val" style="font-size:10px;color:#888;word-break:break-all">${data.clientSha256}</span></div>` : ''}
+      </div>` : '<p style="color:#888;margin-bottom:16px">No hay client subido todavia</p>'}
+
       ${outdated.length > 0 ? `<div style="background:#3d2e00;border-radius:10px;padding:14px;margin-bottom:16px">
         <strong style="color:#ff9800">&#9888; ${outdated.length} maquina(s) con version desactualizada:</strong>
         <div style="margin-top:8px">${outdated.map(m => '<span style="color:#ddd;font-size:13px;margin-right:16px">' + m.machine_name + ' <span style="color:#888">v' + m.agent_version + '</span></span>').join('')}</div>
