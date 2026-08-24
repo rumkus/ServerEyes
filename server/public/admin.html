@@ -112,6 +112,7 @@ let data = null;
 let tab = 'overview';
 let selectedFile = null;
 let uploading = false;
+let uploadTarget = 'agent'; // 'agent' | 'client'
 let agentHistory = [];
 let serverStatus = null;
 let adminNotifs = [];
@@ -260,10 +261,15 @@ function renderAgent() {
     </div>
 
     <div class="section"><h2 class="orange">&#128194; Subir Nueva Version</h2>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        ${[['agent', '&#128421; Agente'], ['client', '&#128187; Client de escritorio']].map(([v, t]) => `
+          <button onclick="setUploadTarget('${v}')" ${uploading ? 'disabled' : ''}
+            style="flex:1;padding:10px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:${uploadTarget === v ? '#ff9800' : '#222'};color:${uploadTarget === v ? '#111' : '#888'}">${t}</button>`).join('')}
+      </div>
       <div class="upload-area ${selectedFile ? 'active' : ''}" onclick="document.getElementById('file-input').click()">
         <input type="file" id="file-input" accept=".exe" onchange="onFileSelect(this)" />
         <div class="icon">${selectedFile ? '&#9989;' : '&#128193;'}</div>
-        <div class="text">${selectedFile ? '' : 'Click para seleccionar el exe del agente'}</div>
+        <div class="text">${selectedFile ? '' : (uploadTarget === 'client' ? 'Click para seleccionar el exe del client' : 'Click para seleccionar el exe del agente')}</div>
         ${selectedFile ? '<div class="filename">' + selectedFile.name + ' (' + fmtSize(selectedFile.size) + ')</div>' : ''}
       </div>
       <div class="form-row">
@@ -299,26 +305,43 @@ function bumpVersion(v) {
   return parts.join('.');
 }
 
+function setUploadTarget(t) {
+  if (uploading) return;
+  uploadTarget = t;
+  selectedFile = null;
+  render();
+}
+
+// El client pesa ~90 MB y en base64 se iria a ~120, por encima del limite del
+// servidor. Va como multipart, que ademas no infla el cuerpo un 33%.
+async function subirClient(version, changelog) {
+  const fd = new FormData();
+  fd.append('version', version);
+  fd.append('changelog', changelog || '');
+  fd.append('file', selectedFile, selectedFile.name);
+  // api() fuerza Content-Type application/json, que rompe el multipart.
+  const r = await fetch(API + '/api/admin/client/upload', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd
+  });
+  let d = {};
+  try { d = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, data: d };
+}
+
 async function doUpload() {
   if (!selectedFile) return;
   const version = document.getElementById('up-version').value.trim();
   const changelog = document.getElementById('up-changelog').value.trim();
   if (!version) { alert('Ingresa la version'); return; }
 
+  const target = uploadTarget;
   uploading = true;
   render();
 
   const bar = document.getElementById('up-bar');
   if (bar) bar.style.width = '30%';
 
-  const reader = new FileReader();
-  reader.onload = async () => {
-    if (bar) bar.style.width = '60%';
-    const base64 = reader.result.split(',')[1];
-    const res = await api('/api/admin/agent/upload', {
-      method: 'POST',
-      body: JSON.stringify({ version, filename: selectedFile.name, file_base64: base64, changelog })
-    });
+  const terminar = async (res) => {
     if (bar) bar.style.width = '100%';
 
     if (res.ok) {
@@ -330,8 +353,8 @@ async function doUpload() {
         st.innerHTML = `<div style="background:#0d2818;border-left:3px solid #4CAF50;border-radius:0 10px 10px 0;padding:14px 18px;margin-top:12px;display:flex;align-items:center;gap:12px">
           <span style="font-size:28px">✅</span>
           <div>
-            <div style="color:#00e676;font-weight:700;font-size:14px">Agente v${version} subido exitosamente</div>
-            <div style="color:#888;font-size:12px;margin-top:2px">Los agentes se actualizaran en el proximo heartbeat (~30 segundos)</div>
+            <div style="color:#00e676;font-weight:700;font-size:14px">${target === 'client' ? 'Client' : 'Agente'} v${version} subido exitosamente</div>
+            <div style="color:#888;font-size:12px;margin-top:2px">${res.data?.sha256 ? 'sha256: ' + res.data.sha256 + '<br>' : ''}Se actualizaran en el proximo heartbeat (~30 segundos)</div>
           </div>
         </div>`;
         setTimeout(() => { if (st) st.innerHTML = ''; }, 10000);
@@ -347,6 +370,22 @@ async function doUpload() {
         </div>`;
       }
     }
+  };
+
+  if (target === 'client') {
+    if (bar) bar.style.width = '60%';
+    await terminar(await subirClient(version, changelog));
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    if (bar) bar.style.width = '60%';
+    const base64 = reader.result.split(',')[1];
+    await terminar(await api('/api/admin/agent/upload', {
+      method: 'POST',
+      body: JSON.stringify({ version, filename: selectedFile.name, file_base64: base64, changelog })
+    }));
   };
   reader.readAsDataURL(selectedFile);
 }

@@ -226,8 +226,10 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
+// 60mb para que entre el agente en base64. El segundo express.json que habia
+// aca, de 10mb, era codigo muerto: el primero ya parseo el body, pero hacia
+// creer que el limite real era 10mb.
 app.use(express.json({ limit: '60mb' }));
-app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.get('/classic', (req, res) => res.sendFile(path.join(__dirname, 'public', 'classic.html')));
@@ -415,6 +417,20 @@ async function initDB() {
   // Tabla para almacenar archivo del agente
   await pool.query(`
     CREATE TABLE IF NOT EXISTS agent_files (
+      id SERIAL PRIMARY KEY,
+      version VARCHAR(20) NOT NULL,
+      filename VARCHAR(255),
+      file_data BYTEA,
+      file_size INTEGER,
+      changelog TEXT DEFAULT '',
+      uploaded_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  // Mismo esquema para el client de escritorio. Antes no existia: se podia
+  // publicar una version del client pero no alojar el binario en ningun lado.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS client_files (
       id SERIAL PRIMARY KEY,
       version VARCHAR(20) NOT NULL,
       filename VARCHAR(255),
@@ -2153,6 +2169,67 @@ app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req,
 });
 
 // Descargar agente (publico, sin auth - los agentes lo descargan)
+// ── BINARIO DEL CLIENT DE ESCRITORIO ──
+//
+// El client pesa bastante mas que el agente (unos 90 MB contra 37), y en
+// base64 se va a ~120 MB: no entra en el limite de express.json. Por eso este
+// va como multipart, que ademas evita el 33% de sobrecarga del base64.
+const subirBinario = require('multer')({
+  storage: require('multer').memoryStorage(),
+  limits: { fileSize: 150 * 1024 * 1024, files: 1 }
+});
+const VERSIONES_A_CONSERVAR = 3;
+
+app.post('/api/admin/client/upload', authenticateToken, requireAdmin, subirBinario.single('file'), async (req, res) => {
+  try {
+    const { version, changelog } = req.body;
+    if (!version) return res.status(400).json({ error: 'version requerida' });
+    if (!req.file) return res.status(400).json({ error: 'archivo requerido (campo "file")' });
+    const buffer = req.file.buffer;
+    if (buffer.length < 1024 * 1024) return res.status(400).json({ error: 'Archivo muy chico, parece invalido' });
+
+    await pool.query(
+      'INSERT INTO client_files (version, filename, file_data, file_size, changelog) VALUES ($1, $2, $3, $4, $5)',
+      [version, req.file.originalname || 'ServerEyes-Portable.exe', buffer, buffer.length, changelog || '']
+    );
+
+    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const downloadUrl = `${protocol}://${req.get('host')}/api/client/download`;
+    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
+    await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256]);
+
+    // Cada version ocupa ~90 MB en la base: no guardamos el historial entero.
+    const podadas = await pool.query(
+      `DELETE FROM client_files WHERE id NOT IN (
+         SELECT id FROM client_files ORDER BY uploaded_at DESC LIMIT ${VERSIONES_A_CONSERVAR}
+       )`
+    );
+    if (podadas.rowCount > 0) console.log(`[CLIENT] ${podadas.rowCount} version(es) vieja(s) eliminada(s)`);
+
+    logAudit(req.user.id, 'upload_client', 'client_files', null, `${version} (${buffer.length} bytes)`, req.ip);
+    console.log(`[CLIENT] Version ${version} publicada, sha256=${sha256}`);
+    res.json({ message: 'Client subido', version, size: buffer.length, downloadUrl, sha256 });
+  } catch (error) {
+    console.error('Error subiendo client:', error.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.get('/api/client/download', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT filename, file_data FROM client_files ORDER BY uploaded_at DESC LIMIT 1');
+    if (result.rows.length === 0) return res.status(404).json({ error: 'No hay client disponible' });
+    const { filename, file_data } = result.rows[0];
+    res.set({ 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${filename}"` });
+    res.send(file_data);
+  } catch (error) {
+    console.error('Error descargando client:', error.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 app.get('/api/agent/download', async (req, res) => {
   try {
     const result = await pool.query('SELECT filename, file_data FROM agent_files ORDER BY uploaded_at DESC LIMIT 1');
