@@ -113,6 +113,7 @@ let tab = 'overview';
 let selectedFile = null;
 let uploading = false;
 let uploadTarget = 'agent'; // 'agent' | 'client'
+let smtpGlobal = null;
 let agentHistory = [];
 let serverStatus = null;
 let adminNotifs = [];
@@ -425,6 +426,79 @@ async function loadHistory() {
   ]);
   if (agente.ok) pintarHistorial('history-list', agente.data);
   if (client.ok) pintarHistorial('history-list-client', client.data);
+}
+
+function renderSmtpGlobal() {
+  const c = smtpGlobal;
+  if (!c) return '<div class="section"><h2>&#128231; Email del sistema</h2><p style="color:#888">Cargando...</p></div>';
+  const configurado = !!(c.smtp_host && c.smtp_user);
+  return `
+    <div class="section"><h2>&#128231; Email del sistema</h2>
+      <p style="color:#888;font-size:13px;margin:0 0 14px">
+        Este SMTP lo usan <strong>todos los usuarios</strong> que no hayan configurado uno propio, incluidos
+        los que se registren de ahora en adelante. Los que tengan el suyo siguen usando el suyo.
+      </p>
+      ${configurado
+        ? `<div style="background:#0d2818;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#00e676;font-size:13px">&#9989; Configurado: ${c.smtp_user} en ${c.smtp_host}${c.smtp_from ? ' — sale como ' + c.smtp_from : ''}</div>`
+        : c.desde_entorno
+          ? '<div style="background:#3d2e00;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#ff9800;font-size:13px">&#9888; Usando las variables de entorno. Si guardas aca, pasan a mandar estos valores.</div>'
+          : '<div style="background:#2d1117;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#ff5252;font-size:13px">&#9888; Sin configurar: los usuarios sin SMTP propio no reciben ningun mail.</div>'}
+      <div class="form-row">
+        <div class="field"><label>Host:</label><input type="text" id="sg-host" value="${c.smtp_host || ''}" placeholder="smtp.resend.com"/></div>
+        <div class="field"><label>Puerto:</label><input type="text" id="sg-port" value="${c.smtp_port || '587'}" placeholder="587"/></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Usuario:</label><input type="text" id="sg-user" value="${c.smtp_user || ''}" placeholder="resend"/></div>
+        <div class="field"><label>Contrasena / API key:</label><input type="password" id="sg-pass" placeholder="${c.tiene_pass ? 'guardada — dejala vacia para no cambiarla' : 're_...'}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Remitente:</label><input type="text" id="sg-from" value="${c.smtp_from || ''}" placeholder="alertas@servereyes.app"/></div>
+        <div class="field"><label>Seguridad:</label>
+          <select id="sg-secure" style="width:100%;padding:8px;border-radius:6px;background:#111;color:#ddd;border:1px solid #333">
+            <option value="tls" ${c.smtp_secure !== 'ssl' ? 'selected' : ''}>TLS (587)</option>
+            <option value="ssl" ${c.smtp_secure === 'ssl' ? 'selected' : ''}>SSL (465)</option>
+          </select>
+        </div>
+      </div>
+      <p style="color:#666;font-size:11px;margin:4px 0 12px">
+        El remitente tiene que ser una direccion de un dominio verificado en tu proveedor. Con Resend el
+        usuario es literalmente <code>resend</code> y la contrasena es la API key.
+      </p>
+      <div style="display:flex;gap:8px">
+        <button class="btn-upload" style="margin:0" onclick="guardarSmtpGlobal()">Guardar</button>
+        <button class="modal-btn sm" style="margin:0;padding:10px 16px" onclick="probarSmtpGlobal()">Enviar prueba</button>
+      </div>
+      <div id="sg-estado" style="margin-top:10px;font-size:13px"></div>
+    </div>`;
+}
+
+async function cargarSmtpGlobal() {
+  const r = await api('/api/admin/smtp');
+  if (r.ok) { smtpGlobal = r.data; render(); }
+}
+
+async function guardarSmtpGlobal() {
+  const cuerpo = {
+    smtp_host: document.getElementById('sg-host')?.value?.trim(),
+    smtp_port: document.getElementById('sg-port')?.value?.trim(),
+    smtp_secure: document.getElementById('sg-secure')?.value,
+    smtp_user: document.getElementById('sg-user')?.value?.trim(),
+    smtp_pass: document.getElementById('sg-pass')?.value,
+    smtp_from: document.getElementById('sg-from')?.value?.trim()
+  };
+  const el = document.getElementById('sg-estado');
+  const r = await api('/api/admin/smtp', { method: 'POST', body: JSON.stringify(cuerpo) });
+  if (r.ok) { if (el) el.innerHTML = '<span style="color:#00e676">Guardado</span>'; await cargarSmtpGlobal(); }
+  else if (el) el.innerHTML = '<span style="color:#ff5252">' + (r.data?.error || 'Error') + '</span>';
+}
+
+async function probarSmtpGlobal() {
+  const el = document.getElementById('sg-estado');
+  if (el) el.innerHTML = '<span style="color:#888">Enviando...</span>';
+  const r = await api('/api/admin/smtp/test', { method: 'POST', body: JSON.stringify({}) });
+  if (el) el.innerHTML = r.ok
+    ? '<span style="color:#00e676">' + r.data.message + (r.data.remitente ? ' — desde ' + r.data.remitente : '') + '</span>'
+    : '<span style="color:#ff5252">' + (r.data?.error || 'Error') + '</span>';
 }
 
 function renderSystem() {
@@ -886,7 +960,7 @@ function render() {
   else if (tab === 'agent') content = renderAgent();
   else if (tab === 'notifs') content = renderNotifs();
   else if (tab === 'support') content = renderSupportAdmin();
-  else if (tab === 'system') content = renderSystem();
+  else if (tab === 'system') content = renderSmtpGlobal() + renderSystem();
 
   document.getElementById('app').innerHTML = `
     <div class="header">
@@ -904,6 +978,7 @@ function render() {
     <div class="content">${content}</div>`;
 
   if (tab === 'agent') loadHistory();
+  if (tab === 'system' && !smtpGlobal) cargarSmtpGlobal();
   if (tab === 'notifs') setTimeout(loadNotifs, 50);
   if (tab === 'support') { setTimeout(loadAdminSupport, 50); }
 }

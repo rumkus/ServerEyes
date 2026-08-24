@@ -238,36 +238,63 @@ async function avisarAExtras(ownerId, tipo, monitorId, asunto, cuerpoHtml) {
 }
 
 // Email (Nodemailer)
-let emailTransporter = null;
-try {
+// El SMTP que usa toda la aplicacion cuando el usuario no configuro el suyo.
+// Se guarda en app_settings para poder editarlo desde el panel de admin sin
+// redesplegar; las variables de entorno quedan como respaldo.
+let _transporteGlobal = null;   // null = sin resolver, false = no hay configurado
+let _remitenteGlobal = null;
+
+function invalidarTransporteGlobal() { _transporteGlobal = null; _remitenteGlobal = null; }
+
+async function configSmtpGlobal() {
+  const q = await pool.query("SELECT key, value FROM app_settings WHERE key LIKE 'smtp_%'");
+  const c = {};
+  for (const r of q.rows) c[r.key.replace(/^smtp_/, '')] = r.value;
+  return c;
+}
+
+async function transporteGlobal() {
+  if (_transporteGlobal !== null) return _transporteGlobal;
   const nodemailer = require('nodemailer');
-  if (process.env.SMTP_HOST) {
-    emailTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-    });
-    console.log('Email configurado:', process.env.SMTP_USER);
-  } else if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-    // Gmail shortcut
-    emailTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-    });
-    console.log('Email Gmail configurado:', process.env.SMTP_USER);
-  } else {
-    console.log('Email no configurado (faltan SMTP_HOST o SMTP_USER/SMTP_PASS)');
+  let c = {};
+  try { c = await configSmtpGlobal(); } catch (e) { /* base todavia no lista */ }
+
+  const host = c.host || process.env.SMTP_HOST;
+  const user = c.user || process.env.SMTP_USER;
+  const pass = c.pass ? descifrarSecreto(c.pass) : process.env.SMTP_PASS;
+  const seguridad = c.secure || (process.env.SMTP_SECURE === 'true' ? 'ssl' : 'tls');
+  _remitenteGlobal = c.from || process.env.SMTP_FROM || user || 'servereyes@noreply.com';
+
+  try {
+    if (host && user && pass) {
+      _transporteGlobal = nodemailer.createTransport({
+        host,
+        port: parseInt(c.port || process.env.SMTP_PORT || '587'),
+        secure: seguridad === 'ssl',
+        ...(seguridad === 'tls' ? { requireTLS: true } : {}),
+        auth: { user, pass }
+      });
+      console.log(`[EMAIL] SMTP global: ${user}@${host} (remitente ${_remitenteGlobal})`);
+    } else if (user && pass) {
+      _transporteGlobal = nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
+      console.log('[EMAIL] SMTP global por Gmail:', user);
+    } else {
+      _transporteGlobal = false;
+      console.log('[EMAIL] Sin SMTP global configurado: los usuarios sin SMTP propio no reciben mails');
+    }
+  } catch (err) {
+    console.error('[EMAIL] Error armando el SMTP global:', err.message);
+    _transporteGlobal = false;
   }
-} catch (err) {
-  console.error('Error configurando email:', err.message);
+  return _transporteGlobal;
 }
 
 async function sendEmail(to, subject, body) {
+  const emailTransporter = await transporteGlobal();
   if (!emailTransporter) return;
   try {
     await emailTransporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER || 'servereyes@noreply.com',
+      from: _remitenteGlobal,
       to,
       subject: '[ServerEyes] ' + subject,
       html: `<div style="font-family:Arial,sans-serif;padding:20px;background:#f5f5f5">
@@ -2800,6 +2827,69 @@ app.get('/api/admin/agent/history', authenticateToken, requireAdmin, async (req,
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── SMTP GLOBAL (solo admin) ──
+// Configurado una vez, sirve para todos los usuarios que no tengan el suyo.
+
+app.get('/api/admin/smtp', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const c = await configSmtpGlobal();
+    res.json({
+      smtp_host: c.host || '',
+      smtp_port: c.port || '587',
+      smtp_secure: c.secure || 'tls',
+      smtp_user: c.user || '',
+      smtp_from: c.from || '',
+      // La clave nunca se devuelve: solo si hay una guardada.
+      tiene_pass: !!c.pass,
+      // Para que se vea si esta cayendo al respaldo del entorno.
+      desde_entorno: !c.host && !!process.env.SMTP_HOST
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/admin/smtp', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from } = req.body;
+    const guardar = async (clave, valor) => {
+      await pool.query(
+        "INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+        [clave, valor == null ? '' : String(valor)]
+      );
+    };
+    await guardar('smtp_host', smtp_host);
+    await guardar('smtp_port', smtp_port || '587');
+    await guardar('smtp_secure', smtp_secure || 'tls');
+    await guardar('smtp_user', smtp_user);
+    await guardar('smtp_from', smtp_from);
+    // Vacia = no tocar la que ya estaba, para no obligar a reescribirla.
+    if (smtp_pass) await guardar('smtp_pass', cifrarSecreto(smtp_pass));
+
+    invalidarTransporteGlobal();
+    logAudit(req.user.id, 'config_smtp_global', 'app_settings', null, `${smtp_user}@${smtp_host}`, req.ip);
+    res.json({ message: 'SMTP global guardado' });
+  } catch (error) {
+    console.error('Error guardando SMTP global:', error.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+app.post('/api/admin/smtp/test', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    invalidarTransporteGlobal();
+    const t = await transporteGlobal();
+    if (!t) return res.status(400).json({ error: 'No hay SMTP global configurado' });
+    const destino = req.body?.to || req.user.email;
+    await sendEmail(destino, 'Prueba de SMTP global',
+      `<p style="color:#333">Si estas leyendo esto, el SMTP global de ServerEyes funciona.</p>
+       <p style="color:#666">Este es el remitente que van a ver todos los usuarios que no tengan un SMTP propio configurado.</p>`);
+    res.json({ message: `Enviado a ${destino}`, remitente: _remitenteGlobal });
+  } catch (error) {
+    res.status(500).json({ error: 'Error: ' + error.message });
   }
 });
 
