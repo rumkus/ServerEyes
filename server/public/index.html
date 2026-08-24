@@ -1394,7 +1394,7 @@ function showSecurityInfo(id) {
   const m = machines.find(x => x.id === id);
   if (!m) return;
   const s = m.security_info;
-  if (!s) { alert('Sin datos de seguridad. El agente aun no reporto esta informacion.'); return; }
+  if (!s) { avisar('Aviso', 'Sin datos de seguridad. El agente aun no reporto esta informacion.', 'ℹ️'); return; }
   const wu = s.windows_update;
   const of = s.office;
   const av = s.antivirus;
@@ -1432,12 +1432,30 @@ function showSecurityInfo(id) {
 async function checkSSL(hostname) {
   const h = hostname.replace(/^https?:\/\//, '').split('/')[0];
   const res = await api('/api/ssl-check', { method: 'POST', body: JSON.stringify({ hostname: h }) });
-  if (res.ok && res.data) {
-    const d = res.data;
-    if (d.error) { alert('SSL Error: ' + d.error); return; }
-    const color = d.status === 'ok' ? '🟢' : d.status === 'warning' ? '🟡' : '🔴';
-    alert(`${color} SSL: ${d.subject}\n\nEmisor: ${d.issuer}\nVence: ${new Date(d.expires_at).toLocaleDateString('es')}\nDias restantes: ${d.days_left}\nEstado: ${d.status === 'ok' ? 'Valido' : d.status === 'warning' ? 'Vence pronto!' : 'Expirado!'}`);
-  } else { alert('Error al verificar SSL'); }
+  if (!res.ok || !res.data) { await avisar('No se pudo verificar', 'El servidor no respondio al chequeo de ' + h, '🔒'); return; }
+  const d = res.data;
+  if (d.error) { await avisar('No se pudo verificar', d.error, '🔒'); return; }
+
+  const color = d.status === 'ok' ? '#4CAF50' : d.status === 'warning' ? '#FF9800' : '#F44336';
+  const etiqueta = d.status === 'ok' ? 'Valido' : d.status === 'warning' ? 'Vence pronto' : 'Expirado';
+  const fila = (l, v) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--border2)">
+    <span style="color:#888">${l}</span><span style="color:var(--text);font-weight:600;text-align:right">${escHtml(v)}</span></div>`;
+
+  await confirmar({
+    icono: '🔒',
+    titulo: d.subject || h,
+    soloAceptar: true,
+    ok: 'Cerrar',
+    detalle: `
+      <div style="text-align:center;margin:-2px 0 12px">
+        <span style="display:inline-block;background:${color}22;color:${color};font-weight:800;font-size:13px;padding:5px 14px;border-radius:20px">${etiqueta}</span>
+      </div>
+      <div style="font-size:13px">
+        ${fila('Dias restantes', d.days_left != null ? d.days_left + ' dias' : '—')}
+        ${fila('Vence', d.expires_at ? new Date(d.expires_at).toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' }) : '—')}
+        ${fila('Emisor', d.issuer || '—')}
+      </div>`
+  });
 }
 
 async function updateSla(id) {
@@ -1659,7 +1677,7 @@ function renderSupportPanel() {
 async function submitNewTicket() {
   const subject = document.getElementById('support-new-subject')?.value?.trim();
   const msg = document.getElementById('support-new-msg')?.value?.trim();
-  if (!subject) { alert('Ingresa el asunto'); return; }
+  if (!subject) { avisar('Error', 'Ingresa el asunto', '⚠️'); return; }
   const r = await api('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject, message: msg || undefined }) });
   if (r.ok) {
     supportNewMode = false;
@@ -1765,13 +1783,13 @@ async function sendSupportMsg() {
   const fileInput = document.getElementById('support-files');
   const files = Array.from(fileInput?.files || []);
   if (!msg && files.length === 0) return;
-  if (files.length > 4) { alert('Maximo 4 adjuntos'); return; }
-  if (files.find(f => f.size > 3 * 1024 * 1024)) { alert('Cada adjunto no puede superar 3MB'); return; }
+  if (files.length > 4) { avisar('Error', 'Maximo 4 adjuntos', '⚠️'); return; }
+  if (files.find(f => f.size > 3 * 1024 * 1024)) { avisar('Error', 'Cada adjunto no puede superar 3MB', '⚠️'); return; }
 
   const formData = new FormData();
   if (msg && msg.length > 1000) {
     const blob = new Blob([msg], { type: 'text/plain' });
-    if (blob.size > 1024 * 1024) { alert('El texto supera 1MB. Envia un email a soporte.'); return; }
+    if (blob.size > 1024 * 1024) { avisar('Error', 'El texto supera 1MB. Envia un email a soporte.', '⚠️'); return; }
     formData.append('files', blob, 'mensaje-completo.txt');
     formData.append('message', msg.substring(0, 100) + '... (ver adjunto)');
   } else {
@@ -2215,10 +2233,10 @@ async function saveEdit() {
   };
   const r=await api('/api/machines/'+activeModal.machineId,{method:'PUT',body:JSON.stringify(data)});
   if(r.ok){closeModal();loadMachines();}
-  else alert(r.data?.error||'Error al guardar');
+  else avisar('Error', r.data?.error||'Error al guardar', '⚠️');
 }
 async function deleteMachine(id) {
-  if(!confirm('¿Eliminar esta máquina?'))return;
+  if (!await confirmar({ icono: '🗑', titulo: 'Eliminar esta maquina?', mensaje: 'Se borran tambien sus metricas e historial.', ok: 'Eliminar', peligro: true })) return;
   await api('/api/machines/'+id,{method:'DELETE'});
   closeModal();loadMachines();
 }
@@ -2275,7 +2293,7 @@ async function saveDisk() {
   for(const[k,v]of Object.entries(activeModal.alertDisks||{})){if(v>0)ca[k]=v;}
   const r=await api('/api/machines/'+activeModal.machineId,{method:'PUT',body:JSON.stringify({monitored_disks:activeModal.monitored,alert_disks:ca})});
   if(r.ok){closeModal();loadMachines();}
-  else alert(r.data?.error||'Error');
+  else avisar('Error', r.data?.error||'Error', '⚠️');
 }
 
 // ── LOGS MODAL ──
@@ -2435,10 +2453,10 @@ function buildAgentModal() {
 async function saveAgent() {
   const version=document.getElementById('ag-ver').value.trim();
   const url=document.getElementById('ag-url').value.trim();
-  if(!version||!url){alert('Completá versión y URL');return;}
+  if(!version||!url){avisar('Error', 'Completá versión y URL', '⚠️');return;}
   const r=await api('/api/agent/version',{method:'POST',body:JSON.stringify({version,url})});
   if(r.ok){agentInfo={version,url};closeModal();}
-  else alert(r.data?.error||'Error');
+  else avisar('Error', r.data?.error||'Error', '⚠️');
 }
 
 // ── MAP FULL MODAL ──
@@ -2485,7 +2503,7 @@ function exportCSV() {
   fetch(API+'/api/machines/export/csv',{headers:{Authorization:'Bearer '+token}})
     .then(r=>r.blob())
     .then(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='servers.csv';a.click();})
-    .catch(()=>alert('Error al exportar CSV'));
+    .catch(()=>avisar('Error', 'Error al exportar CSV', '⚠️'));
 }
 function exportPDF() {
   window.open(API+'/api/machines/report/pdf?token='+token,'_blank');
@@ -2494,12 +2512,12 @@ function downloadRDP(id) {
   fetch(API+'/api/machines/'+id+'/rdp',{headers:{Authorization:'Bearer '+token}})
     .then(r=>r.blob())
     .then(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='connect.rdp';a.click();})
-    .catch(()=>alert('Error al descargar RDP'));
+    .catch(()=>avisar('Error', 'Error al descargar RDP', '⚠️'));
 }
 async function requestSpeedTest(id) {
   const r=await api('/api/machines/'+id+'/speedtest',{method:'POST'});
-  if(r.ok)alert('Speed test solicitado. Resultado disponible en ~30 segundos.');
-  else alert(r.data?.error||'Error');
+  if(r.ok)avisar('Aviso', 'Speed test solicitado. Resultado disponible en ~30 segundos.', 'ℹ️');
+  else avisar('Error', r.data?.error||'Error', '⚠️');
 }
 
 // ── ATTACH EVENTS (called after render) ──
@@ -2641,8 +2659,8 @@ function renderCmdHistoryModal() {
 // ── BACKUP MODAL ──
 async function requestBackupCheck(id) {
   const res = await api('/api/machines/' + id + '/check-backup', { method: 'POST' });
-  if (res.ok) alert('Chequeo solicitado. Resultado en ~30 segundos.');
-  else alert(res.data?.error || 'Error');
+  if (res.ok) avisar('Aviso', 'Chequeo solicitado. Resultado en ~30 segundos.', 'ℹ️');
+  else avisar('Error', res.data?.error || 'Error', '⚠️');
 }
 async function openBackup(id) {
   activeModal = { type: 'backup', machineId: id, data: null }; render();
@@ -2766,13 +2784,13 @@ function renderSSLList() {
 async function addSSLMonitor() {
   const hostname = document.getElementById('ssl-hostname')?.value?.trim();
   const name = document.getElementById('ssl-name')?.value?.trim();
-  if (!hostname) { alert('Ingresa el dominio'); return; }
+  if (!hostname) { avisar('Error', 'Ingresa el dominio', '⚠️'); return; }
   const r = await api('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name }) });
   if (r.ok) { document.getElementById('ssl-hostname').value = ''; document.getElementById('ssl-name').value = ''; loadSSLMonitors(); }
-  else alert(r.data?.error || 'Error');
+  else avisar('Error', r.data?.error || 'Error', '⚠️');
 }
 async function deleteSSLMonitor(id) {
-  if (!confirm('Eliminar monitor SSL?')) return;
+  if (!await confirmar({ icono: '🗑', titulo: 'Eliminar este monitor SSL?', mensaje: 'Dejas de recibir avisos de vencimiento de ese certificado.', ok: 'Eliminar', peligro: true })) return;
   await api('/api/ssl-monitors/' + id, { method: 'DELETE' });
   loadSSLMonitors();
 }
@@ -2782,7 +2800,7 @@ function editSSLDays(id) {
   const input = prompt('Dias antes del vencimiento para alertar (separados por coma):', current);
   if (input === null) return;
   const days = input.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a,b) => b-a);
-  if (days.length === 0) { alert('Ingresa al menos un numero'); return; }
+  if (days.length === 0) { avisar('Error', 'Ingresa al menos un numero', '⚠️'); return; }
   api('/api/ssl-monitors/' + id, { method: 'PUT', body: JSON.stringify({ alert_days: days }) }).then(() => loadSSLMonitors());
 }
 
@@ -2823,7 +2841,7 @@ async function saveUrlMonitor() {
   closeModal();
   loadUrlMonitors();
 }
-// confirm() y alert() del navegador cortan la pagina con un cartel gris que
+// confirm() y avisar('Aviso', , 'ℹ️') del navegador cortan la pagina con un cartel gris que
 // dice "servereyes-production.up.railway.app dice". Estos son del mismo estilo
 // que el resto y devuelven una promesa, asi que se usan igual de simple.
 let _resolverConfirm = null;
@@ -2944,7 +2962,7 @@ async function toggleUrlMonitor(id, currentActive) {
   loadUrlMonitors();
 }
 async function deleteUrlMonitor(id) {
-  if (!confirm('¿Eliminar este monitor?')) return;
+  if (!await confirmar({ icono: '🗑', titulo: 'Eliminar este monitor?', mensaje: 'Se borra tambien su historial de chequeos.', ok: 'Eliminar', peligro: true })) return;
   await api('/api/url-monitors/' + id, { method: 'DELETE' });
   loadUrlMonitors();
 }
@@ -2996,13 +3014,13 @@ async function saveMaintenance() {
     end_time: document.getElementById('mw-end')?.value,
     repeat: document.getElementById('mw-repeat')?.value || 'none'
   };
-  if (!data.start_time || !data.end_time) { alert('Horario requerido'); return; }
+  if (!data.start_time || !data.end_time) { avisar('Error', 'Horario requerido', '⚠️'); return; }
   const r = await api('/api/maintenance', { method: 'POST', body: JSON.stringify(data) });
   if (r.ok) { closeModal(); loadMaintenance(); render(); }
-  else alert(r.data?.error || 'Error');
+  else avisar('Error', r.data?.error || 'Error', '⚠️');
 }
 async function deleteMaintenance(id) {
-  if (!confirm('¿Eliminar ventana de mantenimiento?')) return;
+  if (!await confirmar({ icono: '🗑', titulo: 'Eliminar esta ventana?', mensaje: 'Durante ese periodo volveras a recibir alertas.', ok: 'Eliminar', peligro: true })) return;
   await api('/api/maintenance/' + id, { method: 'DELETE' });
   loadMaintenance();
   render();
@@ -3060,8 +3078,8 @@ function buildAuditSection() {
 // ── WAKE-ON-LAN ──
 async function sendWol(id) {
   const r = await api('/api/machines/' + id + '/wol', { method: 'POST' });
-  if (r.ok) alert(r.data.message || 'Magic packet enviado');
-  else alert(r.data?.error || 'Error al enviar WOL');
+  if (r.ok) avisar('Aviso', r.data.message || 'Magic packet enviado', 'ℹ️');
+  else avisar('Error', r.data?.error || 'Error al enviar WOL', '⚠️');
 }
 
 function buildAddUrlModal() {
@@ -3132,14 +3150,14 @@ async function saveSslMonitor() {
   const hostname = document.getElementById('sm-hostname')?.value?.trim();
   const name = document.getElementById('sm-name')?.value?.trim();
   const diasTxt = document.getElementById('sm-dias')?.value || '';
-  if (!hostname) { alert('Ingresa el dominio'); return; }
+  if (!hostname) { avisar('Error', 'Ingresa el dominio', '⚠️'); return; }
   const alert_days = diasTxt.split(',').map(x => parseInt(x.trim())).filter(n => !isNaN(n) && n > 0).sort((a,b) => b-a);
-  if (alert_days.length === 0) { alert('Ingresa al menos un numero de dias'); return; }
+  if (alert_days.length === 0) { avisar('Error', 'Ingresa al menos un numero de dias', '⚠️'); return; }
   const r = await api('/api/ssl-monitors/' + activeModal.id, {
     method: 'PUT', body: JSON.stringify({ hostname, name: name || null, alert_days })
   });
   if (r.ok) { closeModal(); loadSSLMonitors(); }
-  else alert(r.data?.error || 'Error');
+  else avisar('Error', r.data?.error || 'Error', '⚠️');
 }
 
 // ── Pasar de una lista a la otra ─────────────────────────────────────────────
