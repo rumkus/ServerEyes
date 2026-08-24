@@ -94,6 +94,44 @@ function descifrarSecreto(valor) {
   return null;
 }
 
+// Destinatarios extra de un monitor. Es correo saliente hacia terceros, asi
+// que se valida el formato, se normaliza y se limita la cantidad.
+const MAX_CORREOS_POR_MONITOR = 10;
+function normalizarCorreos(lista) {
+  if (!Array.isArray(lista)) return null;
+  const limpios = [];
+  for (const bruto of lista) {
+    const e = String(bruto || '').trim().toLowerCase();
+    if (!e) continue;
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e)) return { error: `Correo invalido: ${e}` };
+    if (!limpios.includes(e)) limpios.push(e);
+  }
+  if (limpios.length > MAX_CORREOS_POR_MONITOR) return { error: `Maximo ${MAX_CORREOS_POR_MONITOR} correos por monitor` };
+  return limpios;
+}
+
+// Manda el aviso a los destinatarios extra, usando el SMTP del dueño si lo
+// tiene configurado. Nunca corta el flujo: si un envio falla, se loguea.
+async function avisarAExtras(ownerId, correos, asunto, cuerpoHtml) {
+  if (!Array.isArray(correos) || correos.length === 0) return;
+  try {
+    const q = await pool.query('SELECT email, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [ownerId]);
+    const u = q.rows[0];
+    if (!u) return;
+    for (const destino of correos) {
+      try {
+        if (u.smtp_user && u.smtp_pass) await sendEmailWithUserSMTP(u, asunto, cuerpoHtml, destino);
+        else await sendEmail(destino, asunto, cuerpoHtml);
+      } catch (e) {
+        console.error(`[AVISO] No se pudo avisar a ${destino}: ${e.message}`);
+      }
+    }
+    console.log(`[AVISO] ${asunto} -> ${correos.length} destinatario(s) extra`);
+  } catch (e) {
+    console.error('[AVISO] Error avisando a extras:', e.message);
+  }
+}
+
 // Email (Nodemailer)
 let emailTransporter = null;
 try {
@@ -571,6 +609,11 @@ async function initDB() {
       UNIQUE(url_id, user_id)
     )
   `);
+
+  // Destinatarios extra por monitor: al cliente dueño de ese sitio le llegan
+  // los avisos de su propio sitio, sin darle acceso a la cuenta.
+  await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
+  await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
 
   // Historial de chequeos de URL: sin esto no habia forma de saber que fallo,
   // porque last_error se borra en el primer chequeo exitoso posterior.
@@ -2045,6 +2088,10 @@ setInterval(async () => {
       const matchedDay = alertDays.sort((a, b) => b - a).find(d => result.days_left <= d);
       if (matchedDay !== undefined && matchedDay !== mon.last_alerted_days) {
         sendPush(mon.user_id, `🔒 SSL: ${mon.name || mon.hostname}`, `Certificado vence en ${result.days_left} dias (${result.expires_at.toLocaleDateString('es')})`, { type: 'ssl_alert' });
+        avisarAExtras(mon.user_id, mon.notify_emails, `🔒 El certificado de ${mon.name || mon.hostname} vence en ${result.days_left} dias`,
+          `<p style="font-size:15px;color:#333">El certificado SSL de <strong>${mon.hostname}</strong> vence en <strong>${result.days_left} dias</strong>.</p>
+           <p style="color:#666">Fecha de vencimiento: ${result.expires_at.toLocaleDateString('es')}<br>Emisor: ${result.issuer || '?'}</p>
+           <p style="color:#666">Conviene renovarlo antes para que los visitantes no vean la advertencia del navegador.</p>`);
         await pool.query('UPDATE ssl_monitors SET last_alerted_days = $1 WHERE id = $2', [matchedDay, mon.id]);
         console.log(`[SSL] Alerta: ${mon.hostname} vence en ${result.days_left} dias`);
       }
@@ -3318,13 +3365,16 @@ app.get('/api/ssl-monitors', authenticateToken, async (req, res) => {
 
 app.post('/api/ssl-monitors', authenticateToken, async (req, res) => {
   try {
-    const { hostname, name, alert_days } = req.body;
+    const { hostname, name, alert_days, notify_emails } = req.body;
     if (!hostname) return res.status(400).json({ error: 'hostname requerido' });
     const h = hostname.replace(/^https?:\/\//, '').split('/')[0];
     const days = alert_days || [30, 14, 7, 1];
+    const correos = notify_emails === undefined ? [] : normalizarCorreos(notify_emails);
+    if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
+    if (correos.error) return res.status(400).json({ error: correos.error });
     const result = await pool.query(
-      'INSERT INTO ssl_monitors (user_id, hostname, name, alert_days) VALUES ($1, $2, $3, $4) RETURNING *',
-      [req.user.id, h, name || h, JSON.stringify(days)]
+      'INSERT INTO ssl_monitors (user_id, hostname, name, alert_days, notify_emails) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [req.user.id, h, name || h, JSON.stringify(days), JSON.stringify(correos)]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
@@ -3339,7 +3389,7 @@ app.delete('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
 
 app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
   try {
-    const { alert_days, name, hostname } = req.body;
+    const { alert_days, name, hostname, notify_emails } = req.body;
     const fields = [];
     const vals = [];
     let idx = 1;
@@ -3354,9 +3404,15 @@ app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
       // proximo ciclo lo vuelva a mirar en vez de mostrar datos de otro dominio.
       fields.push('last_check = NULL', 'last_days_left = NULL', 'last_issuer = NULL', 'last_expiry = NULL', 'last_status = NULL', 'last_alerted_days = NULL');
     }
+    if (notify_emails !== undefined) {
+      const correos = normalizarCorreos(notify_emails);
+      if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
+      if (correos.error) return res.status(400).json({ error: correos.error });
+      fields.push(`notify_emails = ${idx++}`); vals.push(JSON.stringify(correos));
+    }
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
     vals.push(req.params.id, req.user.id);
-    await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx}`, vals);
+    await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = ${idx++} AND user_id = ${idx}`, vals);
     res.json({ message: 'Actualizado' });
   } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
@@ -3775,11 +3831,14 @@ app.get('/api/url-monitors', authenticateToken, async (req, res) => {
 
 app.post('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
-    const { url, name, method, expected_status, timeout_ms, interval_seconds } = req.body;
+    const { url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails } = req.body;
     if (!url) return res.status(400).json({ error: 'url requerido' });
+    const correos = notify_emails === undefined ? [] : normalizarCorreos(notify_emails);
+    if (correos && correos.error) return res.status(400).json({ error: correos.error });
+    if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
     const result = await pool.query(
-      'INSERT INTO url_monitors (user_id, url, name, method, expected_status, timeout_ms, interval_seconds) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [req.user.id, url, name || url, method || 'GET', expected_status || 200, timeout_ms || 10000, interval_seconds || 300]
+      'INSERT INTO url_monitors (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+      [req.user.id, url, name || url, method || 'GET', expected_status || 200, timeout_ms || 10000, interval_seconds || 300, JSON.stringify(correos)]
     );
     logAudit(req.user.id, 'create_url_monitor', 'url_monitor', result.rows[0].id, url, req.ip);
     res.json(result.rows[0]);
@@ -3790,13 +3849,21 @@ app.post('/api/url-monitors', authenticateToken, async (req, res) => {
 
 app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
   try {
-    const { url, name, method, expected_status, timeout_ms, interval_seconds, is_active } = req.body;
+    const { url, name, method, expected_status, timeout_ms, interval_seconds, is_active, notify_emails } = req.body;
+    let correos = null;
+    if (notify_emails !== undefined) {
+      correos = normalizarCorreos(notify_emails);
+      if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
+      if (correos.error) return res.status(400).json({ error: correos.error });
+    }
     const result = await pool.query(
       `UPDATE url_monitors SET url=COALESCE($1,url), name=COALESCE($2,name), method=COALESCE($3,method),
        expected_status=COALESCE($4,expected_status), timeout_ms=COALESCE($5,timeout_ms),
-       interval_seconds=COALESCE($6,interval_seconds), is_active=COALESCE($7,is_active)
+       interval_seconds=COALESCE($6,interval_seconds), is_active=COALESCE($7,is_active),
+       notify_emails=COALESCE($10,notify_emails)
        WHERE id=$8 AND user_id=$9 RETURNING *`,
-      [url, name, method, expected_status, timeout_ms, interval_seconds, is_active, req.params.id, req.user.id]
+      [url, name, method, expected_status, timeout_ms, interval_seconds, is_active, req.params.id, req.user.id,
+       correos === null ? null : JSON.stringify(correos)]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
     res.json(result.rows[0]);
@@ -3977,8 +4044,14 @@ async function checkUrlMonitor(mon) {
 
   if (notify && isUp) {
     sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${probe.ms}ms)`, { type: 'url_up' });
+    avisarAExtras(mon.owner_id, mon.notify_emails, `✅ ${mon.name || mon.url} volvio a funcionar`,
+      `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> volvio a responder normalmente.</p>
+       <p style="color:#666">Tiempo de respuesta: ${probe.ms}ms<br>URL: ${mon.url}</p>`);
   } else if (notify && !isUp) {
     sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url}: ${lastError} (${attempts} intentos)`, { type: 'url_down' });
+    avisarAExtras(mon.owner_id, mon.notify_emails, `🚨 ${mon.name || mon.url} no responde`,
+      `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> no esta respondiendo.</p>
+       <p style="color:#666">Detalle: ${lastError}<br>URL: ${mon.url}<br>Se reintento ${attempts} veces antes de avisar.</p>`);
   }
   if (!isUp) {
     console.log(`[URL-MONITOR] CAIDA ${mon.url} -> ${lastError} tras ${attempts} intentos`);

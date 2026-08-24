@@ -272,6 +272,8 @@ function AppContent() {
   const [urlVigilarSsl, setUrlVigilarSsl] = useState(true);
   const [sslEditando, setSslEditando] = useState<any>(null);
   const [sslDias, setSslDias] = useState('30, 14, 7, 1');
+  const [urlCorreos, setUrlCorreos] = useState('');
+  const [sslCorreos, setSslCorreos] = useState('');
   const [urlName, setUrlName] = useState('');
   const [urlUrl, setUrlUrl] = useState('');
   const [urlMethod, setUrlMethod] = useState('GET');
@@ -960,6 +962,9 @@ function AppContent() {
     } catch {}
   };
 
+  // "a@b.com, c@d.com" -> ['a@b.com','c@d.com']. El servidor valida el formato.
+  const correosDeTexto = (txt: string) => txt.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+
   // Pasar de una lista a la otra. Crean el equivalente sin borrar el original.
   const vigilarSslDeUrl = async (u: any) => {
     let hostname: string | null = null;
@@ -1031,6 +1036,13 @@ function AppContent() {
               </TouchableOpacity>
             ))}
           </View>
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Avisar tambien a (opcional)</Text>
+          <TextInput style={s.input} value={urlCorreos} onChangeText={setUrlCorreos}
+            placeholder="cliente@empresa.com, soporte@empresa.com" placeholderTextColor="#555"
+            autoCapitalize="none" keyboardType="email-address" />
+          <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14}}>
+            Ademas de vos, estos reciben el aviso por mail cuando el sitio se cae o vuelve.
+          </Text>
           {!urlEditId && (
             <TouchableOpacity onPress={() => setUrlVigilarSsl(!urlVigilarSsl)}
               style={{flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, paddingRight: 8}}>
@@ -1051,7 +1063,8 @@ function AppContent() {
             const datos = {
               url: urlUrl.trim(), name: urlName.trim() || null, method: 'GET',
               expected_status: 200, timeout_ms: 10000,
-              interval_seconds: parseInt(urlInterval) || 300
+              interval_seconds: parseInt(urlInterval) || 300,
+              notify_emails: correosDeTexto(urlCorreos)
             };
             const res = urlEditId
               ? await apiRequest(`/api/url-monitors/${urlEditId}`, { method: 'PUT', body: JSON.stringify(datos) }, token)
@@ -1188,6 +1201,9 @@ function AppContent() {
                   <Text style={{color: '#555', fontSize: 12, marginLeft: 'auto'}}>{u.last_check ? timeSince(u.last_check) : 'Nunca'}</Text>
                 </View>
                 {u.last_error && <Text style={{color: '#ff5252', fontSize: 11, marginTop: 4}}>{u.last_error}</Text>}
+                {(u.notify_emails || []).length > 0 && (
+                  <Text style={{color: th.sub, fontSize: 10, marginTop: 4}}>{'✉'} avisa a {(u.notify_emails || []).length}: {(u.notify_emails || []).join(', ')}</Text>
+                )}
               </View>
               <View style={{flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a2a3a'}}>
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center'}} onPress={() => abrirUrlHistory(u)}>
@@ -1198,6 +1214,7 @@ function AppContent() {
                     setUrlEditId(u.id);
                     setUrlUrl(u.url);
                     setUrlName(u.name || '');
+                    setUrlCorreos((u.notify_emails || []).join(', '));
                     setUrlInterval(String(u.interval_seconds || 300));
                     setShowAddUrl(true);
                   }}>
@@ -1248,7 +1265,7 @@ function AppContent() {
           ))}
         </ScrollView>
         <TouchableOpacity style={{position: 'absolute', bottom: 28, left: 24, width: 50, height: 50, borderRadius: 25, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
-          onPress={() => { setUrlEditId(null); setUrlVigilarSsl(true); setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
+          onPress={() => { setUrlEditId(null); setUrlVigilarSsl(true); setUrlCorreos(''); setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
           <Text style={{fontSize: 24, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
@@ -1980,13 +1997,20 @@ function AppContent() {
           <TextInput style={s.input} value={sslName} onChangeText={setSslName} placeholder="Mi sitio web" placeholderTextColor="#555" />
           <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Avisar estos dias antes de vencer</Text>
           <TextInput style={s.input} value={sslDias} onChangeText={setSslDias} placeholder="30, 14, 7, 1" placeholderTextColor="#555" keyboardType="numbers-and-punctuation" />
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Avisar tambien a (opcional)</Text>
+          <TextInput style={s.input} value={sslCorreos} onChangeText={setSslCorreos}
+            placeholder="cliente@empresa.com" placeholderTextColor="#555"
+            autoCapitalize="none" keyboardType="email-address" />
+          <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14}}>
+            Ademas de vos, estos reciben el aviso de vencimiento por mail.
+          </Text>
           <TouchableOpacity style={s.btn} onPress={async () => {
             const host = sslHostname.trim().replace(/^https?:\/\//i, '').split('/')[0];
             if (!host) { showModal('⚠️', 'Error', 'Dominio requerido'); return; }
             const dias = sslDias.split(',').map(x => parseInt(x.trim())).filter(n => !isNaN(n) && n > 0).sort((a, b) => b - a);
             if (dias.length === 0) { showModal('⚠️', 'Error', 'Ingresa al menos un numero de dias'); return; }
             const res = await apiRequest(`/api/ssl-monitors/${sslEditando.id}`, { method: 'PUT', body: JSON.stringify({
-              hostname: host, name: sslName.trim() || null, alert_days: dias
+              hostname: host, name: sslName.trim() || null, alert_days: dias, notify_emails: correosDeTexto(sslCorreos)
             }) }, token);
             if (res.ok) { setSslEditando(null); loadSSLMonitors(); }
             else showModal('⚠️', 'Error', res.data?.error || 'Error');
@@ -2068,6 +2092,9 @@ function AppContent() {
                   <Text style={{color: th.sub, fontSize: 11}}>Emisor: {mon.last_issuer || '?'}</Text>
                   {mon.last_expiry && <Text style={{color: th.sub, fontSize: 11}}>Vence: {new Date(mon.last_expiry).toLocaleDateString('es')}</Text>}
                 </View>
+                {(mon.notify_emails || []).length > 0 && (
+                  <Text style={{color: th.sub, fontSize: 10, marginBottom: 4}}>{'✉'} avisa a {(mon.notify_emails || []).length}: {(mon.notify_emails || []).join(', ')}</Text>
+                )}
                 <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8}}>
                   <Text style={{color: th.sub, fontSize: 10}}>Alertas:</Text>
                   {days.map((d: number, i: number) => (
@@ -2084,6 +2111,7 @@ function AppContent() {
                       setSslHostname(mon.hostname);
                       setSslName(mon.name || '');
                       setSslDias((mon.alert_days || [30, 14, 7, 1]).join(', '));
+                      setSslCorreos((mon.notify_emails || []).join(', '));
                       setSslEditando(mon);
                     }}>
                     <Text style={{color: '#00d4ff', fontSize: 12}}>✏ Editar</Text>
@@ -4069,7 +4097,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.4.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.5.0</Text>
             </View>
           </View>
         </TouchableOpacity>
