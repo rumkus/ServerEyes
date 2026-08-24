@@ -1479,6 +1479,7 @@ function buildModal() {
     case 'addurl': return buildAddUrlModal();
     case 'urlhistory': return buildUrlHistoryModal();
     case 'editssl': return buildEditSslModal();
+    case 'confirmar': return buildConfirmModal();
     case 'addmaintenance': return buildAddMaintenanceModal();
     case 'sla': return buildSlaModal();
     default: return '';
@@ -2678,7 +2679,7 @@ async function loadUrlMonitors(silent) {
     const newJson = JSON.stringify(r.data);
     const changed = newJson !== _lastUrlMonitorsJson;
     _lastUrlMonitorsJson = newJson;
-    urlMonitors = r.data;
+    urlMonitors = Array.isArray(r.data) ? r.data : [];
     if (!silent && changed && !activeModal && !notifDropdownOpen && activeNav !== 'ajustes') renderSiNoEstasEscribiendo();
   }
 }
@@ -2688,10 +2689,13 @@ function buildUrlsView() {
       <div class="panel-title"><span class="dot" style="background:#2196F3"></span>Monitoreo de URLs / HTTP<button class="help-btn" onclick="event.stopPropagation();showHelp('urls',this)">?</button></div>
       <button class="modal-btn sm" onclick="openAddUrlMonitor()" style="margin-bottom:14px">+ Agregar URL</button>
       ${urlMonitors.length===0?'<p style="text-align:center;color:#ccc;padding:30px 0">Sin monitores configurados. Agregá una URL para empezar.</p>':
-      `<table class="server-table"><thead><tr>
+      `${barraSeleccion(urlsSeleccionadas.size, '🔒 Vigilar sus certificados SSL', 'crearSslDesdeUrl([...urlsSeleccionadas])', 'marcarTodasUrls(false)')}
+      <table class="server-table"><thead><tr>
+        <th style="width:28px"><input type="checkbox" onchange="marcarTodasUrls(this.checked)" ${urlsSeleccionadas.size === urlMonitors.length && urlMonitors.length > 0 ? 'checked' : ''} title="Seleccionar todas"/></th>
         <th></th><th>Nombre</th><th>URL</th><th>Método</th><th>Respuesta</th><th>Ultimo chequeo</th><th>Estado</th><th></th>
       </tr></thead><tbody>
       ${urlMonitors.map(u=>`<tr>
+        <td onclick="event.stopPropagation()"><input type="checkbox" onchange="marcarUrl(${u.id}, this.checked)" ${urlsSeleccionadas.has(u.id) ? 'checked' : ''}/></td>
         <td><span class="status-dot ${u.is_up?'on':'off'}"></span></td>
         <td><strong style="font-size:13px">${u.name||u.url}</strong></td>
         <td style="font-size:12px;color:#666;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.url}</td>
@@ -2729,17 +2733,21 @@ function buildUrlsView() {
 let sslMonitors = [];
 async function loadSSLMonitors() {
   const r = await api('/api/ssl-monitors');
-  if (r.ok) { sslMonitors = r.data; renderSSLList(); }
+  // Sin el chequeo, una respuesta que no sea lista deja sslMonitors como un
+  // objeto y rompe todo lo que despues hace .some() o .map() sobre el.
+  if (r.ok && Array.isArray(r.data)) { sslMonitors = r.data; renderSSLList(); }
 }
 function renderSSLList() {
   const el = document.getElementById('ssl-list');
   if (!el) return;
   if (sslMonitors.length === 0) { el.innerHTML = '<p style="color:#888;text-align:center;font-size:13px">Sin certificados monitoreados</p>'; return; }
-  el.innerHTML = sslMonitors.map(s => {
+  el.innerHTML = barraSeleccion(sslSeleccionados.size, '🌐 Vigilar que respondan', 'crearUrlDesdeSsl([...sslSeleccionados])', 'marcarTodosSsl(false)') +
+    sslMonitors.map(s => {
     const color = s.last_status === 'ok' ? '#4CAF50' : s.last_status === 'warning' ? '#FF9800' : s.last_status === 'expired' ? '#F44336' : '#888';
     const icon = s.last_status === 'ok' ? '🟢' : s.last_status === 'warning' ? '🟡' : s.last_status === 'expired' ? '🔴' : '⏳';
     const days = s.alert_days || [30,14,7,1];
     return `<div style="background:var(--bg);border-left:3px solid ${color};border-radius:0 10px 10px 0;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+      <input type="checkbox" onchange="marcarSsl(${s.id}, this.checked)" ${sslSeleccionados.has(s.id) ? 'checked' : ''} style="margin:0"/>
       <span style="font-size:16px">${icon}</span>
       <div style="flex:1">
         <div style="font-weight:700;font-size:13px;color:var(--text)">${s.name || s.hostname}</div>
@@ -2800,6 +2808,47 @@ async function saveUrlMonitor() {
   if (r.ok) { closeModal(); loadUrlMonitors(); }
   else alert(r.data?.error || 'Error');
 }
+// confirm() y alert() del navegador cortan la pagina con un cartel gris que
+// dice "servereyes-production.up.railway.app dice". Estos son del mismo estilo
+// que el resto y devuelven una promesa, asi que se usan igual de simple.
+let _resolverConfirm = null;
+function confirmar(op) {
+  return new Promise(resolve => {
+    _resolverConfirm = resolve;
+    activeModal = { type: 'confirmar', ...op };
+    pauseRefresh();
+    render();
+  });
+}
+function avisar(titulo, mensaje, icono) {
+  return confirmar({ titulo, mensaje, icono: icono || 'ℹ️', soloAceptar: true });
+}
+function responderConfirm(valor) {
+  const r = _resolverConfirm;
+  _resolverConfirm = null;
+  activeModal = null;
+  resumeRefresh();
+  render();
+  if (r) r(valor);
+}
+function buildConfirmModal() {
+  const m = activeModal;
+  const colorOk = m.peligro ? '#F44336' : '#2196F3';
+  return `<div class="modal-overlay" onmousedown="if(event.target===this)responderConfirm(false)">
+  <div class="modal-box" style="max-width:420px">
+    <div style="text-align:center;padding:6px 0 2px">
+      <div style="font-size:38px;line-height:1">${m.icono || '❓'}</div>
+      <h2 style="margin:10px 0 0;font-size:17px;color:var(--text)">${escHtml(m.titulo || '')}</h2>
+    </div>
+    ${m.mensaje ? `<p style="text-align:center;color:#888;font-size:14px;margin:10px 0 0;line-height:1.5">${escHtml(m.mensaje)}</p>` : ''}
+    ${m.detalle ? `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12px;color:#999;line-height:1.5">${m.detalle}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:18px">
+      ${m.soloAceptar ? '' : `<button class="modal-btn ghost" style="flex:1;margin:0" onclick="responderConfirm(false)">${escHtml(m.cancelar || 'Cancelar')}</button>`}
+      <button class="modal-btn" style="flex:1;margin:0;background:${colorOk}" onclick="responderConfirm(true)">${escHtml(m.ok || 'Aceptar')}</button>
+    </div>
+  </div></div>`;
+}
+
 function escHtml(t) {
   return String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
@@ -3075,29 +3124,94 @@ async function saveSslMonitor() {
 // ── Pasar de una lista a la otra ─────────────────────────────────────────────
 // Crean el monitor equivalente sin borrar el original: si despues no lo queres,
 // lo eliminas de la otra lista.
-async function crearSslDesdeUrl(id) {
-  const u = urlMonitors.find(x => x.id === id);
-  if (!u) return;
-  let hostname;
-  try { hostname = new URL(u.url).hostname; } catch (e) { alert('No pude sacar el dominio de esa URL'); return; }
-  if (sslMonitors.some(s => s.hostname === hostname)) { alert('Ya tenes un monitor SSL para ' + hostname); return; }
-  if (!confirm('Agregar un monitor de certificado SSL para ' + hostname + '?\n\nEl monitor de URL queda como esta.')) return;
-  const r = await api('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name: u.name || hostname }) });
-  if (r.ok) { closeModal(); activeNav = 'urls'; await loadSSLMonitors(); render(); }
-  else alert(r.data?.error || 'Error');
-}
-async function crearUrlDesdeSsl(id) {
-  const m = sslMonitors.find(x => x.id === id);
-  if (!m) return;
-  const url = 'https://' + m.hostname + '/';
-  if (urlMonitors.some(u => u.url === url)) { alert('Ya tenes un monitor de URL para ' + url); return; }
-  if (!confirm('Agregar un monitor de URL para ' + url + '?\n\nEl monitor SSL queda como esta.')) return;
-  const r = await api('/api/url-monitors', {
-    method: 'POST',
-    body: JSON.stringify({ url, name: m.name || m.hostname, method: 'GET', expected_status: 200, timeout_ms: 10000, interval_seconds: 300 })
+// Aceptan uno o varios ids: el boton de la fila manda uno, el de la barra de
+// seleccion manda todos los tildados.
+async function crearSslDesdeUrl(ids) {
+  const lista = (Array.isArray(ids) ? ids : [ids]).map(id => urlMonitors.find(x => x.id === id)).filter(Boolean);
+  const nuevos = [], yaEstaban = [], sinDominio = [];
+  for (const u of lista) {
+    let hostname;
+    try { hostname = new URL(u.url).hostname; } catch (e) { sinDominio.push(u.url); continue; }
+    if (sslMonitors.some(x => x.hostname === hostname) || nuevos.some(x => x.hostname === hostname)) { yaEstaban.push(hostname); continue; }
+    nuevos.push({ hostname, name: u.name || hostname });
+  }
+  if (nuevos.length === 0) {
+    await avisar('Nada para agregar',
+      yaEstaban.length ? 'Ya tenes monitor SSL de ' + yaEstaban.join(', ') : 'No pude sacar el dominio de ' + sinDominio.join(', '), '🔒');
+    return;
+  }
+  const ok = await confirmar({
+    icono: '🔒', titulo: nuevos.length === 1 ? 'Vigilar su certificado' : `Vigilar ${nuevos.length} certificados`,
+    mensaje: 'Se agregan a Monitoreo de Certificados SSL. Los monitores de URL quedan como estan.',
+    detalle: nuevos.map(n => escHtml(n.hostname)).join('<br>') +
+      (yaEstaban.length ? `<div style="margin-top:8px;color:#FF9800">Ya estaban: ${escHtml(yaEstaban.join(', '))}</div>` : ''),
+    ok: 'Agregar'
   });
-  if (r.ok) { closeModal(); await loadUrlMonitors(); render(); }
-  else alert(r.data?.error || 'Error');
+  if (!ok) return;
+  let fallaron = 0;
+  for (const n of nuevos) {
+    const r = await api('/api/ssl-monitors', { method: 'POST', body: JSON.stringify(n) });
+    if (!r.ok) fallaron++;
+  }
+  urlsSeleccionadas.clear();
+  await loadSSLMonitors();
+  render();
+  if (fallaron) await avisar('Algunos no se pudieron agregar', `${fallaron} de ${nuevos.length} fallaron`, '⚠️');
+}
+
+async function crearUrlDesdeSsl(ids) {
+  const lista = (Array.isArray(ids) ? ids : [ids]).map(id => sslMonitors.find(x => x.id === id)).filter(Boolean);
+  const nuevos = [], yaEstaban = [];
+  for (const m of lista) {
+    const url = 'https://' + m.hostname + '/';
+    if (urlMonitors.some(u => u.url === url) || nuevos.some(n => n.url === url)) { yaEstaban.push(m.hostname); continue; }
+    nuevos.push({ url, name: m.name || m.hostname, method: 'GET', expected_status: 200, timeout_ms: 10000, interval_seconds: 300 });
+  }
+  if (nuevos.length === 0) {
+    await avisar('Nada para agregar', 'Ya tenes monitor de URL de ' + yaEstaban.join(', '), '🌐');
+    return;
+  }
+  const ok = await confirmar({
+    icono: '🌐', titulo: nuevos.length === 1 ? 'Vigilar que responda' : `Vigilar ${nuevos.length} sitios`,
+    mensaje: 'Se agregan a Monitoreo de URLs, chequeando cada 5 minutos. Los monitores SSL quedan como estan.',
+    detalle: nuevos.map(n => escHtml(n.url)).join('<br>') +
+      (yaEstaban.length ? `<div style="margin-top:8px;color:#FF9800">Ya estaban: ${escHtml(yaEstaban.join(', '))}</div>` : ''),
+    ok: 'Agregar'
+  });
+  if (!ok) return;
+  let fallaron = 0;
+  for (const n of nuevos) {
+    const r = await api('/api/url-monitors', { method: 'POST', body: JSON.stringify(n) });
+    if (!r.ok) fallaron++;
+  }
+  sslSeleccionados.clear();
+  await loadUrlMonitors();
+  render();
+  if (fallaron) await avisar('Algunos no se pudieron agregar', `${fallaron} de ${nuevos.length} fallaron`, '⚠️');
+}
+
+// ── Seleccion multiple ──────────────────────────────────────────────────────
+let urlsSeleccionadas = new Set();
+let sslSeleccionados = new Set();
+function marcarUrl(id, tildado) { tildado ? urlsSeleccionadas.add(id) : urlsSeleccionadas.delete(id); render(); }
+function marcarSsl(id, tildado) { tildado ? sslSeleccionados.add(id) : sslSeleccionados.delete(id); renderSSLList(); }
+function marcarTodasUrls(tildado) {
+  urlsSeleccionadas.clear();
+  if (tildado) urlMonitors.forEach(u => urlsSeleccionadas.add(u.id));
+  render();
+}
+function marcarTodosSsl(tildado) {
+  sslSeleccionados.clear();
+  if (tildado) sslMonitors.forEach(m => sslSeleccionados.add(m.id));
+  renderSSLList();
+}
+function barraSeleccion(cantidad, texto, accion, limpiar) {
+  if (cantidad === 0) return '';
+  return `<div style="display:flex;align-items:center;gap:10px;background:var(--bg);border-radius:8px;padding:8px 12px;margin-bottom:10px">
+    <strong style="font-size:13px;color:var(--text)">${cantidad} seleccionada${cantidad > 1 ? 's' : ''}</strong>
+    <button class="modal-btn sm" style="margin-top:0;padding:5px 12px;font-size:12px;border-radius:6px" onclick="${accion}">${texto}</button>
+    <button class="modal-btn sm ghost" style="margin-top:0;padding:5px 10px;font-size:12px;border-radius:6px" onclick="${limpiar}">Limpiar</button>
+  </div>`;
 }
 
 function buildAddMaintenanceModal() {
