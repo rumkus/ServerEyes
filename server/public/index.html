@@ -2800,13 +2800,28 @@ async function saveUrlMonitor() {
     timeout_ms: parseInt(document.getElementById('um-timeout')?.value) || 10000,
     interval_seconds: parseInt(document.getElementById('um-interval')?.value) || 300
   };
-  if (!data.url) { alert('URL requerida'); return; }
+  if (!data.url) { await avisar('Falta la URL', 'Escribi la direccion del sitio que queres vigilar', '🌐'); return; }
   const editando = activeModal && activeModal.editId;
+  const vigilarSsl = !editando && document.getElementById('um-ssl')?.checked;
   const r = editando
     ? await api('/api/url-monitors/' + editando, { method: 'PUT', body: JSON.stringify(data) })
     : await api('/api/url-monitors', { method: 'POST', body: JSON.stringify(data) });
-  if (r.ok) { closeModal(); loadUrlMonitors(); }
-  else alert(r.data?.error || 'Error');
+  if (!r.ok) { await avisar('No se pudo guardar', r.data?.error || 'Error', '⚠️'); return; }
+
+  // El chequeo de URL ignora los errores de certificado (rejectUnauthorized:
+  // false en el servidor) para no reportar caidas falsas. La contrapartida es
+  // que sin un monitor SSL nadie avisa cuando el certificado vence, asi que lo
+  // creamos junto con la URL salvo que lo destildes.
+  if (vigilarSsl) {
+    let hostname = null;
+    try { const u = new URL(data.url); if (u.protocol === 'https:') hostname = u.hostname; } catch (e) {}
+    if (hostname && !sslMonitors.some(x => x.hostname === hostname)) {
+      await api('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name: data.name || hostname }) });
+      await loadSSLMonitors();
+    }
+  }
+  closeModal();
+  loadUrlMonitors();
 }
 // confirm() y alert() del navegador cortan la pagina con un cartel gris que
 // dice "servereyes-production.up.railway.app dice". Estos son del mismo estilo
@@ -3070,6 +3085,12 @@ function buildAddUrlModal() {
     <input type="hidden" id="um-method" value="${m ? escHtml(m.method || 'GET') : 'GET'}"/>
     <input type="hidden" id="um-status" value="${m ? (m.expected_status || 200) : 200}"/>
     <input type="hidden" id="um-timeout" value="${m ? (m.timeout_ms || 10000) : 10000}"/>
+    ${m ? '' : `<label style="display:flex;align-items:flex-start;gap:8px;margin:4px 0 12px;cursor:pointer">
+      <input type="checkbox" id="um-ssl" checked style="margin-top:2px"/>
+      <span style="font-size:13px;color:var(--text);line-height:1.4">Vigilar tambien su certificado SSL
+        <span style="display:block;font-size:11px;color:#888">El chequeo de URL ignora los problemas de certificado a proposito, asi que sin esto un certificado vencido no dispara ninguna alerta.</span>
+      </span>
+    </label>`}
     <button class="modal-btn" onclick="saveUrlMonitor()">${m ? 'Guardar cambios' : 'Agregar monitor'}</button>
     ${m ? `<button class="modal-btn ghost" onclick="crearSslDesdeUrl(${m.id})">🔒 Vigilar tambien su certificado SSL</button>` : ''}
     <button class="modal-btn ghost" onclick="closeModal()">Cancelar</button>
