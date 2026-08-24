@@ -268,6 +268,10 @@ function AppContent() {
   const [urlHistoryLoading, setUrlHistoryLoading] = useState(false);
   const [urlHistorySoloFallos, setUrlHistorySoloFallos] = useState(false);
   const [showAddUrl, setShowAddUrl] = useState(false);
+  const [urlEditId, setUrlEditId] = useState<number | null>(null);   // null = agregar
+  const [urlVigilarSsl, setUrlVigilarSsl] = useState(true);
+  const [sslEditando, setSslEditando] = useState<any>(null);
+  const [sslDias, setSslDias] = useState('30, 14, 7, 1');
   const [urlName, setUrlName] = useState('');
   const [urlUrl, setUrlUrl] = useState('');
   const [urlMethod, setUrlMethod] = useState('GET');
@@ -350,6 +354,7 @@ function AppContent() {
     if (scanCompare) { setScanCompare(null); return true; }
     if (scanDetail) { setScanDetail(null); return true; }
     if (showScanner) { setShowScanner(false); return true; }
+    if (sslEditando) { setSslEditando(null); return true; }
     if (sslAdding) { setSslAdding(false); return true; }
     if (showSSL) { setShowSSL(false); return true; }
     if (incidentDetail) { setIncidentDetail(null); return true; }
@@ -955,6 +960,40 @@ function AppContent() {
     } catch {}
   };
 
+  // Pasar de una lista a la otra. Crean el equivalente sin borrar el original.
+  const vigilarSslDeUrl = async (u: any) => {
+    let hostname: string | null = null;
+    try { const p = new URL(u.url); if (p.protocol === 'https:') hostname = p.hostname; } catch {}
+    if (!hostname) { showModal('🔒', 'No se puede', 'Solo las URLs https tienen certificado que vigilar.'); return; }
+    const actuales = await loadSSLMonitors();
+    if (actuales.some((x: any) => x.hostname === hostname)) { showModal('🔒', 'Ya esta', `Ya vigilas el certificado de ${hostname}.`); return; }
+    showModal('🔒', 'Vigilar su certificado', `Agregar ${hostname} a Certificados SSL?\n\nEl monitor de URL queda como esta.`, [
+      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+      { text: 'Agregar', onPress: async () => {
+        const res = await apiRequest('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name: u.name || hostname }) }, token);
+        if (res.ok) { await loadSSLMonitors(); showModal('✅', 'Listo', `Ahora vigilas el certificado de ${hostname}.`); }
+        else showModal('⚠️', 'Error', res.data?.error || 'Error');
+      }}
+    ]);
+  };
+
+  const vigilarUrlDeSsl = async (mon: any) => {
+    const url = `https://${mon.hostname}/`;
+    const res0 = await apiRequest('/api/url-monitors', {}, token);
+    const actuales = res0.ok && Array.isArray(res0.data) ? res0.data : urlMonitors;
+    if (actuales.some((x: any) => x.url === url)) { showModal('🌐', 'Ya esta', `Ya vigilas ${url}.`); return; }
+    showModal('🌐', 'Vigilar que responda', `Agregar ${url} a Monitoreo de URLs?\n\nSe chequea cada 5 minutos. El monitor SSL queda como esta.`, [
+      { text: 'Cancelar', style: 'cancel', onPress: () => {} },
+      { text: 'Agregar', onPress: async () => {
+        const res = await apiRequest('/api/url-monitors', { method: 'POST', body: JSON.stringify({
+          url, name: mon.name || mon.hostname, method: 'GET', expected_status: 200, timeout_ms: 10000, interval_seconds: 300
+        }) }, token);
+        if (res.ok) { await loadUrlMonitors(); showModal('✅', 'Listo', `Ahora vigilas ${url}.`); }
+        else showModal('⚠️', 'Error', res.data?.error || 'Error');
+      }}
+    ]);
+  };
+
   const abrirUrlHistory = async (mon: any, soloFallos = false) => {
     setUrlHistoryMonitor(mon);
     setUrlHistorySoloFallos(soloFallos);
@@ -977,7 +1016,7 @@ function AppContent() {
     return (
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
-        <BackHeader title="Agregar Monitor URL" />
+        <BackHeader title={urlEditId ? 'Editar Monitor URL' : 'Agregar Monitor URL'} />
         <ScrollView contentContainerStyle={{padding: 24}}>
           <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>URL del sitio:</Text>
           <TextInput style={s.input} value={urlUrl} onChangeText={setUrlUrl} placeholder="https://ejemplo.com" placeholderTextColor="#555" autoCapitalize="none" keyboardType="url" />
@@ -992,19 +1031,49 @@ function AppContent() {
               </TouchableOpacity>
             ))}
           </View>
+          {!urlEditId && (
+            <TouchableOpacity onPress={() => setUrlVigilarSsl(!urlVigilarSsl)}
+              style={{flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, paddingRight: 8}}>
+              <View style={{width: 22, height: 22, borderRadius: 5, borderWidth: 2, borderColor: urlVigilarSsl ? '#00d4ff' : th.sub,
+                backgroundColor: urlVigilarSsl ? '#00d4ff' : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10, marginTop: 1}}>
+                {urlVigilarSsl && <Text style={{color: '#0a1628', fontSize: 14, fontWeight: '800'}}>{'✓'}</Text>}
+              </View>
+              <View style={{flex: 1}}>
+                <Text style={{color: th.text, fontSize: 13}}>Vigilar tambien su certificado SSL</Text>
+                <Text style={{color: th.sub, fontSize: 11, marginTop: 2, lineHeight: 15}}>
+                  El chequeo de URL ignora los problemas de certificado a proposito, asi que sin esto un certificado vencido no dispara ninguna alerta.
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={s.btn} onPress={async () => {
             if (!urlUrl.trim()) { showModal('⚠️', 'Error', 'URL requerida'); return; }
-            const res = await apiRequest('/api/url-monitors', { method: 'POST', body: JSON.stringify({
+            const datos = {
               url: urlUrl.trim(), name: urlName.trim() || null, method: 'GET',
               expected_status: 200, timeout_ms: 10000,
               interval_seconds: parseInt(urlInterval) || 300
-            }) }, token);
-            if (res.ok) { setShowAddUrl(false); setUrlUrl(''); setUrlName(''); loadUrlMonitors(); }
-            else showModal('⚠️', 'Error', res.data?.error || 'Error');
+            };
+            const res = urlEditId
+              ? await apiRequest(`/api/url-monitors/${urlEditId}`, { method: 'PUT', body: JSON.stringify(datos) }, token)
+              : await apiRequest('/api/url-monitors', { method: 'POST', body: JSON.stringify(datos) }, token);
+            if (!res.ok) { showModal('⚠️', 'Error', res.data?.error || 'Error'); return; }
+
+            // Al agregar una https, creamos tambien el monitor del certificado:
+            // el chequeo de URL no lo mira, asi que si no, nadie avisa cuando vence.
+            if (!urlEditId && urlVigilarSsl) {
+              let hostname: string | null = null;
+              try { const p = new URL(datos.url); if (p.protocol === 'https:') hostname = p.hostname; } catch {}
+              const yaHay = await loadSSLMonitors();
+              if (hostname && !yaHay.some((x: any) => x.hostname === hostname)) {
+                await apiRequest('/api/ssl-monitors', { method: 'POST', body: JSON.stringify({ hostname, name: datos.name || hostname }) }, token);
+                await loadSSLMonitors();
+              }
+            }
+            setShowAddUrl(false); setUrlEditId(null); setUrlUrl(''); setUrlName(''); loadUrlMonitors();
           }}>
-            <Text style={s.btnTxt}>Agregar monitor</Text>
+            <Text style={s.btnTxt}>{urlEditId ? 'Guardar cambios' : 'Agregar monitor'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowAddUrl(false)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => { setShowAddUrl(false); setUrlEditId(null); }}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
         </ScrollView>
       </View>
     );
@@ -1124,6 +1193,20 @@ function AppContent() {
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center'}} onPress={() => abrirUrlHistory(u)}>
                   <Text style={{color: '#00d4ff', fontSize: 12, fontWeight: '600'}}>{'📈'} Historial</Text>
                 </TouchableOpacity>
+                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}}
+                  onPress={() => {
+                    setUrlEditId(u.id);
+                    setUrlUrl(u.url);
+                    setUrlName(u.name || '');
+                    setUrlInterval(String(u.interval_seconds || 300));
+                    setShowAddUrl(true);
+                  }}>
+                  <Text style={{color: '#b388ff', fontSize: 12, fontWeight: '600'}}>{'✏'} Editar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}}
+                  onPress={() => vigilarSslDeUrl(u)}>
+                  <Text style={{color: '#00e676', fontSize: 12, fontWeight: '600'}}>{'🔒'} SSL</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}} onPress={async () => {
                   if (u.is_shared) {
                     await apiRequest('/api/pending-changes', { method: 'POST', body: JSON.stringify({
@@ -1165,7 +1248,7 @@ function AppContent() {
           ))}
         </ScrollView>
         <TouchableOpacity style={{position: 'absolute', bottom: 28, left: 24, width: 50, height: 50, borderRadius: 25, backgroundColor: '#00d4ff', alignItems: 'center', justifyContent: 'center', elevation: 8}}
-          onPress={() => { setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
+          onPress={() => { setUrlEditId(null); setUrlVigilarSsl(true); setUrlUrl(''); setUrlName(''); setUrlMethod('GET'); setUrlExpectedStatus('200'); setUrlTimeout('10000'); setUrlInterval('300'); setShowAddUrl(true); }}>
           <Text style={{fontSize: 24, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
@@ -1875,8 +1958,51 @@ function AppContent() {
   // SSL MONITORS
   const loadSSLMonitors = async () => {
     const res = await apiRequest('/api/ssl-monitors', {}, token);
-    if (res.ok) setSslMonitors(res.data);
+    const lista = res.ok && Array.isArray(res.data) ? res.data : [];
+    if (res.ok) setSslMonitors(lista);
+    // La devolvemos porque setState no es inmediato: quien necesite mirarla en
+    // la misma funcion no puede confiar en sslMonitors todavia.
+    return lista;
   };
+
+  if (sslEditando) {
+    return (
+      <View style={{flex: 1, backgroundColor: th.bg}}>
+        <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
+        <BackHeader title="Editar Certificado SSL" subtitle={sslEditando.hostname} />
+        <ScrollView contentContainerStyle={{padding: 24}}>
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Dominio (sin https://)</Text>
+          <TextInput style={s.input} value={sslHostname} onChangeText={setSslHostname} placeholder="ejemplo.com" placeholderTextColor="#555" autoCapitalize="none" />
+          <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 12}}>
+            Si cambias el dominio, lo chequeado hasta ahora se descarta y se vuelve a verificar.
+          </Text>
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Nombre (opcional)</Text>
+          <TextInput style={s.input} value={sslName} onChangeText={setSslName} placeholder="Mi sitio web" placeholderTextColor="#555" />
+          <Text style={{color: th.sub, fontSize: 12, marginBottom: 4}}>Avisar estos dias antes de vencer</Text>
+          <TextInput style={s.input} value={sslDias} onChangeText={setSslDias} placeholder="30, 14, 7, 1" placeholderTextColor="#555" keyboardType="numbers-and-punctuation" />
+          <TouchableOpacity style={s.btn} onPress={async () => {
+            const host = sslHostname.trim().replace(/^https?:\/\//i, '').split('/')[0];
+            if (!host) { showModal('⚠️', 'Error', 'Dominio requerido'); return; }
+            const dias = sslDias.split(',').map(x => parseInt(x.trim())).filter(n => !isNaN(n) && n > 0).sort((a, b) => b - a);
+            if (dias.length === 0) { showModal('⚠️', 'Error', 'Ingresa al menos un numero de dias'); return; }
+            const res = await apiRequest(`/api/ssl-monitors/${sslEditando.id}`, { method: 'PUT', body: JSON.stringify({
+              hostname: host, name: sslName.trim() || null, alert_days: dias
+            }) }, token);
+            if (res.ok) { setSslEditando(null); loadSSLMonitors(); }
+            else showModal('⚠️', 'Error', res.data?.error || 'Error');
+          }}>
+            <Text style={s.btnTxt}>Guardar cambios</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{backgroundColor: th.card, borderRadius: 10, padding: 12, alignItems: 'center', marginTop: 10}}
+            onPress={() => { const m = sslEditando; setSslEditando(null); vigilarUrlDeSsl(m); }}>
+            <Text style={{color: '#00e676', fontSize: 13, fontWeight: '600'}}>{'🌐'} Vigilar tambien que el sitio responda</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setSslEditando(null)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
+        </ScrollView>
+        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
+      </View>
+    );
+  }
 
   if (sslAdding) {
     return (
@@ -1951,15 +2077,20 @@ function AppContent() {
                   ))}
                 </View>
                 <View style={{flexDirection: 'row', gap: 8}}>
+                  {/* Antes esto usaba Alert.prompt, que no existe en Android: mandaba
+                      a "usa la version web". Ahora abre una pantalla propia. */}
                   <TouchableOpacity style={{flex: 1, backgroundColor: th.border, borderRadius: 8, padding: 8, alignItems: 'center'}}
                     onPress={() => {
-                      const input = (mon.alert_days || [30,14,7,1]).join(', ');
-                      Alert.prompt ? Alert.prompt('Dias de alerta', 'Separados por coma', async (text: string) => {
-                        const parsed = text.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a: number, b: number) => b - a);
-                        if (parsed.length > 0) { await apiRequest(`/api/ssl-monitors/${mon.id}`, { method: 'PUT', body: JSON.stringify({ alert_days: parsed }) }, token); loadSSLMonitors(); }
-                      }, 'plain-text', input) : showModal('⚙', 'Dias de alerta', `Actual: ${input}\n\nPara editar, usa la version web.`);
+                      setSslHostname(mon.hostname);
+                      setSslName(mon.name || '');
+                      setSslDias((mon.alert_days || [30, 14, 7, 1]).join(', '));
+                      setSslEditando(mon);
                     }}>
-                    <Text style={{color: '#00d4ff', fontSize: 12}}>⚙ Dias</Text>
+                    <Text style={{color: '#00d4ff', fontSize: 12}}>✏ Editar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={{flex: 1, backgroundColor: th.border, borderRadius: 8, padding: 8, alignItems: 'center'}}
+                    onPress={() => vigilarUrlDeSsl(mon)}>
+                    <Text style={{color: '#00e676', fontSize: 12}}>{'→'} URL</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={{flex: 1, backgroundColor: '#2d1117', borderRadius: 8, padding: 8, alignItems: 'center'}}
                     onPress={async () => {
@@ -3938,7 +4069,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.3.12</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.4.0</Text>
             </View>
           </View>
         </TouchableOpacity>
