@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.3.5';
+const AGENT_VERSION = '1.3.6';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -43,15 +43,26 @@ const URL_NUEVA = 'https://servereyes.app';
 // cada vuelta: en memoria se perderia y el bucle seguiria igual.
 const MAX_INTENTOS_UPDATE = 3;
 
-function intentosDeUpdate(config, version) {
-  const registro = config.updateIntentos || {};
-  return registro[version] || 0;
+// La cuenta va por version Y por hash del binario, no solo por version.
+//
+// Si se publica un ejecutable corregido con el mismo numero de version, el
+// numero no alcanza para notar que algo cambio: el agente seguiria desistiendo
+// de un update que ahora si funcionaria. El hash si cambia, y el servidor ya lo
+// manda junto con la oferta.
+function claveIntento(version, sha256) {
+  return `${version}#${String(sha256 || 'sin-hash').slice(0, 12)}`;
 }
 
-function anotarIntentoUpdate(config, version) {
-  // Solo se guarda la version que se esta intentando: si aparece una nueva, la
-  // anterior deja de importar y el archivo no crece.
-  config.updateIntentos = { [version]: intentosDeUpdate(config, version) + 1 };
+function intentosDeUpdate(config, version, sha256) {
+  const registro = config.updateIntentos || {};
+  return registro[claveIntento(version, sha256)] || 0;
+}
+
+function anotarIntentoUpdate(config, version, sha256) {
+  // Solo se guarda el intento en curso: si aparece otro binario, el anterior
+  // deja de importar y el archivo de configuracion no crece.
+  const clave = claveIntento(version, sha256);
+  config.updateIntentos = { [clave]: intentosDeUpdate(config, version, sha256) + 1 };
   saveConfig(config);
 }
 
@@ -59,6 +70,13 @@ function limpiarIntentosUpdate(config) {
   if (!config.updateIntentos) return;
   delete config.updateIntentos;
   saveConfig(config);
+}
+
+// Al arrancar: si ya somos la version que se venia intentando, el update salio
+// bien. Se compara solo por version porque el hash de lo que quedo instalado no
+// se conoce desde aca.
+function seAplicoElUpdate(config, version) {
+  return Object.keys(config.updateIntentos || {}).some(k => k.split('#')[0] === version);
 }
 
 function migrarUrlServidor(config) {
@@ -839,7 +857,7 @@ async function sendHeartbeat(config) {
         if (!firmaValida(up.sig, esperada)) {
           log(`Update IGNORADO: firma invalida para v${up.version} (${up.url})`);
         } else {
-          const yaIntentado = intentosDeUpdate(config, up.version);
+          const yaIntentado = intentosDeUpdate(config, up.version, up.sha256);
           if (yaIntentado >= MAX_INTENTOS_UPDATE) {
             // Una sola linea por vuelta y nada de red: el agente sigue haciendo
             // su trabajo y el problema queda visible en el log en vez de
@@ -847,7 +865,7 @@ async function sendHeartbeat(config) {
             log(`Update a v${up.version} DESISTIDO: se intento ${yaIntentado} veces y el agente sigue en v${AGENT_VERSION}. Hay que actualizarlo a mano.`);
           } else {
             log(`Actualizacion disponible: v${up.version} (intento ${yaIntentado + 1} de ${MAX_INTENTOS_UPDATE})`);
-            anotarIntentoUpdate(config, up.version);
+            anotarIntentoUpdate(config, up.version, up.sha256);
             await selfUpdate(up.url, up.version, config, up.sha256);
           }
         }
@@ -922,7 +940,7 @@ function startHeartbeatLoop(config) {
   try { if (fs.existsSync(FLAG_UPDATE)) fs.unlinkSync(FLAG_UPDATE); } catch {}
   // Si arrancamos siendo la version que se venia intentando, el update salio
   // bien y el contador tiene que volver a cero.
-  if (config.updateIntentos && config.updateIntentos[AGENT_VERSION]) {
+  if (seAplicoElUpdate(config, AGENT_VERSION)) {
     log(`Update a v${AGENT_VERSION} aplicado correctamente`);
     limpiarIntentosUpdate(config);
   }
