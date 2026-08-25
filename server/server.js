@@ -1043,6 +1043,9 @@ async function initDB() {
 
   // Security info
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS security_info JSONB`).catch(() => {});
+  // Inventario de hardware y red que manda el agente una vez por dia
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS inventory JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS inventory_at TIMESTAMP`).catch(() => {});
 
   // Wake-on-LAN
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
@@ -1698,7 +1701,7 @@ const pendingSpeedTests = new Set();
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
-    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs, agent_type, services, open_ports, agent_config, backup_status, security_info } = req.body;
+    const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs, agent_type, services, open_ports, agent_config, backup_status, security_info, inventory } = req.body;
 
     if (!machine_key) {
       return res.status(400).json({ error: 'machine_key es requerido' });
@@ -1740,12 +1743,15 @@ app.post('/api/heartbeat', async (req, res) => {
         agent_config = COALESCE($16, agent_config),
         backup_status = COALESCE($17, backup_status),
         security_info = COALESCE($18, security_info),
+        inventory = COALESCE($19, inventory),
+        -- Solo se mueve la fecha cuando llega inventario nuevo, no en cada latido
+        inventory_at = CASE WHEN $19::jsonb IS NULL THEN inventory_at ELSE NOW() END,
         last_heartbeat = NOW(),
         is_online = true,
         offline_notified = false
       WHERE machine_key = $5
       RETURNING *`,
-      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion, disks ? JSON.stringify(disks) : null, agent_logs || null, services ? JSON.stringify(services) : null, open_ports ? JSON.stringify(open_ports) : null, agent_config ? JSON.stringify(agent_config) : null, backup_status ? JSON.stringify(backup_status) : null, security_info ? JSON.stringify(security_info) : null]
+      [public_ip, local_ip, os_info, ping_ms, machine_key, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, reportedVersion, disks ? JSON.stringify(disks) : null, agent_logs || null, services ? JSON.stringify(services) : null, open_ports ? JSON.stringify(open_ports) : null, agent_config ? JSON.stringify(agent_config) : null, backup_status ? JSON.stringify(backup_status) : null, security_info ? JSON.stringify(security_info) : null, inventory ? JSON.stringify(inventory) : null]
     );
 
     if (result.rows.length === 0) {
@@ -2247,6 +2253,99 @@ app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
 
 // Obtener historial de IPs de una maquina
 // Sparkline data: ultimos 12 puntos de CPU/RAM por maquina del usuario
+// Inventario del parque, para armar el relevamiento de un cliente.
+// Devuelve una fila por maquina con los datos ya aplanados.
+function filasInventario(maquinas) {
+  return maquinas.map(m => {
+    const i = m.inventory || {};
+    const disco = (i.discos || []);
+    const solidos = disco.filter(d => (d.tipo || '').includes('SSD')).length;
+    return {
+      'Maquina': m.machine_name || '',
+      'Hostname': i.hostname || '',
+      'Usuario': i.usuario || '',
+      'Dominio o grupo': i.en_dominio ? (i.dominio || '') : (i.grupo_trabajo || i.dominio || ''),
+      'En dominio': i.en_dominio === true ? 'Si' : i.en_dominio === false ? 'No' : '',
+      'Sistema operativo': [i.so, i.so_arch].filter(Boolean).join(' '),
+      'Fabricante': i.fabricante || '',
+      'Modelo': i.modelo || '',
+      'Numero de serie': i.serie || '',
+      'CPU': i.cpu || '',
+      'Generacion CPU': i.cpu_generacion || '',
+      'Nucleos': i.cpu_nucleos ?? '',
+      'RAM (GB)': i.ram_gb ?? '',
+      'Tipo de RAM': i.ram_tipo || '',
+      'Slots usados': i.ram_slots_usados ?? '',
+      'Slots totales': i.ram_slots_total ?? '',
+      'Slots libres': i.ram_slots_libres ?? '',
+      'Se puede ampliar RAM': i.ram_ampliable === true ? 'Si' : i.ram_ampliable === false ? 'No' : '',
+      'RAM maxima (GB)': i.ram_max_gb ?? '',
+      'Discos': disco.length,
+      'Detalle de discos': disco.map(d => `${d.modelo || 's/d'} ${d.gb}GB ${d.tipo || ''}`.trim()).join(' / '),
+      'Discos solidos': disco.length ? `${solidos} de ${disco.length}` : '',
+      'Volumenes': (i.volumenes || []).map(v => `${v.letra} ${v.libre_gb}/${v.gb}GB`).join(' / '),
+      'IP de internet': m.public_ip || '',
+      'IP interna': i.ip_interna || '',
+      'Gateway': i.gateway || '',
+      'DNS': (i.dns || []).join(' '),
+      'DHCP o fija': i.dhcp === true ? 'DHCP' : i.dhcp === false ? 'Fija' : '',
+      'MAC': i.mac || '',
+      'Placas de red activas': (i.placas || []).map(p => `${p.nombre} ${p.mac} ${p.ip || ''}`.trim()).join(' / '),
+      'Proxy': i.proxy?.configurado ? (i.proxy.servidor || 'Si') : (i.proxy ? 'No' : ''),
+      'Proxy del sistema': i.proxy?.winhttp || '',
+      'Archivo hosts con entradas': i.hosts_tiene_entradas === true ? 'Si' : i.hosts_tiene_entradas === false ? 'No' : '',
+      'Entradas del hosts': (i.hosts_entradas || []).join(' | '),
+      'Inventario tomado': m.inventory_at ? new Date(m.inventory_at).toLocaleString('es-AR') : '',
+      'Ultimo contacto': m.last_heartbeat ? new Date(m.last_heartbeat).toLocaleString('es-AR') : ''
+    };
+  });
+}
+
+// Excel en castellano abre el CSV con punto y coma, no con coma: con coma mete
+// todo en una sola columna. El BOM es para que no rompa los acentos.
+function aCsv(filas) {
+  if (!filas.length) return '\uFEFF';
+  const columnas = Object.keys(filas[0]);
+  const escapar = v => {
+    const t = String(v ?? '');
+    return /[";\n\r]/.test(t) ? '"' + t.split('"').join('""') + '"' : t;
+  };
+  const lineas = [columnas.join(';')];
+  for (const fila of filas) lineas.push(columnas.map(c => escapar(fila[c])).join(';'));
+  return '\uFEFF' + lineas.join('\r\n');
+}
+
+app.get('/api/machines/inventory', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, machine_name, public_ip, last_heartbeat, is_online, inventory, inventory_at
+       FROM machines WHERE user_id = $1 ORDER BY machine_name`, [req.user.id]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error('[INVENTARIO]', e.message);
+    res.status(500).json({ error: 'No se pudo leer el inventario' });
+  }
+});
+
+app.get('/api/machines/inventory.csv', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, machine_name, public_ip, last_heartbeat, inventory, inventory_at
+       FROM machines WHERE user_id = $1 ORDER BY machine_name`, [req.user.id]);
+    // Solo las que ya reportaron: una fila vacia por maquina sin agente nuevo
+    // no aporta nada al relevamiento.
+    const conDatos = r.rows.filter(m => m.inventory);
+    const csv = aCsv(filasInventario(conDatos));
+    const fecha = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="inventario-servereyes-${fecha}.csv"`);
+    res.send(csv);
+  } catch (e) {
+    console.error('[INVENTARIO CSV]', e.message);
+    res.status(500).json({ error: 'No se pudo generar el inventario' });
+  }
+});
+
 app.get('/api/machines/sparklines', authenticateToken, async (req, res) => {
   try {
     // Las columnas de metrics_history son cpu_usage, ram_usage, ping_ms y

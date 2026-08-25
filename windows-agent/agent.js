@@ -21,6 +21,22 @@ function loadConfig() {
   return { serverUrl: '', machineKey: '', machineName: os.hostname(), heartbeatInterval: 30 };
 }
 
+// El dominio propio reemplazo al de Railway, pero las maquinas que ya tenian el
+// agente instalado siguen con la URL vieja en su servereyes-config.json, que se
+// guardo en el disco de cada una. Recompilar el .exe no las toca: hay que
+// reescribirla al arrancar. Las dos apuntan al mismo servicio, asi que el
+// cambio es transparente.
+const URL_VIEJA = 'https://servereyes-production.up.railway.app';
+const URL_NUEVA = 'https://servereyes.app';
+
+function migrarUrlServidor(config) {
+  if (config.serverUrl !== URL_VIEJA) return false;
+  config.serverUrl = URL_NUEVA;
+  saveConfig(config);
+  log(`Servidor actualizado al dominio propio: ${URL_NUEVA}`);
+  return true;
+}
+
 function saveConfig(config) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
@@ -300,6 +316,239 @@ function getAntivirusInfo() {
   });
 }
 
+// ── INVENTARIO ──
+//
+// Todo lo que hace falta para armar el inventario de un cliente: hardware, red,
+// proxy, archivo hosts, y si se le puede agregar memoria.
+//
+// Va en PowerShell con CIM y no con wmic porque Microsoft saco wmic de Windows
+// 11 24H2 en adelante. Se manda por -EncodedCommand (base64 UTF-16LE) para no
+// pelear con el escapeo de comillas de cmd, que con un script de este largo es
+// imposible de mantener.
+// Con String.raw y no con un template literal comun: adentro hay regex de
+// PowerShell (\s, \d) y la ruta \System32\drivers\etc\hosts. Un template
+// normal se come las barras invertidas y PowerShell recibe "s+" en vez de
+// "\s+" y una ruta sin separadores, sin fallar: simplemente no encuentra nada.
+const INVENTARIO_PS = String.raw`# Inventario de la maquina para ServerEyes. Devuelve un JSON por stdout.
+#
+# Usa CIM y no wmic: Microsoft saco wmic de Windows 11 24H2 en adelante, asi que
+# el codigo viejo del agente va a dejar de funcionar en maquinas nuevas.
+# Todo va envuelto en try/catch por campo: una maquina sin un dato (por ejemplo
+# sin Get-PhysicalDisk en Windows 7) tiene que devolver el resto igual.
+
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+
+function Intentar($bloque) { try { & $bloque } catch { $null } }
+# Igual que Intentar pero garantizando un array. El operador & desarma las
+# colecciones: con un solo elemento vuelve el objeto suelto, y pedirle .Count a
+# un CimInstance devuelve $null (busca una propiedad CIM llamada Count, que no
+# existe) en vez de 1. Sin esto, toda maquina con un solo modulo de memoria o
+# un solo disco se iba por la rama de "no hay datos".
+function IntentarLista($bloque) { $r = try { & $bloque } catch { $null }; return @($r | Where-Object { $_ -ne $null }) }
+
+$inv = [ordered]@{}
+$inv.recolectado = (Get-Date).ToString('o')
+
+# ── Identidad ───────────────────────────────────────────────────────────────
+$cs = Intentar { Get-CimInstance Win32_ComputerSystem }
+$os = Intentar { Get-CimInstance Win32_OperatingSystem }
+$inv.hostname   = $env:COMPUTERNAME
+$inv.so         = if ($os) { $os.Caption } else { $null }
+$inv.so_version = if ($os) { $os.Version } else { $null }
+$inv.so_arch    = if ($os) { $os.OSArchitecture } else { $null }
+# Usuario logueado ahora; si no hay sesion interactiva, el ultimo que se conocio
+$inv.usuario    = if ($cs -and $cs.UserName) { $cs.UserName } else { $env:USERNAME }
+$inv.en_dominio = if ($cs) { [bool]$cs.PartOfDomain } else { $null }
+$inv.dominio    = if ($cs) { $cs.Domain } else { $null }
+$inv.grupo_trabajo = if ($cs -and -not $cs.PartOfDomain) { $cs.Workgroup } else { $null }
+$inv.fabricante = if ($cs) { $cs.Manufacturer } else { $null }
+$inv.modelo     = if ($cs) { $cs.Model } else { $null }
+$bios = Intentar { Get-CimInstance Win32_BIOS }
+$inv.serie      = if ($bios) { $bios.SerialNumber } else { $null }
+
+# ── CPU ─────────────────────────────────────────────────────────────────────
+$cpu = Intentar { Get-CimInstance Win32_Processor | Select-Object -First 1 }
+if ($cpu) {
+  $inv.cpu         = $cpu.Name.Trim()
+  $inv.cpu_nucleos = $cpu.NumberOfCores
+  $inv.cpu_hilos   = $cpu.NumberOfLogicalProcessors
+  $inv.cpu_mhz     = $cpu.MaxClockSpeed
+  # Generacion: Intel Core i5-8250U -> 8va; Ryzen 5 5600X -> serie 5000
+  $gen = $null
+  if ($cpu.Name -match 'Ultra\s+\d+\s+(\d)\d{2}') {
+    # Los Core Ultra no siguen el formato i7-8750H: "Ultra 7 265KF" es serie 2,
+    # "Ultra 7 155H" es serie 1.
+    $gen = "Core Ultra serie $($matches[1])"
+  } elseif ($cpu.Name -match '[im]\d[- ](\d{4,5})') {
+    $n = $matches[1]
+    $gen = if ($n.Length -eq 5) { "$($n.Substring(0,2))a generacion" } else { "$($n.Substring(0,1))a generacion" }
+  } elseif ($cpu.Name -match 'Ryzen\s+\d\s+(\d)\d{3}') {
+    $gen = "serie $($matches[1])000"
+  }
+  $inv.cpu_generacion = $gen
+}
+
+# ── Memoria ─────────────────────────────────────────────────────────────────
+$tipos = @{
+  20='DDR'; 21='DDR2'; 22='DDR2 FB-DIMM'; 24='DDR3'; 26='DDR4'; 34='DDR5';
+  17='SDRAM'; 18='SDRAM'; 19='RDRAM'; 25='FBD2'; 27='DDR4'; 28='LPDDR'; 29='LPDDR2'; 30='LPDDR3'; 31='LPDDR4'; 35='LPDDR5'
+}
+$modulos = @(IntentarLista { Get-CimInstance Win32_PhysicalMemory })
+$arreglo = @(IntentarLista { Get-CimInstance Win32_PhysicalMemoryArray })
+$inv.ram_gb = if ($cs) { [math]::Round($cs.TotalPhysicalMemory / 1GB, 1) } else { $null }
+$inv.ram_modulos = @()
+foreach ($m in $modulos) {
+  $t = $tipos[[int]$m.SMBIOSMemoryType]
+  if (-not $t) { $t = $tipos[[int]$m.MemoryType] }
+  $inv.ram_modulos += [ordered]@{
+    banco = $m.DeviceLocator; gb = [math]::Round($m.Capacity / 1GB, 1)
+    tipo = $t; mhz = $m.Speed; fabricante = ($m.Manufacturer -replace '\s+$','')
+  }
+}
+# Slots: MemoryDevices del arreglo fisico es el total de zocalos de la placa
+$slotsTotal = if ($arreglo -and $arreglo.Count -gt 0) { ($arreglo | Measure-Object -Property MemoryDevices -Sum).Sum } else { $null }
+$inv.ram_slots_total = $slotsTotal
+$inv.ram_slots_usados = $modulos.Count
+$inv.ram_slots_libres = if ($slotsTotal) { $slotsTotal - $modulos.Count } else { $null }
+$inv.ram_tipo = ($inv.ram_modulos | ForEach-Object { $_.tipo } | Where-Object { $_ } | Select-Object -Unique) -join '/'
+$inv.ram_ampliable = if ($slotsTotal) { ($slotsTotal - $modulos.Count) -gt 0 } else { $null }
+$inv.ram_max_gb = if ($arreglo -and $arreglo.Count -gt 0) {
+  $k = ($arreglo | Measure-Object -Property MaxCapacityEx -Sum).Sum
+  if ($k -gt 0) { [math]::Round($k / 1MB, 0) } else { $null }
+} else { $null }
+
+# ── Discos fisicos: tamaño y si es solido o mecanico ────────────────────────
+$inv.discos = @()
+$fisicos = @(IntentarLista { Get-PhysicalDisk })
+if ($fisicos -and $fisicos.Count -gt 0) {
+  foreach ($d in $fisicos) {
+    $medio = switch ("$($d.MediaType)") {
+      'SSD' { 'Solido (SSD)' } 'HDD' { 'Mecanico (HDD)' } 'SCM' { 'Memoria persistente' } default { $null }
+    }
+    if (-not $medio -and $d.SpindleSpeed -eq 0) { $medio = 'Solido (SSD)' }
+    $inv.discos += [ordered]@{
+      modelo = $d.FriendlyName; gb = [math]::Round($d.Size / 1GB, 1)
+      tipo = $medio; bus = "$($d.BusType)"; salud = "$($d.HealthStatus)"
+    }
+  }
+} else {
+  # Windows viejo sin Get-PhysicalDisk
+  foreach ($d in (IntentarLista { Get-CimInstance Win32_DiskDrive })) {
+    $inv.discos += [ordered]@{ modelo = $d.Model; gb = [math]::Round($d.Size / 1GB, 1); tipo = $null; bus = $d.InterfaceType; salud = $null }
+  }
+}
+
+# ── Volumenes (lo que ve el usuario: C:, D:, ...) ───────────────────────────
+$inv.volumenes = @()
+foreach ($v in (IntentarLista { Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' })) {
+  $inv.volumenes += [ordered]@{
+    letra = $v.DeviceID; etiqueta = $v.VolumeName
+    gb = [math]::Round($v.Size / 1GB, 1); libre_gb = [math]::Round($v.FreeSpace / 1GB, 1)
+  }
+}
+
+# ── Red: solo las placas que realmente transmiten ───────────────────────────
+# Se piden las que estan Up y con IP; las virtuales (Hyper-V, VMware, VPN) y las
+# desconectadas no entran, que es lo que se pidio.
+$inv.placas = @()
+$adaptadores = @(IntentarLista { Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } })
+if (-not $adaptadores -or $adaptadores.Count -eq 0) {
+  $adaptadores = @(IntentarLista { Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.Virtual -eq $false } })
+}
+# Nombres que Windows presenta como fisicos pero no llevan trafico real
+$falsas = 'bucle invertido|loopback|KM-TEST|Hyper-V|VMware|VirtualBox|VPN|TAP-|Bluetooth|Npcap|WAN Miniport'
+foreach ($a in $adaptadores) {
+  if ("$($a.InterfaceDescription) $($a.Name)" -match $falsas) { continue }
+  $cfg  = Intentar { Get-NetIPConfiguration -InterfaceIndex $a.ifIndex }
+  $ipv4 = Intentar { Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 | Select-Object -First 1 }
+  $dns  = IntentarLista { (Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4).ServerAddresses }
+  $dhcp = Intentar { (Get-NetIPInterface -InterfaceIndex $a.ifIndex -AddressFamily IPv4).Dhcp }
+  # Sin IP util (APIPA de 169.254 o directamente ninguna) no esta transmitiendo
+  if (-not $ipv4 -or $ipv4.IPAddress -like '169.254.*') { continue }
+  $inv.placas += [ordered]@{
+    nombre = $a.Name; descripcion = $a.InterfaceDescription; mac = $a.MacAddress
+    velocidad = "$($a.LinkSpeed)"
+    ip = if ($ipv4) { $ipv4.IPAddress } else { $null }
+    mascara = if ($ipv4) { $ipv4.PrefixLength } else { $null }
+    gateway = if ($cfg -and $cfg.IPv4DefaultGateway) { $cfg.IPv4DefaultGateway.NextHop } else { $null }
+    dns = @($dns)
+    # PrefixOrigin Dhcp es mas confiable que el flag de la interfaz
+    dhcp = if ($ipv4) { $ipv4.PrefixOrigin -eq 'Dhcp' } elseif ($dhcp) { "$dhcp" -eq 'Enabled' } else { $null }
+  }
+}
+$conGw = $inv.placas | Where-Object { $_.gateway } | Select-Object -First 1
+if (-not $conGw) { $conGw = $inv.placas | Select-Object -First 1 }
+if ($conGw) {
+  $inv.ip_interna = $conGw.ip
+  $inv.gateway    = $conGw.gateway
+  $inv.dns        = $conGw.dns
+  $inv.dhcp       = $conGw.dhcp
+  $inv.mac        = $conGw.mac
+}
+
+# ── Proxy ───────────────────────────────────────────────────────────────────
+$proxy = [ordered]@{ configurado = $false; servidor = $null; excepciones = $null; automatico = $null; winhttp = $null }
+$reg = Intentar { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' }
+if ($reg) {
+  $proxy.configurado = [bool]$reg.ProxyEnable
+  $proxy.servidor    = $reg.ProxyServer
+  $proxy.excepciones = $reg.ProxyOverride
+  $proxy.automatico  = $reg.AutoConfigURL
+}
+# El proxy de sistema (servicios, no la sesion del usuario)
+$wh = Intentar { netsh winhttp show proxy 2>$null | Out-String }
+if ($wh) {
+  $proxy.winhttp = if ($wh -match 'Acceso directo|Direct access') { 'directo' } else { ($wh -split ([char]10) | Where-Object { $_ -match ':' } | Select-Object -Last 2) -join ' ' }
+}
+$inv.proxy = $proxy
+
+# ── Archivo hosts con entradas cargadas ─────────────────────────────────────
+$hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+$entradas = @()
+if (Test-Path $hostsPath) {
+  foreach ($l in (Get-Content $hostsPath)) {
+    $t = $l.Trim()
+    if ($t -and -not $t.StartsWith('#')) { $entradas += $t -replace '\s+', ' ' }
+  }
+}
+$inv.hosts_entradas = $entradas
+$inv.hosts_tiene_entradas = $entradas.Count -gt 0
+
+$inv | ConvertTo-Json -Depth 6 -Compress
+`;
+
+function getInventario() {
+  return new Promise((resolve) => {
+    const { spawn } = require('child_process');
+    // El script va por stdin y no por -Command ni -EncodedCommand: la linea de
+    // comandos de Windows corta en ~8191 caracteres, y este script en base64
+    // UTF-16 pasa los 19000. Por stdin no hay limite y no quedan archivos
+    // temporales dando vueltas en el disco del cliente.
+    const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-'],
+      { windowsHide: true });
+    let salida = '', errores = '';
+    const cortar = setTimeout(() => { ps.kill(); }, 90000);
+    ps.stdout.on('data', d => { salida += d; });
+    ps.stderr.on('data', d => { errores += d; });
+    ps.on('error', e => { clearTimeout(cortar); log('Inventario: no se pudo lanzar PowerShell: ' + e.message); resolve(null); });
+    ps.on('close', () => {
+      clearTimeout(cortar);
+      const texto = salida.trim();
+      if (!texto) { log('Inventario: sin respuesta' + (errores ? ': ' + errores.trim().slice(0, 200) : '')); resolve(null); return; }
+      try {
+        const datos = JSON.parse(texto);
+        resolve(datos && datos.hostname ? datos : null);
+      } catch (e) {
+        log('Inventario: respuesta ilegible: ' + e.message);
+        resolve(null);
+      }
+    });
+    ps.stdin.write(INVENTARIO_PS);
+    ps.stdin.end();
+  });
+}
+
 // Ping a google.com
 function measurePing() {
   return new Promise((resolve) => {
@@ -438,6 +687,12 @@ async function selfUpdate(url, newVersion, config, sha256Esperado) {
 
 let heartbeatCount = 0;
 let cachedSecurityInfo = null;
+// El inventario cambia muy de vez en cuando (se agrega un disco, se cambia la
+// IP): recolectarlo en cada heartbeat seria tirar CPU a la basura. Se arma al
+// arrancar y despues una vez por dia.
+let cachedInventario = null;
+let inventarioTomadoEn = 0;
+const INVENTARIO_CADA = 24 * 60 * 60 * 1000;
 
 // Heartbeat
 async function sendHeartbeat(config) {
@@ -449,6 +704,18 @@ async function sendHeartbeat(config) {
 
     // Recolectar info de seguridad cada 10 heartbeats (~5 min)
     heartbeatCount++;
+    if (!cachedInventario || Date.now() - inventarioTomadoEn > INVENTARIO_CADA) {
+      const inv = await getInventario();
+      if (inv) {
+        cachedInventario = inv;
+        inventarioTomadoEn = Date.now();
+        log(`Inventario actualizado: ${(inv.discos || []).length} disco(s), ${(inv.placas || []).length} placa(s) de red`);
+      } else {
+        // Si fallo, reintentar al siguiente heartbeat y no dentro de 24 horas
+        inventarioTomadoEn = 0;
+      }
+    }
+
     if (heartbeatCount >= 10 || !cachedSecurityInfo) {
       heartbeatCount = 0;
       try {
@@ -470,7 +737,7 @@ async function sendHeartbeat(config) {
       body: JSON.stringify({
         machine_key: config.machineKey, machine_name: config.machineName,
         public_ip: publicIP, local_ip: getLocalIP(), os_info: getOSInfo(),
-        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), backup_status: await getBackupStatus(false), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, security_info: cachedSecurityInfo || null, ...metrics
+        ping_ms: pingMs, agent_version: AGENT_VERSION, agent_type: 'agent', agent_logs: getLastLogs(30), services: await getServices(), open_ports: await getOpenPorts(), backup_status: await getBackupStatus(false), agent_config: { machineName: config.machineName, heartbeatInterval: config.heartbeatInterval, serverUrl: config.serverUrl }, security_info: cachedSecurityInfo || null, inventory: cachedInventario || null, ...metrics
       })
     });
     if (res.ok) {
@@ -551,6 +818,7 @@ async function sendHeartbeat(config) {
 // Heartbeat loop
 function startHeartbeatLoop(config) {
   log(`Agente iniciado - ${config.machineName}`);
+  migrarUrlServidor(config);
   log(`Servidor: ${config.serverUrl}`);
   log(`Intervalo: ${config.heartbeatInterval}s`);
   sendHeartbeat(config);

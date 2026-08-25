@@ -535,7 +535,7 @@ function morfar(actual, nuevo) {
       sincronizarAtributos(a, b);
       // Contenedores que pinta otra funcion: buildLayout los genera vacios o con
       // un "Cargando...", asi que morfearlos les borraria el contenido real.
-      if (a.id === 'nocMap' || a.id === 'ssl-list' || a.id === 'history-list' || a.id === 'history-list-client') continue;
+      if (a.id === 'nocMap' || a.id === 'ssl-list' || a.id === 'history-list' || a.id === 'history-list-client' || a.id === 'inv-list') continue;
       morfar(a, b);
     }
   }
@@ -560,6 +560,9 @@ function render() {
   }
   if (activeNav === 'urls') {
     setTimeout(loadSSLMonitors, 100);
+  }
+  if (activeNav === 'inventario') {
+    setTimeout(loadInventario, 100);
   }
   if (activeNav === 'incidentes' && !incidentsLoaded) {
     incidentsLoaded = true;
@@ -609,6 +612,7 @@ function buildLayout() {
       ${activeNav==='urls' ? buildUrlsView() : ''}
       ${activeNav==='incidentes' ? buildIncidentesView() : ''}
       ${activeNav==='reportes' ? buildReportesView() : ''}
+      ${activeNav==='inventario' ? buildInventarioView() : ''}
       ${activeNav==='ajustes' ? buildAjustesView() : ''}
     </div>
     ${buildBottomNav(offlineBadge)}
@@ -1154,6 +1158,7 @@ function buildBottomNav(alertBadge) {
     {id:'urls', icon:'🌐', label:'URLs'},
     {id:'incidentes', icon:'🚨', label:'Incidentes'},
     {id:'reportes', icon:'📋', label:t('nav_reports')},
+    {id:'inventario', icon:'📦', label:'Inventario'},
     {id:'ajustes', icon:'⚙️', label:t('nav_settings')},
   ];
   return `<nav class="bottom-nav">
@@ -1163,6 +1168,139 @@ function buildBottomNav(alertBadge) {
       ${t.badge?`<span class="nav-badge">${t.badge}</span>`:''}
     </button>`).join('')}
   </nav>`;
+}
+
+// ── INVENTARIO ──
+//
+// Relevamiento del parque de un cliente: que maquina es, que tiene adentro y
+// como esta conectada. Lo junta el agente una vez por dia y lo manda con el
+// latido; aca solo se muestra y se baja.
+let inventario = [];
+let _ultimoInvJson = '';
+
+function buildInventarioView() {
+  return `<div class="panel">
+    <div class="panel-title"><span class="dot" style="background:#9C27B0"></span>Inventario del parque</div>
+    <p style="font-size:12px;color:#888;line-height:1.5;margin:-4px 0 14px">
+      Cada agente releva su maquina una vez por dia: hardware, red, proxy y archivo hosts.
+      Sirve para el inventario del cliente y para ver de una si a una maquina se le puede agregar memoria.
+    </p>
+    <button class="modal-btn sm" onclick="bajarInventario(this)">⬇️ Descargar planilla (CSV)</button>
+    <div id="inv-list" style="margin-top:14px"><p style="color:#888;font-size:12px">Cargando...</p></div>
+  </div>`;
+}
+
+async function loadInventario() {
+  const el = document.getElementById('inv-list');
+  if (!el) return;
+  const r = await api('/api/machines/inventory');
+  if (!r.ok) { pintar(el, '<p style="color:#F44336;font-size:12px">No se pudo leer el inventario</p>'); return; }
+  inventario = Array.isArray(r.data) ? r.data : [];
+  // Igual que la lista de certificados: solo repintar si algo cambio, para que
+  // el refresco automatico no haga parpadear la pantalla.
+  const json = JSON.stringify(inventario);
+  if (json === _ultimoInvJson) return;
+  _ultimoInvJson = json;
+  renderInventario();
+}
+
+function renderInventario() {
+  const el = document.getElementById('inv-list');
+  if (!el) return;
+  const conDatos = inventario.filter(m => m.inventory);
+  const sinDatos = inventario.filter(m => !m.inventory);
+
+  if (inventario.length === 0) { pintar(el, '<p style="color:#888;font-size:12px">Todavia no hay maquinas.</p>'); return; }
+
+  const aviso = sinDatos.length ? `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#999;line-height:1.5">
+    ${sinDatos.length} maquina(s) todavia sin relevar: <strong>${sinDatos.map(m => escHtml(m.machine_name)).join(', ')}</strong>.
+    Aparecen cuando actualicen el agente y manden el primer latido.</div>` : '';
+
+  pintar(el, aviso + (conDatos.length ? conDatos.map(tarjetaInventario).join('') :
+    '<p style="color:#888;font-size:12px">Ninguna maquina relevada todavia. Publicá la version nueva del agente desde el panel de administracion.</p>'));
+}
+
+function dato(etiqueta, valor, resaltar) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  return `<div style="display:flex;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border2)">
+    <span style="color:#888;min-width:130px;flex-shrink:0">${escHtml(etiqueta)}</span>
+    <span style="color:${resaltar || 'var(--text)'};font-weight:600;word-break:break-word">${escHtml(String(valor))}</span>
+  </div>`;
+}
+
+function tarjetaInventario(m) {
+  const i = m.inventory || {};
+  const grupo = i.en_dominio ? `${i.dominio} (dominio)` : `${i.grupo_trabajo || i.dominio || ''} (grupo de trabajo)`;
+  const ram = [i.ram_gb ? i.ram_gb + ' GB' : null, i.ram_tipo].filter(Boolean).join(' ');
+  // Lo mas util del relevamiento: se le puede poner mas memoria o no
+  const libres = i.ram_slots_libres;
+  const ampliable = i.ram_ampliable === true
+    ? `${libres} slot(s) libre(s) de ${i.ram_slots_total} — se puede ampliar`
+    : i.ram_ampliable === false
+      ? `${i.ram_slots_total} slot(s), todos ocupados — hay que reemplazar modulos`
+      : null;
+  const colorAmp = i.ram_ampliable === true ? '#4CAF50' : i.ram_ampliable === false ? '#FF9800' : null;
+
+  const discos = (i.discos || []).map(d =>
+    `<div style="font-size:12px;color:var(--text);padding:3px 0">• ${escHtml(d.modelo || 'Disco')} — <strong>${d.gb} GB</strong> ${escHtml(d.tipo || '')} ${d.bus ? '(' + escHtml(d.bus) + ')' : ''}</div>`).join('');
+  const placas = (i.placas || []).map(p =>
+    `<div style="font-size:12px;color:var(--text);padding:3px 0">• ${escHtml(p.nombre)} — ${escHtml(p.mac)} — ${escHtml(p.ip || 's/IP')}${p.dhcp === true ? ' (DHCP)' : p.dhcp === false ? ' (fija)' : ''}</div>`).join('');
+  const hosts = (i.hosts_entradas || []).length
+    ? `<div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:6px;font-family:monospace;font-size:11px;color:#999;line-height:1.6;max-height:120px;overflow:auto">${i.hosts_entradas.map(escHtml).join('<br>')}</div>`
+    : '';
+
+  return `<div style="border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="font-size:18px">${m.is_online ? '🟢' : '⚪'}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:var(--text);font-size:14px">${escHtml(m.machine_name || i.hostname || '')}</div>
+        <div style="font-size:11px;color:#888">${escHtml(i.hostname || '')} · ${escHtml(grupo)}</div>
+      </div>
+    </div>
+    ${dato('Usuario', i.usuario)}
+    ${dato('Sistema', [i.so, i.so_arch].filter(Boolean).join(' '))}
+    ${dato('Equipo', [i.fabricante, i.modelo].filter(Boolean).join(' '))}
+    ${dato('Numero de serie', i.serie)}
+    ${dato('CPU', [i.cpu, i.cpu_generacion ? '· ' + i.cpu_generacion : ''].filter(Boolean).join(' '))}
+    ${dato('Memoria', ram)}
+    ${dato('Ampliar memoria', ampliable, colorAmp)}
+    ${dato('IP de internet', m.public_ip)}
+    ${dato('IP interna', i.ip_interna)}
+    ${dato('Gateway', i.gateway)}
+    ${dato('DNS', (i.dns || []).join(', '))}
+    ${dato('Asignacion', i.dhcp === true ? 'DHCP' : i.dhcp === false ? 'Fija' : '')}
+    ${dato('Proxy', i.proxy ? (i.proxy.configurado ? (i.proxy.servidor || 'Configurado') : 'Sin proxy') : '')}
+    ${discos ? `<div style="margin-top:10px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:2px">DISCOS</div>${discos}</div>` : ''}
+    ${placas ? `<div style="margin-top:10px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:2px">PLACAS DE RED QUE TRANSMITEN</div>${placas}</div>` : ''}
+    ${hosts ? `<div style="margin-top:10px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:2px">ARCHIVO HOSTS</div>${hosts}</div>` : ''}
+    <div style="font-size:11px;color:#777;margin-top:10px">Relevado: ${m.inventory_at ? new Date(m.inventory_at).toLocaleString('es-AR') : 'sin fecha'}</div>
+  </div>`;
+}
+
+async function bajarInventario(boton) {
+  const original = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = 'Generando...';
+  try {
+    // Con fetch y no con un enlace directo: la descarga necesita el token en la
+    // cabecera, y un <a href> no lo manda.
+    const r = await fetch(API + '/api/machines/inventory.csv', { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) { avisar('No se pudo generar', 'El servidor rechazo el pedido de la planilla.', '⚠️'); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inventario-servereyes-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    avisar('No se pudo descargar', e.message, '⚠️');
+  } finally {
+    boton.disabled = false;
+    boton.textContent = original;
+  }
 }
 
 // ── INLINE MAP ──
