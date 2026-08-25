@@ -1045,6 +1045,10 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS security_info JSONB`).catch(() => {});
   // Inventario de hardware y red que manda el agente una vez por dia
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS inventory JSONB`).catch(() => {});
+  // Cuantas veces seguidas se le ofrecio el mismo update a esta maquina sin que
+  // cambie de version. Sirve para cortar el bucle de updates que no prenden.
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS update_offers INTEGER DEFAULT 0`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS update_offer_version VARCHAR(20)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS inventory_at TIMESTAMP`).catch(() => {});
 
   // Wake-on-LAN
@@ -2025,6 +2029,39 @@ app.post('/api/heartbeat', async (req, res) => {
     // Resetear alerta cuando el backup vuelve a estar ok
     if (backup_status && (backup_status.status === 'ok' || backup_status.status === 'found') && updatedMachine.backup_alert_sent) {
       pool.query('UPDATE machines SET backup_alert_sent = false WHERE id = $1', [updatedMachine.id]).catch(() => {});
+    }
+
+    // Freno de updates que no prenden.
+    //
+    // Un agente puede bajar el binario, "aplicarlo" y volver a arrancar con la
+    // version de antes. Ahi vuelve a pedir el update en el siguiente latido y
+    // se queda en un bucle bajando el ejecutable entero cada minuto. Paso de
+    // verdad: 168 vueltas con la v1.0.0 y 163 con la v1.1.0 en una sola
+    // maquina.
+    //
+    // Los agentes nuevos se frenan solos, pero ese arreglo viaja dentro del
+    // binario que justamente no logran instalar. Por eso el freno tambien tiene
+    // que estar aca: es el unico lado que se puede arreglar para los que ya
+    // estan en la calle.
+    const MAX_OFERTAS = 5;
+    if (updateInfo) {
+      const mismaOferta = updatedMachine.update_offer_version === updateInfo.version;
+      const ofertas = mismaOferta ? (updatedMachine.update_offers || 0) : 0;
+      if (ofertas >= MAX_OFERTAS) {
+        console.warn(`[UPDATE] ${updatedMachine.machine_name}: se le ofrecio la v${updateInfo.version} ${ofertas} veces y sigue en v${reportedVersion}. Se deja de ofrecer; hay que actualizarla a mano.`);
+        updateInfo = null;
+      } else {
+        pool.query(
+          'UPDATE machines SET update_offers = $1, update_offer_version = $2 WHERE id = $3',
+          [ofertas + 1, updateInfo.version, updatedMachine.id]
+        ).catch(() => {});
+      }
+    } else if (updatedMachine.update_offer_version) {
+      // No hay nada que ofrecer: o se actualizo, o el admin publico otra cosa.
+      pool.query(
+        'UPDATE machines SET update_offers = 0, update_offer_version = NULL WHERE id = $1',
+        [updatedMachine.id]
+      ).catch(() => {});
     }
 
     // El update lleva hash del binario y firma; y no se ofrece por http, para
