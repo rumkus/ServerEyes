@@ -8,12 +8,16 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.3.2';
+const AGENT_VERSION = '1.3.3';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
 const LOG_FILE = path.join(EXE_DIR, 'servereyes.log');
 const VBS_FILE = path.join(EXE_DIR, 'ServerEyes-Silent.vbs');
+const WATCHDOG_FILE = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
+// Mientras existe esta bandera el watchdog no levanta nada. Es lo que evita que
+// relance el binario viejo justo cuando el update esta moviendo los archivos.
+const FLAG_UPDATE = path.join(EXE_DIR, 'servereyes-actualizando.flag');
 const TASK_NAME = 'ServerEyes Agent';
 
 function loadConfig() {
@@ -710,18 +714,27 @@ async function selfUpdate(url, newVersion, config, sha256Esperado) {
     // mueve el nuevo al nombre original, y lo arranca.
     // El watchdog tambien ayuda a levantarlo si el bat falla.
     const exeName = path.basename(EXE_PATH);
+    // La bandera frena al watchdog mientras se cambian los archivos.
+    try { fs.writeFileSync(FLAG_UPDATE, new Date().toISOString()); } catch {}
     const batContent = [
       '@echo off',
-      'timeout /t 5 /nobreak >nul',
-      // Limpiar old anterior si existe
-      `if exist "${oldPath}" del /f "${oldPath}"`,
-      // Renombrar exe actual a old (Windows permite renombrar exe en uso)
+      'timeout /t 3 /nobreak >nul',
+      // No puede quedar ninguna instancia viva: si queda, el binario nuevo
+      // arranca, ve el lock y se va, y sigue corriendo el viejo.
+      `taskkill /F /IM "${exeName}" >nul 2>&1`,
+      'taskkill /F /IM "servereyes-old.exe" >nul 2>&1',
+      'timeout /t 2 /nobreak >nul',
+      `if exist "${oldPath}" del /f /q "${oldPath}"`,
+      // Windows deja renombrar un exe aunque este en uso
       `if exist "${EXE_PATH}" rename "${EXE_PATH}" servereyes-old.exe`,
-      // Mover nuevo al nombre correcto
       `if exist "${newPath}" move /y "${newPath}" "${EXE_PATH}"`,
-      // Arrancar
+      // Si el reemplazo no quedo, volver a la version anterior en vez de dejar
+      // la carpeta sin agente.
+      `if not exist "${EXE_PATH}" if exist "${oldPath}" rename "${oldPath}" "${exeName}"`,
+      // El lock quedo con el pid del proceso que acabamos de matar
+      `if exist "${LOCK_FILE}" del /f /q "${LOCK_FILE}"`,
+      `if exist "${FLAG_UPDATE}" del /f /q "${FLAG_UPDATE}"`,
       `if exist "${EXE_PATH}" start "" "${EXE_PATH}"`,
-      // Limpiar bat
       'del "%~f0"'
     ].join('\r\n') + '\r\n';
     fs.writeFileSync(batPath, batContent);
@@ -734,6 +747,7 @@ async function selfUpdate(url, newVersion, config, sha256Esperado) {
   } catch (err) {
     log(`Error en update: ${err.message}`);
     try { if (fs.existsSync(newPath)) fs.unlinkSync(newPath); } catch {}
+    try { if (fs.existsSync(FLAG_UPDATE)) fs.unlinkSync(FLAG_UPDATE); } catch {}
   }
 }
 
@@ -882,6 +896,9 @@ async function sendHeartbeat(config) {
 function startHeartbeatLoop(config) {
   log(`Agente iniciado - ${config.machineName}`);
   migrarUrlServidor(config);
+  asegurarScripts();
+  // Si quedo una bandera de un update anterior, sacarla: ya arrancamos.
+  try { if (fs.existsSync(FLAG_UPDATE)) fs.unlinkSync(FLAG_UPDATE); } catch {}
   // Si arrancamos siendo la version que se venia intentando, el update salio
   // bien y el contador tiene que volver a cero.
   if (config.updateIntentos && config.updateIntentos[AGENT_VERSION]) {
@@ -928,21 +945,28 @@ function startPairing(config) {
   });
 }
 
-// Instalar como tarea programada (corre sin ventana al iniciar Windows)
-function install() {
+function contenidoVbsSilencioso() {
+  return `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False\r\n`;
+}
+
+function contenidoVbsWatchdog() {
   const exeName = path.basename(EXE_PATH);
-
-  // Crear VBS que lanza el exe oculto
-  const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run chr(34) & "${EXE_PATH.replace(/\\/g, '\\\\')}" & chr(34), 0, False\r\n`;
-  fs.writeFileSync(VBS_FILE, vbsContent);
-
-  // Crear VBS watchdog que chequea si el proceso existe y lo levanta si no (100% silencioso)
-  const watchdogVbs = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
-  const tempCheck = 'fso.GetSpecialFolder(2) & "\\se_check.tmp"';
-  const watchdogContent = [
+  return [
     'Set WshShell = CreateObject("WScript.Shell")',
     'Set fso = CreateObject("Scripting.FileSystemObject")',
-    `tempFile = ${tempCheck}`,
+    // Durante un update los archivos se estan renombrando. Si el watchdog
+    // levanta el binario viejo en ese momento, el nuevo arranca, ve el lock de
+    // la instancia vieja y se va en silencio: la maquina queda en la version
+    // anterior y vuelve a pedir el update al minuto siguiente, para siempre.
+    // Sin duplicar las barras: en VBS las cadenas son literales, no llevan
+    // escape. Se embebe igual que la ruta del exe unas lineas mas abajo.
+    `bandera = "${FLAG_UPDATE}"`,
+    'If fso.FileExists(bandera) Then',
+    // Con vencimiento: si un update queda colgado, la bandera no puede dejar el
+    // watchdog apagado para siempre.
+    '  If DateDiff("n", fso.GetFile(bandera).DateLastModified, Now) < 10 Then WScript.Quit',
+    'End If',
+    'tempFile = fso.GetSpecialFolder(2) & "\\se_check.tmp"',
     `WshShell.Run "cmd /c tasklist /FI ""IMAGENAME eq ${exeName}"" /NH > """ & tempFile & """", 0, True`,
     'If fso.FileExists(tempFile) Then',
     '  Set f = fso.OpenTextFile(tempFile, 1)',
@@ -954,7 +978,29 @@ function install() {
     '  End If',
     'End If',
   ].join('\r\n') + '\r\n';
-  fs.writeFileSync(watchdogVbs, watchdogContent);
+}
+
+// Las instalaciones que ya estan en la calle tienen el watchdog viejo, sin el
+// chequeo de la bandera. Se reescribe al arrancar para que el arreglo llegue
+// solo, sin reinstalar a mano en cada maquina.
+function asegurarScripts() {
+  for (const [ruta, contenido] of [[VBS_FILE, contenidoVbsSilencioso()], [WATCHDOG_FILE, contenidoVbsWatchdog()]]) {
+    try {
+      if (fs.existsSync(ruta) && fs.readFileSync(ruta, 'utf8') === contenido) continue;
+      fs.writeFileSync(ruta, contenido);
+      log(`Script de arranque actualizado: ${path.basename(ruta)}`);
+    } catch (e) {
+      log(`No se pudo actualizar ${path.basename(ruta)}: ${e.message}`);
+    }
+  }
+}
+
+// Instalar como tarea programada (corre sin ventana al iniciar Windows)
+function install() {
+  const exeName = path.basename(EXE_PATH);
+  const watchdogVbs = WATCHDOG_FILE;
+  fs.writeFileSync(VBS_FILE, contenidoVbsSilencioso());
+  fs.writeFileSync(watchdogVbs, contenidoVbsWatchdog());
 
   try {
     // Tarea principal: arrancar al iniciar sesion
