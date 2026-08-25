@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.3.1';
+const AGENT_VERSION = '1.3.2';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -28,6 +28,34 @@ function loadConfig() {
 // cambio es transparente.
 const URL_VIEJA = 'https://servereyes-production.up.railway.app';
 const URL_NUEVA = 'https://servereyes.app';
+
+// Un update puede "aplicarse" y dejar corriendo la misma version de antes: el
+// bat renombra y mueve archivos, y si algo de eso falla nadie se entera. Sin
+// freno, el agente vuelve a bajar el mismo binario cada minuto para siempre.
+// Paso de verdad en esta instalacion: 168 intentos seguidos con la v1.0.0, 163
+// con la v1.1.0 y 23 con la v1.0.7, bajando 36MB cada vez.
+//
+// El contador va al archivo de configuracion porque el proceso se reinicia en
+// cada vuelta: en memoria se perderia y el bucle seguiria igual.
+const MAX_INTENTOS_UPDATE = 3;
+
+function intentosDeUpdate(config, version) {
+  const registro = config.updateIntentos || {};
+  return registro[version] || 0;
+}
+
+function anotarIntentoUpdate(config, version) {
+  // Solo se guarda la version que se esta intentando: si aparece una nueva, la
+  // anterior deja de importar y el archivo no crece.
+  config.updateIntentos = { [version]: intentosDeUpdate(config, version) + 1 };
+  saveConfig(config);
+}
+
+function limpiarIntentosUpdate(config) {
+  if (!config.updateIntentos) return;
+  delete config.updateIntentos;
+  saveConfig(config);
+}
 
 function migrarUrlServidor(config) {
   if (config.serverUrl !== URL_VIEJA) return false;
@@ -776,8 +804,17 @@ async function sendHeartbeat(config) {
         if (!firmaValida(up.sig, esperada)) {
           log(`Update IGNORADO: firma invalida para v${up.version} (${up.url})`);
         } else {
-          log(`Actualizacion disponible: v${up.version}`);
-          await selfUpdate(up.url, up.version, config, up.sha256);
+          const yaIntentado = intentosDeUpdate(config, up.version);
+          if (yaIntentado >= MAX_INTENTOS_UPDATE) {
+            // Una sola linea por vuelta y nada de red: el agente sigue haciendo
+            // su trabajo y el problema queda visible en el log en vez de
+            // esconderse detras de miles de reintentos.
+            log(`Update a v${up.version} DESISTIDO: se intento ${yaIntentado} veces y el agente sigue en v${AGENT_VERSION}. Hay que actualizarlo a mano.`);
+          } else {
+            log(`Actualizacion disponible: v${up.version} (intento ${yaIntentado + 1} de ${MAX_INTENTOS_UPDATE})`);
+            anotarIntentoUpdate(config, up.version);
+            await selfUpdate(up.url, up.version, config, up.sha256);
+          }
         }
       }
 
@@ -845,6 +882,12 @@ async function sendHeartbeat(config) {
 function startHeartbeatLoop(config) {
   log(`Agente iniciado - ${config.machineName}`);
   migrarUrlServidor(config);
+  // Si arrancamos siendo la version que se venia intentando, el update salio
+  // bien y el contador tiene que volver a cero.
+  if (config.updateIntentos && config.updateIntentos[AGENT_VERSION]) {
+    log(`Update a v${AGENT_VERSION} aplicado correctamente`);
+    limpiarIntentosUpdate(config);
+  }
   log(`Servidor: ${config.serverUrl}`);
   log(`Intervalo: ${config.heartbeatInterval}s`);
   sendHeartbeat(config);
