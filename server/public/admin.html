@@ -306,7 +306,7 @@ function renderAgent() {
         ${selectedFile ? '<div class="filename">' + selectedFile.name + ' (' + fmtSize(selectedFile.size) + ')</div>' : ''}
       </div>
       <div class="form-row">
-        <div class="field"><label>Version:</label><input type="text" id="up-version" placeholder="ej: 1.1.0" /></div>
+        <div class="field"><label>Version:</label><input type="text" id="up-version" placeholder="ej: 1.1.0" /><div id="up-version-nota" style="font-size:11px;margin-top:4px;line-height:1.4"></div></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Changelog (opcional):</label><textarea id="up-changelog" placeholder="Que cambio en esta version..."></textarea></div>
@@ -327,19 +327,40 @@ function renderAgent() {
     </div>`;
 }
 
+// La version sale del nombre del archivo, que el build deja como
+// ServerEyes-Agent-1.3.6.exe. Es el unico dato confiable: adentro del ejecutable
+// el codigo va como bytecode, y las versiones de las dependencias no dejan
+// distinguir cual es la del agente.
+function versionDelNombre(nombre) {
+  const m = String(nombre || '').match(/(\d+\.\d+\.\d+)/);
+  return m ? m[1] : null;
+}
+
 function onFileSelect(input) {
   selectedFile = input.files[0] || null;
   render();
-  if (selectedFile) {
-    const suggestedVer = data.configuredVersion ? bumpVersion(data.configuredVersion) : '1.0.0';
-    document.getElementById('up-version').value = suggestedVer;
-  }
-}
+  if (!selectedFile) return;
 
-function bumpVersion(v) {
-  const parts = v.split('.').map(Number);
-  parts[2] = (parts[2] || 0) + 1;
-  return parts.join('.');
+  const campo = document.getElementById('up-version');
+  const aviso = document.getElementById('up-version-nota');
+  const delArchivo = versionDelNombre(selectedFile.name);
+
+  if (delArchivo) {
+    campo.value = delArchivo;
+    if (aviso) aviso.innerHTML = `<span style="color:#00e676">Tomada del nombre del archivo</span>`;
+    return;
+  }
+
+  // Sin version en el nombre no hay de donde sacarla. Antes se ofrecia la
+  // siguiente a la publicada, y esa sugerencia fue justamente la que hizo
+  // publicar un ejecutable viejo con un numero que no le correspondia: el campo
+  // se completaba solo con algo que no tenia nada que ver con el archivo. Ahora
+  // queda vacio y se avisa.
+  campo.value = '';
+  if (aviso) {
+    aviso.innerHTML = `<span style="color:#ff9800">El nombre del archivo no dice la version, asi que hay que escribirla a mano. `
+      + `Si compilaste con "npm run build", el archivo se llama ServerEyes-Agent-x.y.z.exe y se completa sola.</span>`;
+  }
 }
 
 function setUploadTarget(t) {
