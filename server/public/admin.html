@@ -365,6 +365,58 @@ async function subirClient(version, changelog) {
   return { ok: r.ok, status: r.status, data: d };
 }
 
+// Publicar un binario hace que cada maquina instalada lo descargue y lo ejecute,
+// asi que conviene mirar dos veces que sea el archivo correcto.
+//
+// El sha256 se calcula aca, en el navegador, antes de subir nada: si coincide
+// con el que ya esta publicado, es el mismo ejecutable y el update no va a
+// prender. Eso fue exactamente lo que paso subiendo por error un .exe viejo que
+// estaba al lado del codigo en vez del recien compilado.
+async function sha256DelArchivo(archivo) {
+  try {
+    if (!crypto.subtle) return null; // sin contexto seguro no esta disponible
+    const buf = await archivo.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+
+async function confirmarPublicacion(target, version) {
+  const esClient = target === 'client';
+  const shaNuevo = await sha256DelArchivo(selectedFile);
+  const shaActual = esClient ? data.clientSha256 : data.agentSha256;
+  const versionActual = esClient ? data.configuredClientVersion : data.configuredVersion;
+  const repetido = shaNuevo && shaActual && shaNuevo === shaActual;
+
+  const fila = (etiqueta, valor, color) =>
+    `<div style="display:flex;gap:8px;padding:3px 0"><span style="color:#8ba0b3;min-width:88px;flex-shrink:0">${etiqueta}</span>` +
+    `<span style="color:${color || '#ddd'};word-break:break-all">${escApp(valor)}</span></div>`;
+
+  let detalle =
+    fila('Archivo', selectedFile.name) +
+    fila('Tamano', fmtSize(selectedFile.size)) +
+    fila('Version', (versionActual ? versionActual + '  \u2192  ' : '') + version, '#00e676') +
+    (shaNuevo ? fila('sha256', shaNuevo.slice(0, 24) + '\u2026' + shaNuevo.slice(-8), repetido ? '#ff5252' : '#888') : '');
+
+  if (repetido) {
+    detalle += `<div style="background:#2d1117;border-radius:8px;padding:10px;margin-top:10px;color:#ff5252;line-height:1.5">
+      <strong>Es el mismo ejecutable que ya esta publicado como ${escApp(versionActual)}.</strong><br>
+      Las maquinas lo van a instalar y van a seguir reportando ${escApp(versionActual)}, asi que el servidor
+      les va a ofrecer la actualizacion una y otra vez. Seguramente no es el archivo que querias subir.</div>`;
+  }
+
+  return confirmar({
+    icono: repetido ? '&#9888;&#65039;' : '&#128228;',
+    peligro: repetido,
+    color: '#ff9800',
+    titulo: `Publicar ${esClient ? 'el client' : 'el agente'} ${version}`,
+    subtitulo: `Cada ${esClient ? 'client' : 'agente'} instalado va a descargar y ejecutar este archivo.`,
+    detalle,
+    ok: repetido ? 'Publicar igual' : 'Publicar',
+    cancelar: 'Cancelar'
+  });
+}
+
 async function doUpload() {
   if (!selectedFile) return;
   const version = document.getElementById('up-version').value.trim();
@@ -372,6 +424,7 @@ async function doUpload() {
   if (!version) { avisar('Falta la version', 'Escribi el numero de version que vas a publicar, por ejemplo 1.4.2. Es lo que compara cada agente para saber si tiene que actualizarse.', '&#9888;&#65039;'); return; }
 
   const target = uploadTarget;
+  if (!await confirmarPublicacion(target, version)) return;
   uploading = true;
   render();
 
