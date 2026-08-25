@@ -2278,15 +2278,33 @@ function AppContent() {
                     <Text style={{color: th.sub, fontSize: 11}}>{mon.hostname}</Text>
                   </View>
                   {mon.last_days_left != null && (
-                    <View style={{backgroundColor: color + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8}}>
-                      <Text style={{color, fontSize: 12, fontWeight: '700'}}>{mon.last_days_left}d</Text>
+                    <View style={{backgroundColor: color + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignItems: 'center'}}>
+                      <Text style={{color, fontSize: 14, fontWeight: '800'}}>{mon.last_days_left}</Text>
+                      <Text style={{color, fontSize: 9}}>{mon.last_days_left === 1 ? 'dia' : 'dias'}</Text>
                     </View>
                   )}
                 </View>
-                <View style={{flexDirection: 'row', gap: 12, marginBottom: 6}}>
-                  <Text style={{color: th.sub, fontSize: 11}}>Emisor: {mon.last_issuer || '?'}</Text>
-                  {mon.last_expiry && <Text style={{color: th.sub, fontSize: 11}}>Vence: {new Date(mon.last_expiry).toLocaleDateString('es')}</Text>}
-                </View>
+                {mon.last_check ? (
+                  <View style={{marginBottom: 6}}>
+                    {mon.last_days_left != null && (
+                      <Text style={{color, fontSize: 12, fontWeight: '600', marginBottom: 2}}>
+                        {mon.last_days_left < 0
+                          ? `Vencido hace ${Math.abs(mon.last_days_left)} dias`
+                          : `Caduca en ${mon.last_days_left} ${mon.last_days_left === 1 ? 'dia' : 'dias'}`}
+                      </Text>
+                    )}
+                    <Text style={{color: th.sub, fontSize: 11}}>
+                      {mon.last_expiry ? `Vence el ${new Date(mon.last_expiry).toLocaleDateString('es')}` : 'Sin fecha'}
+                      {mon.last_issuer ? `  ·  ${mon.last_issuer}` : ''}
+                    </Text>
+                  </View>
+                ) : (
+                  // Sin chequear todavia: decirlo asi, y no "Emisor: ?", que
+                  // parece un error del certificado en vez de falta de datos.
+                  <Text style={{color: th.sub, fontSize: 11, marginBottom: 6}}>
+                    Sin chequear todavia — se revisa solo en unos minutos
+                  </Text>
+                )}
                 {resumenDestinatarios(mon.destinatarios) && (
                   <Text style={{color: th.sub, fontSize: 10, marginBottom: 4}}>{'✉'} {resumenDestinatarios(mon.destinatarios)}</Text>
                 )}
@@ -4292,7 +4310,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.8.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.8.1</Text>
             </View>
           </View>
         </TouchableOpacity>

@@ -2772,7 +2772,7 @@ function renderSSLList() {
       <span style="font-size:16px">${icon}</span>
       <div style="flex:1">
         <div style="font-weight:700;font-size:13px;color:var(--text)">${s.name || s.hostname}</div>
-        <div style="font-size:11px;color:#888">${s.hostname} · ${s.last_issuer || '?'} · ${s.last_days_left != null ? s.last_days_left + ' dias restantes' : 'Sin chequear'}</div>
+        <div style="font-size:11px;color:#888">${s.hostname} · ${detalleCert(s)}</div>
         <div style="font-size:10px;color:#999;margin-top:2px">Alertas: ${days.map(d => `<span style="background:var(--border2);padding:1px 6px;border-radius:3px;margin-right:3px">${d}d</span>`).join('')}${resumenDestinatarios(s.destinatarios) ? ' · ' + resumenDestinatarios(s.destinatarios) : ''}</div>
       </div>
       <div style="display:flex;gap:4px;align-items:center">
@@ -3026,6 +3026,20 @@ async function reenviarPermiso(tipo, monitorId, email) {
   else await avisar('No se pudo reenviar', r.data?.error || 'Error', '⚠️');
 }
 
+// Estado del certificado en una linea. Sin chequear se dice asi, y no
+// "Emisor: ?", que parece un problema del certificado y no falta de datos.
+function detalleCert(m) {
+  if (!m.last_check) return 'sin chequear todavia';
+  const partes = [];
+  if (m.last_days_left != null) {
+    partes.push(m.last_days_left < 0
+      ? 'vencido hace ' + Math.abs(m.last_days_left) + ' dias'
+      : 'caduca en ' + m.last_days_left + (m.last_days_left === 1 ? ' dia' : ' dias'));
+  }
+  if (m.last_expiry) partes.push(new Date(m.last_expiry).toLocaleDateString('es'));
+  if (m.last_issuer) partes.push(escHtml(m.last_issuer));
+  return partes.length ? partes.join(' · ') : 'sin datos';
+}
 function resumenDestinatarios(lista) {
   if (!Array.isArray(lista) || lista.length === 0) return '';
   const cuenta = { confirmado: 0, pendiente: 0, baja: 0 };

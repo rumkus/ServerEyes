@@ -2317,9 +2317,22 @@ async function checkSSLCert(hostname) {
   });
 }
 
-setInterval(async () => {
+// Los certificados se miran cada 6 horas, pero la tarea corre cada 15 minutos
+// y elige a los que les toca. Antes era un setInterval de 6 horas: como el
+// primer disparo recien ocurre 6 horas despues de arrancar, cualquier deploy
+// reiniciaba la cuenta y el chequeo no llegaba a correr nunca.
+const SSL_CADA_HORAS = 6;
+let sslChequeando = false;
+
+async function revisarCertificados() {
+  if (sslChequeando) return;
+  sslChequeando = true;
   try {
-    const monitors = await pool.query('SELECT sm.*, u.id as uid FROM ssl_monitors sm JOIN users u ON sm.user_id = u.id');
+    const monitors = await pool.query(
+      `SELECT sm.*, u.id as uid FROM ssl_monitors sm JOIN users u ON sm.user_id = u.id
+       WHERE sm.last_check IS NULL OR sm.last_check < NOW() - INTERVAL '${SSL_CADA_HORAS} hours'`
+    );
+    if (monitors.rows.length > 0) console.log(`[SSL] Revisando ${monitors.rows.length} certificado(s)`);
     for (const mon of monitors.rows) {
       const result = await checkSSLCert(mon.hostname);
       if (!result) {
@@ -2342,14 +2355,17 @@ setInterval(async () => {
         console.log(`[SSL] Alerta: ${mon.hostname} vence en ${result.days_left} dias`);
       }
     }
-  } catch (e) { console.error('Error SSL check:', e.message); }
-}, 6 * 3600000);
-setTimeout(async () => {
-  try {
-    const monitors = await pool.query('SELECT id FROM ssl_monitors WHERE last_check IS NULL LIMIT 10');
-    if (monitors.rows.length > 0) console.log(`[SSL] ${monitors.rows.length} certificados pendientes de chequeo inicial`);
-  } catch {}
-}, 30000);
+  } catch (e) {
+    console.error('Error SSL check:', e.message);
+  } finally {
+    sslChequeando = false;
+  }
+}
+
+setInterval(revisarCertificados, 15 * 60 * 1000);
+// Y una pasada al ratito de arrancar, para que un despliegue no deje los
+// certificados sin datos hasta la proxima vuelta.
+setTimeout(revisarCertificados, 45000);
 
 // ============== DETECTOR DE OFFLINE ==============
 
