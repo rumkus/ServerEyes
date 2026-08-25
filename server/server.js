@@ -2048,7 +2048,13 @@ app.post('/api/heartbeat', async (req, res) => {
       const mismaOferta = updatedMachine.update_offer_version === updateInfo.version;
       const ofertas = mismaOferta ? (updatedMachine.update_offers || 0) : 0;
       if (ofertas >= MAX_OFERTAS) {
-        console.warn(`[UPDATE] ${updatedMachine.machine_name}: se le ofrecio la v${updateInfo.version} ${ofertas} veces y sigue en v${reportedVersion}. Se deja de ofrecer; hay que actualizarla a mano.`);
+        // El aviso sale una sola vez, en el latido que cruza el limite. Repetirlo
+        // en cada latido llenaria el log del server con el mismo renglon cada 30
+        // segundos, que es justo el ruido que este freno viene a sacar.
+        if (ofertas === MAX_OFERTAS) {
+          console.warn(`[UPDATE] ${updatedMachine.machine_name}: se le ofrecio la v${updateInfo.version} ${ofertas} veces y sigue en v${reportedVersion}. Se deja de ofrecer; hay que actualizarla a mano.`);
+          pool.query('UPDATE machines SET update_offers = $1 WHERE id = $2', [MAX_OFERTAS + 1, updatedMachine.id]).catch(() => {});
+        }
         updateInfo = null;
       } else {
         pool.query(
