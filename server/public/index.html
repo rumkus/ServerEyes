@@ -489,12 +489,65 @@ function restaurarCampos(estado) {
   }
 }
 
+// Reemplazar todo el HTML cada 10 segundos hacia parpadear la pagina, perder
+// la posicion del scroll y reiniciar el mapa. En vez de eso recorremos el arbol
+// y tocamos solo lo que cambio: los nodos que quedan igual ni se enteran.
+function sincronizarAtributos(viejo, nuevo) {
+  for (const a of Array.from(nuevo.attributes)) {
+    if (viejo.getAttribute(a.name) !== a.value) viejo.setAttribute(a.name, a.value);
+  }
+  for (const a of Array.from(viejo.attributes)) {
+    if (!nuevo.hasAttribute(a.name)) viejo.removeAttribute(a.name);
+  }
+  // El atributo no refleja lo que el usuario tipeo, asi que los campos se
+  // sincronizan aparte y solo si no los esta usando en este momento.
+  const tag = viejo.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    if (document.activeElement !== viejo) {
+      if (viejo.type === 'checkbox' || viejo.type === 'radio') {
+        const marcado = nuevo.hasAttribute('checked');
+        if (viejo.checked !== marcado) viejo.checked = marcado;
+      } else {
+        const v = nuevo.getAttribute('value');
+        if (v !== null && viejo.value !== v) viejo.value = v;
+      }
+    }
+  }
+}
+
+function morfar(actual, nuevo) {
+  const viejos = Array.from(actual.childNodes);
+  const nuevos = Array.from(nuevo.childNodes);
+  const total = Math.max(viejos.length, nuevos.length);
+  for (let i = 0; i < total; i++) {
+    const a = viejos[i], b = nuevos[i];
+    if (!b) { if (a) actual.removeChild(a); continue; }
+    if (!a) { actual.appendChild(b.cloneNode(true)); continue; }
+    if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) {
+      actual.replaceChild(b.cloneNode(true), a);
+      continue;
+    }
+    if (a.nodeType === 3 || a.nodeType === 8) {
+      if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+      continue;
+    }
+    if (a.nodeType === 1) {
+      sincronizarAtributos(a, b);
+      // El mapa lo maneja Leaflet por dentro: si le tocamos los hijos se rompe.
+      if (a.id === 'nocMap') continue;
+      morfar(a, b);
+    }
+  }
+}
+
 function render() {
   if (notifDropdownOpen) return;
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
   const campos = capturarCampos();
-  el.innerHTML = buildLayout();
+  const molde = document.createElement('div');
+  molde.innerHTML = buildLayout();
+  morfar(el, molde);
   restaurarCampos(campos);
   attachEvents();
   if (activeNav === 'noc') {
@@ -1113,6 +1166,7 @@ function buildBottomNav(alertBadge) {
 // ── INLINE MAP ──
 let nocMapInstance = null;
 
+let _firmaMapa = null;
 function initInlineMap() {
   const el = document.getElementById('nocMap');
   if (!el) return;
@@ -1120,6 +1174,10 @@ function initInlineMap() {
     lat:parseFloat(m.geo_lat), lon:parseFloat(m.geo_lon),
     name:m.machine_name, online:m.is_online, ip:m.public_ip
   }));
+  // Rearmarlo en cada refresco te devolvia el zoom y el centro al inicio.
+  const firma = JSON.stringify(pts);
+  if (firma === _firmaMapa && nocMapInstance) return;
+  _firmaMapa = firma;
   if (pts.length===0) {
     el.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:13px;background:#f8f9fa;border-radius:10px">Sin datos de geolocalización</div>';
     return;
@@ -3429,7 +3487,10 @@ function marcarTodosSsl(tildado) {
   renderSSLList();
 }
 function barraSeleccion(cantidad, texto, accion, limpiar) {
-  if (cantidad === 0) return '';
+  // Devolvemos siempre un nodo, vacio cuando no hay nada seleccionado: si
+  // aparece y desaparece, cambia la cantidad de hermanos y el morfeo termina
+  // reemplazando la tabla entera en vez de solo lo que cambio.
+  if (cantidad === 0) return '<div></div>';
   return `<div style="display:flex;align-items:center;gap:10px;background:var(--bg);border-radius:8px;padding:8px 12px;margin-bottom:10px">
     <strong style="font-size:13px;color:var(--text)">${cantidad} seleccionada${cantidad > 1 ? 's' : ''}</strong>
     <button class="modal-btn sm" style="margin-top:0;padding:5px 12px;font-size:12px;border-radius:6px" onclick="${accion}">${texto}</button>
