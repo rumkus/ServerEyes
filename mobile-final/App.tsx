@@ -984,6 +984,17 @@ function AppContent() {
   // "a@b.com, c@d.com" -> ['a@b.com','c@d.com']. El servidor valida el formato.
   const correosDeTexto = (txt: string) => txt.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
 
+  // Abrir la configuracion de un monitor concreto. Desde el inicio se entra
+  // directo al que se toca; la pantalla con la lista completa queda en el menu.
+  const abrirEdicionUrl = (u: any) => {
+    setUrlEditId(u.id);
+    setUrlUrl(u.url);
+    setUrlName(u.name || '');
+    setUrlCorreos((u.destinatarios || []).filter((d: any) => d.estado !== 'baja').map((d: any) => d.email).join(', '));
+    setUrlInterval(String(u.interval_seconds || 300));
+    setShowAddUrl(true);
+  };
+
   // Un correo cargado que todavia no acepto no recibe nada: decirlo evita creer
   // que esta avisando cuando en realidad no.
   const reenviarPermiso = async (tipo: string, monitorId: number, email: string) => {
@@ -1399,12 +1410,7 @@ function AppContent() {
                 </TouchableOpacity>
                 <TouchableOpacity style={{flex: 1, paddingVertical: 10, alignItems: 'center', borderLeftWidth: 1, borderLeftColor: '#1a2a3a'}}
                   onPress={() => {
-                    setUrlEditId(u.id);
-                    setUrlUrl(u.url);
-                    setUrlName(u.name || '');
-                    setUrlCorreos((u.destinatarios || []).filter((d: any) => d.estado !== 'baja').map((d: any) => d.email).join(', '));
-                    setUrlInterval(String(u.interval_seconds || 300));
-                    setShowAddUrl(true);
+                    abrirEdicionUrl(u);
                   }}>
                   <Text style={{color: '#b388ff', fontSize: 12, fontWeight: '600'}}>{'✏'} Editar</Text>
                 </TouchableOpacity>
@@ -3340,7 +3346,7 @@ function AppContent() {
               </View>
             </TouchableOpacity>
             {!urlsCollapsed && urlMonitors.map((u: any) => (
-              <TouchableOpacity key={u.id} onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}
+              <TouchableOpacity key={u.id} onPress={() => abrirEdicionUrl(u)}
                 style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, borderLeftColor: u.is_up ? '#00e676' : '#ff5252'}}>
                 <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: u.is_up ? '#00e676' : '#ff5252', marginRight: 10}} />
                 <View style={{flex: 1}}>
@@ -4286,7 +4292,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.7.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.8.0</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -4334,7 +4340,7 @@ function AppContent() {
                 </View>
               </TouchableOpacity>
               {!urlsCollapsed && urlMonitors.map((u: any) => (
-                <TouchableOpacity key={u.id} onPress={async () => { await loadUrlMonitors(); setShowUrlMonitors(true); }}
+                <TouchableOpacity key={u.id} onPress={() => abrirEdicionUrl(u)}
                   style={{backgroundColor: '#0d1b2a', borderRadius: 12, padding: 12, marginBottom: 6, flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, borderLeftColor: u.is_up ? '#00e676' : '#ff5252'}}>
                   <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: u.is_up ? '#00e676' : '#ff5252', marginRight: 10}} />
                   <View style={{flex: 1}}>
