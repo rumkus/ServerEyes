@@ -533,8 +533,9 @@ function morfar(actual, nuevo) {
     }
     if (a.nodeType === 1) {
       sincronizarAtributos(a, b);
-      // El mapa lo maneja Leaflet por dentro: si le tocamos los hijos se rompe.
-      if (a.id === 'nocMap') continue;
+      // Contenedores que pinta otra funcion: buildLayout los genera vacios o con
+      // un "Cargando...", asi que morfearlos les borraria el contenido real.
+      if (a.id === 'nocMap' || a.id === 'ssl-list' || a.id === 'history-list' || a.id === 'history-list-client') continue;
       morfar(a, b);
     }
   }
@@ -2810,17 +2811,32 @@ function buildUrlsView() {
 }
 
 let sslMonitors = [];
+let _ultimoSslJson = '';
 async function loadSSLMonitors() {
   const r = await api('/api/ssl-monitors');
   // Sin el chequeo, una respuesta que no sea lista deja sslMonitors como un
   // objeto y rompe todo lo que despues hace .some() o .map() sobre el.
-  if (r.ok && Array.isArray(r.data)) { sslMonitors = r.data; renderSSLList(); }
+  if (r.ok && Array.isArray(r.data)) {
+    // render() llama a esto en cada vuelta estando en URLs: sin comparar, la
+    // lista se repintaba cada 10 segundos aunque no hubiera cambiado nada.
+    const nuevo = JSON.stringify(r.data);
+    sslMonitors = r.data;
+    if (nuevo !== _ultimoSslJson) { _ultimoSslJson = nuevo; renderSSLList(); }
+  }
 }
+// Mismo criterio que render(): actualizar en vez de reconstruir. Esta lista se
+// repinta sola cada 10 segundos y con innerHTML parpadeaba entera.
+function pintar(el, html) {
+  const molde = document.createElement('div');
+  molde.innerHTML = html;
+  morfar(el, molde);
+}
+
 function renderSSLList() {
   const el = document.getElementById('ssl-list');
   if (!el) return;
-  if (sslMonitors.length === 0) { el.innerHTML = '<p style="color:#888;text-align:center;font-size:13px">Sin certificados monitoreados</p>'; return; }
-  el.innerHTML = barraSeleccion(sslSeleccionados.size, '🌐 Vigilar que respondan', 'crearUrlDesdeSsl([...sslSeleccionados])', 'marcarTodosSsl(false)') +
+  if (sslMonitors.length === 0) { pintar(el, '<p style="color:#888;text-align:center;font-size:13px">Sin certificados monitoreados</p>'); return; }
+  pintar(el, barraSeleccion(sslSeleccionados.size, '🌐 Vigilar que respondan', 'crearUrlDesdeSsl([...sslSeleccionados])', 'marcarTodosSsl(false)') +
     sslMonitors.map(s => {
     const color = s.last_status === 'ok' ? '#4CAF50' : s.last_status === 'warning' ? '#FF9800' : s.last_status === 'expired' ? '#F44336' : '#888';
     const icon = s.last_status === 'ok' ? '🟢' : s.last_status === 'warning' ? '🟡' : s.last_status === 'expired' ? '🔴' : '⏳';
@@ -2840,7 +2856,7 @@ function renderSSLList() {
         <button class="modal-btn sm" style="background:#FFEBEE;color:#F44336;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="deleteSSLMonitor(${s.id})">✕</button>
       </div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 async function addSSLMonitor() {
   const hostname = document.getElementById('ssl-hostname')?.value?.trim();
