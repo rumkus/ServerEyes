@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.3.0';
+const AGENT_VERSION = '1.3.1';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -518,8 +518,23 @@ $inv.hosts_tiene_entradas = $entradas.Count -gt 0
 $inv | ConvertTo-Json -Depth 6 -Compress
 `;
 
+// Windows 10 / Server 2016 son la version 10.x. Todo lo anterior (6.3 es
+// Server 2012 R2, 6.1 es 2008 R2) queda afuera del relevamiento: ahi el agente
+// se comporta exactamente como antes de esta funcion. Node 18 declara esos
+// Windows como soporte experimental, asi que no vale la pena arriesgar el
+// monitoreo de un servidor por un dato de inventario.
+function windowsSoportaInventario() {
+  const mayor = parseInt(String(require('os').release()).split('.')[0], 10);
+  return Number.isFinite(mayor) && mayor >= 10;
+}
+
 function getInventario() {
   return new Promise((resolve) => {
+    if (!windowsSoportaInventario()) {
+      log(`Inventario omitido: Windows ${require('os').release()} es anterior a Windows 10 / Server 2016`);
+      resolve(null);
+      return;
+    }
     const { spawn } = require('child_process');
     // El script va por stdin y no por -Command ni -EncodedCommand: la linea de
     // comandos de Windows corta en ~8191 caracteres, y este script en base64
@@ -528,24 +543,33 @@ function getInventario() {
     const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-'],
       { windowsHide: true });
     let salida = '', errores = '';
-    const cortar = setTimeout(() => { ps.kill(); }, 90000);
+    let listo = false;
+    const terminar = (v) => { if (listo) return; listo = true; clearTimeout(cortar); resolve(v); };
+    const cortar = setTimeout(() => { try { ps.kill(); } catch {} terminar(null); }, 90000);
+    // Sin este manejador, si PowerShell no esta o muere antes de leer, el EPIPE
+    // se emite como 'error' sin escuchar y se lleva puesto al agente entero.
+    ps.stdin.on('error', (e) => { log('Inventario: no se pudo enviar el script: ' + e.message); terminar(null); });
     ps.stdout.on('data', d => { salida += d; });
     ps.stderr.on('data', d => { errores += d; });
-    ps.on('error', e => { clearTimeout(cortar); log('Inventario: no se pudo lanzar PowerShell: ' + e.message); resolve(null); });
+    ps.on('error', e => { log('Inventario: no se pudo lanzar PowerShell: ' + e.message); terminar(null); });
     ps.on('close', () => {
-      clearTimeout(cortar);
       const texto = salida.trim();
-      if (!texto) { log('Inventario: sin respuesta' + (errores ? ': ' + errores.trim().slice(0, 200) : '')); resolve(null); return; }
+      if (!texto) { log('Inventario: sin respuesta' + (errores ? ': ' + errores.trim().slice(0, 200) : '')); terminar(null); return; }
       try {
         const datos = JSON.parse(texto);
-        resolve(datos && datos.hostname ? datos : null);
+        terminar(datos && datos.hostname ? datos : null);
       } catch (e) {
         log('Inventario: respuesta ilegible: ' + e.message);
-        resolve(null);
+        terminar(null);
       }
     });
-    ps.stdin.write(INVENTARIO_PS);
-    ps.stdin.end();
+    try {
+      ps.stdin.write(INVENTARIO_PS);
+      ps.stdin.end();
+    } catch (e) {
+      log('Inventario: fallo al escribir el script: ' + e.message);
+      terminar(null);
+    }
   });
 }
 
@@ -705,7 +729,9 @@ async function sendHeartbeat(config) {
     // Recolectar info de seguridad cada 10 heartbeats (~5 min)
     heartbeatCount++;
     if (!cachedInventario || Date.now() - inventarioTomadoEn > INVENTARIO_CADA) {
-      const inv = await getInventario();
+      // El inventario es un extra: si algo sale mal, el agente tiene que seguir
+      // avisando si la maquina esta viva, que es para lo que esta.
+      const inv = await getInventario().catch(e => { log('Inventario: ' + e.message); return null; });
       if (inv) {
         cachedInventario = inv;
         inventarioTomadoEn = Date.now();
