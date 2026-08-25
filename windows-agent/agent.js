@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.2.0';
+const AGENT_VERSION = '1.3.0';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
