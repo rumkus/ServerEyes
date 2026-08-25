@@ -2696,6 +2696,12 @@ app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req,
     // reemplazar su propio ejecutable.
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256]);
 
+    // Publicar es la senal de "algo cambio, volve a intentar": se reinicia el
+    // freno de todas las maquinas. Sin esto, una maquina que se freno con el
+    // binario anterior quedaria sin recibir el nuevo, aunque el problema ya
+    // este resuelto.
+    await pool.query('UPDATE machines SET update_offers = 0, update_offer_version = NULL WHERE update_offer_version IS NOT NULL').catch(() => {});
+
     res.json({ message: 'Agente subido', version, size: buffer.length, downloadUrl, sha256 });
   } catch (error) {
     console.error('Error subiendo agente:', error);
@@ -2742,6 +2748,12 @@ app.post('/api/admin/client/upload', authenticateToken, requireAdmin, subirBinar
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256]);
+
+    // Publicar es la senal de "algo cambio, volve a intentar": se reinicia el
+    // freno de todas las maquinas. Sin esto, una maquina que se freno con el
+    // binario anterior quedaria sin recibir el nuevo, aunque el problema ya
+    // este resuelto.
+    await pool.query('UPDATE machines SET update_offers = 0, update_offer_version = NULL WHERE update_offer_version IS NOT NULL').catch(() => {});
 
     // Cada version ocupa ~90 MB en la base: no guardamos el historial entero.
     const podadas = await pool.query(
