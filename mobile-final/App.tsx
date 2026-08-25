@@ -348,6 +348,19 @@ function AppContent() {
   const [urlsCollapsed, setUrlsCollapsed] = useState(false);
   const [customModal, setCustomModal] = useState<any>(null);
 
+  // Toda pantalla sale por aca. Antes cada return tenia que acordarse de montar
+  // el <CustomModal> y faltaba en la mayoria: en esas pantallas showModal()
+  // guardaba el aviso en el estado pero no lo dibujaba nadie, asi que el
+  // dialogo simplemente no aparecia (por ejemplo "URL requerida" al guardar un
+  // monitor sin URL). Poniendolo en un solo lugar no se puede volver a olvidar.
+  const conDialogo = (pantalla: any) => (
+    <>
+      {pantalla}
+      <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title}
+        message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
+    </>
+  );
+
   // Funcion para volver a la pantalla principal
   const goBack = (): boolean => {
     if (menuOpen) { setMenuOpen(false); return true; }
@@ -1134,7 +1147,7 @@ function AppContent() {
   };
 
   if (showAddUrl) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title={urlEditId ? 'Editar Monitor URL' : 'Agregar Monitor URL'} />
@@ -1228,7 +1241,7 @@ function AppContent() {
         </View>
       </TouchableOpacity>
     );
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Avisar a una persona" subtitle={total > 0 ? `${total} seleccionado${total === 1 ? '' : 's'}` : undefined} />
@@ -1282,7 +1295,6 @@ function AppContent() {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setAsignarAbierto(false)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
         </ScrollView>
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -1300,7 +1312,7 @@ function AppContent() {
         <Text style={{fontSize: 10, color: th.sub, marginTop: 2, textTransform: 'uppercase'}}>{etiqueta}</Text>
       </View>
     );
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Historial de chequeos" subtitle={mon.name || mon.url} />
@@ -1367,7 +1379,7 @@ function AppContent() {
   }
 
   if (showUrlMonitors) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Monitoreo de URLs" subtitle={`${urlMonitors.length} monitores`} />
@@ -1463,7 +1475,6 @@ function AppContent() {
           <Text style={{fontSize: 24, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -1475,7 +1486,7 @@ function AppContent() {
   };
 
   if (showAddMaintenance) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Nueva Ventana" subtitle="Mantenimiento programado" />
@@ -1532,7 +1543,7 @@ function AppContent() {
 
     const fmtDate = (ts: string) => new Date(ts).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Mantenimiento" subtitle={`${maintenanceWindows.length} ventanas`} />
@@ -1608,7 +1619,6 @@ function AppContent() {
           <Text style={{fontSize: 28, color: '#0a1628', fontWeight: '700'}}>+</Text>
         </TouchableOpacity>
         <FloatingBackButton />
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -1657,7 +1667,7 @@ function AppContent() {
   if (supportTicketId) {
     const isClosed = supportTickets.find(t => t.id === supportTicketId)?.status === 'closed';
     const remaining = 1000 - supportMsg.length;
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor="#9C27B0" />
         {/* Header */}
@@ -1743,14 +1753,13 @@ function AppContent() {
             )}
           </View>
         )}
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
 
   if (showSupport) {
     const newMsgChars = supportNewMsg.length;
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor="#9C27B0" />
         <View style={{backgroundColor: '#9C27B0', paddingTop: 46, paddingHorizontal: 16, paddingBottom: 14, flexDirection: 'row', alignItems: 'center'}}>
@@ -1875,7 +1884,6 @@ function AppContent() {
           </>
         )}
         <FloatingBackButton />
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -1977,7 +1985,7 @@ function AppContent() {
   };
 
   if (scanCompare) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Comparacion" subtitle={`${scanCompare.scan1.name} vs ${scanCompare.scan2.name}`} />
@@ -2036,7 +2044,7 @@ function AppContent() {
   }
 
   if (scanDetail) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title={scanDetail.name} subtitle={`${scanDetail.device_count} dispositivos · ${new Date(scanDetail.created_at).toLocaleDateString('es')}`} />
@@ -2075,7 +2083,7 @@ function AppContent() {
   }
 
   if (showScanner) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Escaner de Red" subtitle={scanning ? scanProgress : `${scanResults.length} dispositivos`} />
@@ -2161,7 +2169,6 @@ function AppContent() {
           )}
         </ScrollView>
         <FloatingBackButton />
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -2177,7 +2184,7 @@ function AppContent() {
   };
 
   if (sslEditando) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Editar Certificado SSL" subtitle={sslEditando.hostname} />
@@ -2218,13 +2225,12 @@ function AppContent() {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setSslEditando(null)}><Text style={s.link}>Cancelar</Text></TouchableOpacity>
         </ScrollView>
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
 
   if (sslAdding) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Agregar Certificado SSL" />
@@ -2248,7 +2254,7 @@ function AppContent() {
   }
 
   if (showSSL) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: th.bg}}>
         <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
         <BackHeader title="Certificados SSL" subtitle={`${sslMonitors.length} monitoreados`} />
@@ -2372,7 +2378,7 @@ function AppContent() {
     const d = incidentDetail;
     const evtColors: any = { detected: '#ff5252', acknowledged: '#ff9800', update: '#2196F3', resolved: '#4CAF50' };
     const evtIcons: any = { detected: '🔴', acknowledged: '👁', update: '📝', resolved: '✅' };
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title={d.title} subtitle={d.machine_name} />
@@ -2435,7 +2441,7 @@ function AppContent() {
   if (showIncidents) {
     const open = incidents.filter(i => i.status === 'open');
     const resolved = incidents.filter(i => i.status === 'resolved');
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Incidentes" subtitle={`${open.length} abiertos`} />
@@ -2495,7 +2501,7 @@ function AppContent() {
   if (showNotifs) {
     const unread = userNotifs.filter(n => !n.is_read);
     const read = userNotifs.filter(n => n.is_read);
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Notificaciones" subtitle={`${unread.length} sin leer`} />
@@ -2548,7 +2554,7 @@ function AppContent() {
       create_maintenance:'🔧 Crear mantenimiento', create_url_monitor:'🌐 Agregar URL',
       wake_on_lan:'⚡ Wake-on-LAN'
     };
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Auditoria" subtitle={`${auditLog.length} acciones`} />
@@ -2609,7 +2615,7 @@ function AppContent() {
 
   // CONFIG EMAIL / SMTP
   if (showSmtp) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Configurar Email" subtitle="Notificaciones por email" />
@@ -2703,7 +2709,7 @@ function AppContent() {
 
   // CAMBIAR CONTRASEÑA
   if (showChangePass) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Cambiar contraseña" />
@@ -2735,7 +2741,7 @@ function AppContent() {
   if (outagesMachine) {
     const outages = outagesData?.outages || [];
     const totalDown = outages.reduce((a: number, o: any) => a + o.duration_min, 0);
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Historial de caidas" subtitle={outagesMachine.machine_name} />
@@ -2809,7 +2815,7 @@ function AppContent() {
       ? Math.round(uptimeData.reduce((a: number, d: any) => a + d.percentage, 0) / uptimeData.length)
       : 0;
 
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Uptime" subtitle={uptimeMachine.machine_name} />
@@ -2876,7 +2882,7 @@ function AppContent() {
 
   // IP HISTORY
   if (ipHistoryMachine) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Historial de IPs" subtitle={ipHistoryMachine.machine_name} />
@@ -2947,7 +2953,7 @@ function AppContent() {
       );
     };
 
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Metricas" subtitle={metricsMachine.machine_name} />
@@ -3005,7 +3011,7 @@ function AppContent() {
 
   // LOGS
   if (showLogs) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#16213e" />
         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
@@ -3060,7 +3066,7 @@ function AppContent() {
 
   // Pantalla de carga
   if (!appReady) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', alignItems: 'center'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <Text style={{fontSize: 40, marginBottom: 10}}>👁</Text>
@@ -3071,7 +3077,7 @@ function AppContent() {
 
   // LOGIN
   if (!token) {
-    return (
+    return conDialogo(
       <View style={s.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <Text style={s.icon}>👁</Text>
@@ -3104,7 +3110,7 @@ function AppContent() {
 
   // PAIRING
   if (showPairing) {
-    return (
+    return conDialogo(
       <View style={s.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>🔗</Text>
@@ -3132,7 +3138,7 @@ function AppContent() {
 
   // ADD MODAL
   if (showAdd) {
-    return (
+    return conDialogo(
       <View style={s.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         {newKey ? (
@@ -3389,7 +3395,7 @@ function AppContent() {
     const toggleDisk = (drive: string) => {
       setDetailMonitored(prev => prev.includes(drive) ? prev.filter(d => d !== drive) : [...prev, drive]);
     };
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#16213e" />
         <View style={{padding: 16, paddingTop: 50, backgroundColor: '#16213e'}}>
@@ -3483,7 +3489,7 @@ function AppContent() {
 
   // LOGS SCREEN
   if (logsMachine) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Logs del Agente" subtitle={logsMachine.machine_name} />
@@ -3519,7 +3525,7 @@ function AppContent() {
     const ports = servicesData?.open_ports || [];
     const running = svcs.filter((s: any) => s.state === 'RUNNING').length;
     const stopped = svcs.length - running;
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Servicios" subtitle={servicesMachine.machine_name} />
@@ -3579,7 +3585,7 @@ function AppContent() {
   if (configMachine) {
     const cfg = configData?.config;
     const backedUp = configData?.backed_up_at;
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Configuracion" subtitle={configMachine.machine_name} />
@@ -3624,7 +3630,7 @@ function AppContent() {
     const icons: {[k:string]:string} = { ok: '🛡', error: '🚨', warning: '⚠', never: '📋', not_configured: '❌', unknown: '❓' };
     const colors: {[k:string]:string} = { ok: '#00e676', error: '#ff5252', warning: '#ff9800', never: '#ff9800', not_configured: '#607d8b', unknown: '#607d8b' };
     const st = d?.status || 'unknown';
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Backup" subtitle={backupMachine.machine_name} />
@@ -3665,7 +3671,7 @@ function AppContent() {
   if (shareUserId) {
     const myMachines = machines.filter(m => !m.is_shared);
     const myUrls = urlMonitors.filter(u => !u.is_shared);
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
@@ -3761,7 +3767,7 @@ function AppContent() {
     const invitations = orgData?.invitations?.filter((i: any) => i.status === 'pending') || [];
     const isOwner = !org || team.find((t: any) => t.id === parseInt(String(token?.split('.')[1] ? JSON.parse(atob(token!.split('.')[1])).id : '0')))?.role === 'owner' || !org;
 
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
         <StatusBar barStyle="light-content" backgroundColor="#0d1b2a" />
         <BackHeader title="Empresa y Equipo" />
@@ -3954,7 +3960,6 @@ function AppContent() {
           <View style={{height: 80}} />
         </ScrollView>
         <FloatingBackButton />
-        <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
       </View>
     );
   }
@@ -3962,7 +3967,7 @@ function AppContent() {
   // AGENT UPDATE
   if (showAgentUpdate) {
     const outdated = machines.filter(m => m.agent_version && agentVersion && m.agent_version !== agentVersion);
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <ScrollView contentContainerStyle={{padding: 24, paddingTop: 50}}>
@@ -4024,7 +4029,7 @@ function AppContent() {
       updateMachine(pickerMachine.id, { grupo });
       setShowGroupPicker(null);
     };
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e', justifyContent: 'center', padding: 24}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <Text style={{fontSize: 40, textAlign: 'center', marginBottom: 10}}>📁</Text>
@@ -4078,7 +4083,7 @@ function AppContent() {
 
   // EDIT MODAL
   if (editingMachine) {
-    return (
+    return conDialogo(
       <View style={{flex: 1, backgroundColor: '#1a1a2e'}}>
         <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
         <BackHeader title="Editar maquina" subtitle={editingMachine.machine_name} />
@@ -4235,7 +4240,7 @@ function AppContent() {
   const onlineCount = machines.filter(m => m.is_online).length;
   const offlineCount = machines.length - onlineCount;
 
-  return (
+  return conDialogo(
     <View style={{flex: 1, backgroundColor: th.bg}}>
       <StatusBar barStyle={th.statusBar} backgroundColor={th.card} />
       {/* Header */}
@@ -4405,7 +4410,6 @@ function AppContent() {
           </TouchableOpacity>
         </TouchableOpacity>
       ) : null}
-      <CustomModal visible={!!customModal} icon={customModal?.icon} title={customModal?.title} message={customModal?.message} buttons={customModal?.buttons} onClose={() => setCustomModal(null)} />
     </View>
   );
 }
