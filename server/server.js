@@ -656,6 +656,14 @@ async function initDB() {
     console.error('[SEGURIDAD] Error re-cifrando contraseñas SMTP:', e.message);
   }
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS smtp_from VARCHAR(255)`).catch(() => {});
+  // Sin registro de cuando salio el ultimo, la unica forma de no repetirlo era
+  // acertar la hora exacta, y si el servidor se reiniciaba en esa hora la
+  // semana se perdia sin dejar rastro.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_report_at TIMESTAMP`).catch(() => {});
+  // Al estrenar la columna todos quedan en NULL, y NULL significa "nunca se le
+  // mando": sin esto, el primer arranque le dispararia el reporte a todos los
+  // usuarios de una. Se los da por al dia y el primero sale el lunes que viene.
+  await pool.query(`UPDATE users SET last_report_at = NOW() WHERE last_report_at IS NULL`).catch(() => {});
   // Hacer admin al primer usuario
   await pool.query(`UPDATE users SET is_admin = true WHERE id = 1 AND is_admin = false`).catch(() => {});
   // Tabla para almacenar archivo del agente
@@ -4446,15 +4454,23 @@ setInterval(async () => {
   }
 }, 60000);
 
-// Purga diaria del historial de chequeos (retencion 30 dias)
-setInterval(async () => {
+// Purga del historial de chequeos (retencion 30 dias).
+//
+// Estaba en un setInterval de 24 horas: desplegando a diario no llegaba a
+// correr nunca y la tabla crecia sin techo. Borrar por fecha es idempotente,
+// asi que correrlo cada hora no cuesta nada y no depende de que el proceso
+// sobreviva un dia entero.
+async function purgarHistorialUrls() {
   try {
     const r = await pool.query(`DELETE FROM url_check_history WHERE checked_at < NOW() - INTERVAL '30 days'`);
     if (r.rowCount > 0) console.log(`[URL-MONITOR] Historial purgado: ${r.rowCount} registros`);
   } catch (err) {
     console.error('[URL-MONITOR] Error purgando historial:', err.message);
   }
-}, 24 * 60 * 60 * 1000);
+}
+
+setInterval(purgarHistorialUrls, 60 * 60 * 1000);
+setTimeout(purgarHistorialUrls, 120000);
 
 // ============== WEEKLY REPORT ==============
 
@@ -4528,18 +4544,49 @@ async function generateWeeklyReport(userId) {
   }
 }
 
-// Weekly report every Monday at 8:00 (check every hour)
-setInterval(async () => {
-  const now = new Date();
-  if (now.getUTCDay() === 1 && now.getUTCHours() === 11) {
-    try {
-      const users = await pool.query('SELECT id FROM users WHERE email_notifications = true');
-      for (const u of users.rows) {
-        generateWeeklyReport(u.id);
-      }
-    } catch {}
+// Reporte semanal: lunes a la mañana (11 UTC = 8 en Argentina).
+//
+// Antes preguntaba "son exactamente las 11 del lunes?" una vez por hora. Si el
+// deploy caia en esa hora, esa semana no salia y nadie se enteraba, porque no
+// quedaba registro de si se habia mandado. Ahora se guarda cuando salio cada
+// uno y la condicion mira eso, no el reloj:
+//   - nunca se le mando: sale
+//   - es lunes despues de las 11 y el ultimo tiene mas de 3 dias: sale
+//   - pasaron mas de 8 dias: sale igual, aunque no sea lunes
+// La ultima linea es la que hace que un fin de semana caido no cueste la
+// semana entera.
+let reporteCorriendo = false;
+
+async function mandarReportesSemanales() {
+  if (reporteCorriendo) return;
+  reporteCorriendo = true;
+  try {
+    const ahora = new Date();
+    const esLunesTemprano = ahora.getUTCDay() === 1 && ahora.getUTCHours() >= 11;
+    const users = await pool.query(
+      `SELECT id FROM users
+       WHERE email_notifications = true
+         AND (last_report_at IS NULL
+              OR (${esLunesTemprano ? 'true' : 'false'} AND last_report_at < NOW() - INTERVAL '3 days')
+              OR last_report_at < NOW() - INTERVAL '8 days')`
+    );
+    if (users.rows.length === 0) return;
+    console.log(`[REPORT] Enviando reporte semanal a ${users.rows.length} usuario(s)`);
+    for (const u of users.rows) {
+      // Se marca antes de mandar: si el envio falla, no queremos reintentarlo
+      // cada 15 minutos durante una semana.
+      await pool.query('UPDATE users SET last_report_at = NOW() WHERE id = $1', [u.id]);
+      await generateWeeklyReport(u.id);
+    }
+  } catch (e) {
+    console.error('[REPORT] Error:', e.message);
+  } finally {
+    reporteCorriendo = false;
   }
-}, 3600000);
+}
+
+setInterval(mandarReportesSemanales, 15 * 60 * 1000);
+setTimeout(mandarReportesSemanales, 90000);
 
 // ============== WAKE-ON-LAN ==============
 
