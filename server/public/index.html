@@ -1307,14 +1307,23 @@ async function openIncident(id) {
 }
 
 async function addIncidentNote(id) {
-  const msg = prompt('Agregar nota al incidente:');
+  const msg = await pedirTexto({
+    icono: '📝', titulo: 'Agregar nota al incidente',
+    mensaje: 'Queda registrada en la linea de tiempo, con la fecha y quien la escribio.',
+    marcador: 'Que paso o que se hizo', ok: 'Agregar'
+  });
   if (!msg) return;
   await api('/api/incidents/' + id + '/events', { method: 'POST', body: JSON.stringify({ event_type: 'update', message: msg }) });
   openIncident(id);
 }
 
 async function resolveIncident(id) {
-  const notes = prompt('Notas de resolucion (opcional):');
+  const notes = await pedirTexto({
+    icono: '✅', titulo: 'Resolver el incidente',
+    mensaje: 'Podes dejar en claro que lo causo y como se soluciono. Es opcional.',
+    marcador: 'Notas de resolucion', ok: 'Resolver'
+  });
+  if (notes === null) return;
   await api('/api/incidents/' + id + '/resolve', { method: 'POST', body: JSON.stringify({ resolution_notes: notes || '' }) });
   incidentDetail = null;
   loadIncidents();
@@ -2873,10 +2882,15 @@ async function deleteSSLMonitor(id) {
   await api('/api/ssl-monitors/' + id, { method: 'DELETE' });
   loadSSLMonitors();
 }
-function editSSLDays(id) {
+async function editSSLDays(id) {
   const mon = sslMonitors.find(s => s.id === id);
   const current = (mon?.alert_days || [30,14,7,1]).join(', ');
-  const input = prompt('Dias antes del vencimiento para alertar (separados por coma):', current);
+  const input = await pedirTexto({
+    icono: '🔔', titulo: 'Avisos de vencimiento',
+    mensaje: 'Cuantos dias antes de que venza el certificado queres que te avisemos.',
+    detalle: 'Separados por coma. Por ejemplo <strong>30, 14, 7, 1</strong> te avisa un mes antes, dos semanas, una semana y el dia anterior.',
+    marcador: '30, 14, 7, 1', valor: current, ok: 'Guardar'
+  });
   if (input === null) return;
   const days = input.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0).sort((a,b) => b-a);
   if (days.length === 0) { avisar('Error', 'Ingresa al menos un numero', '⚠️'); return; }
@@ -2921,7 +2935,7 @@ async function saveUrlMonitor() {
   closeModal();
   loadUrlMonitors();
 }
-// confirm() y avisar('Aviso', , 'ℹ️') del navegador cortan la pagina con un cartel gris que
+// Los dialogos nativos del navegador cortan la pagina con un cartel gris que
 // dice "servereyes.app dice". Estos son del mismo estilo
 // que el resto y devuelven una promesa, asi que se usan igual de simple.
 let _resolverConfirm = null;
@@ -2931,6 +2945,7 @@ function confirmar(op) {
     activeModal = { type: 'confirmar', ...op };
     pauseRefresh();
     render();
+    if (op.campo) setTimeout(() => { const c = document.getElementById('confirm-campo'); if (c) { c.focus(); c.select(); } }, 60);
   });
 }
 function avisar(titulo, mensaje, icono) {
@@ -2938,12 +2953,25 @@ function avisar(titulo, mensaje, icono) {
 }
 function responderConfirm(valor) {
   const r = _resolverConfirm;
+  // Con campo, aceptar devuelve el texto y cancelar devuelve null. Hay que
+  // leerlo antes de cerrar: al cerrar el input deja de existir.
+  const conCampo = activeModal && activeModal.campo;
+  const texto = conCampo ? valorDelCampo() : null;
   _resolverConfirm = null;
   activeModal = null;
   resumeRefresh();
   render();
-  if (r) r(valor);
+  if (r) r(conCampo ? (valor ? (texto || '') : null) : valor);
 }
+// Pedir un dato con el mismo modal, en vez de prompt(): mismo estilo, y de
+// paso se puede explicar que se espera en vez de meter todo en una linea.
+function pedirTexto(op) {
+  return confirmar({ ...op, campo: true });
+}
+function valorDelCampo() {
+  return (document.getElementById('confirm-campo') || {}).value;
+}
+
 function buildConfirmModal() {
   const m = activeModal;
   const colorOk = m.peligro ? '#F44336' : '#2196F3';
@@ -2955,6 +2983,8 @@ function buildConfirmModal() {
     </div>
     ${m.mensaje ? `<p style="text-align:center;color:#888;font-size:14px;margin:10px 0 0;line-height:1.5">${escHtml(m.mensaje)}</p>` : ''}
     ${m.detalle ? `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12px;color:#999;line-height:1.5">${m.detalle}</div>` : ''}
+    ${m.campo ? `<input class="modal-input" id="confirm-campo" style="margin-top:14px" placeholder="${escHtml(m.marcador || '')}" value="${escHtml(m.valor || '')}"
+      onkeydown="if(event.key==='Enter')responderConfirm(true)"/>` : ''}
     <div style="display:flex;gap:8px;margin-top:18px">
       ${m.soloAceptar ? '' : `<button class="modal-btn ghost" style="flex:1;margin:0" onclick="responderConfirm(false)">${escHtml(m.cancelar || 'Cancelar')}</button>`}
       <button class="modal-btn" style="flex:1;margin:0;background:${colorOk}" onclick="responderConfirm(true)">${escHtml(m.ok || 'Aceptar')}</button>

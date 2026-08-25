@@ -94,6 +94,26 @@ tr:hover { background: #1a1a3e; }
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes scaleIn{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
 
+/* Dialogos del panel: reemplazan alert/confirm/prompt del navegador */
+.dlg-box { background: #16213e; border-radius: 20px; padding: 28px; max-width: 440px; width: 100%; box-shadow: 0 12px 48px rgba(0,0,0,.5); animation: scaleIn .25s ease-out; }
+.dlg-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.dlg-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+.dlg-head h3 { color: #eee; margin: 0 0 4px; font-size: 17px; font-weight: 700; }
+.dlg-head p { color: #8ba0b3; font-size: 13px; margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.dlg-detalle { background: #0d1b2a; border-radius: 12px; padding: 14px; margin-bottom: 18px; color: #aaa; font-size: 13px; line-height: 1.6; }
+.dlg-opciones { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.dlg-opcion { text-align: left; background: #0f0f23; color: #eee; border: 1px solid #2a2a4a; border-radius: 10px; padding: 12px 14px; font-size: 14px; font-family: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.dlg-opcion:hover { border-color: #ff9800; background: #1a1a3e; }
+.dlg-input { width: 100%; background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 10px; padding: 12px 14px; color: #eee; font-size: 15px; font-family: inherit; outline: none; margin-bottom: 18px; }
+.dlg-input:focus { border-color: #ff9800; }
+.dlg-btns { display: flex; gap: 10px; }
+.dlg-btn { flex: 1; padding: 12px; border: none; border-radius: 12px; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; }
+.dlg-ok { color: #0f0f23; }
+.dlg-ok:hover { filter: brightness(1.1); }
+.dlg-cancel { background: #1a2a3a; color: #888; border: 1px solid #2a2a4a; font-weight: 600; }
+.dlg-cancel:hover { background: #2a3a4a; color: #eee; }
+@media (max-width: 480px) { .dlg-box { padding: 22px; } }
+
 /* Responsive */
 @media (max-width: 768px) {
   .content { padding: 12px; }
@@ -349,7 +369,7 @@ async function doUpload() {
   if (!selectedFile) return;
   const version = document.getElementById('up-version').value.trim();
   const changelog = document.getElementById('up-changelog').value.trim();
-  if (!version) { alert('Ingresa la version'); return; }
+  if (!version) { avisar('Falta la version', 'Escribi el numero de version que vas a publicar, por ejemplo 1.4.2. Es lo que compara cada agente para saber si tiene que actualizarse.', '&#9888;&#65039;'); return; }
 
   const target = uploadTarget;
   uploading = true;
@@ -614,7 +634,13 @@ function renderNotifHistory() {
 }
 
 async function deleteNotif(id) {
-  if (!confirm('Eliminar esta notificacion?')) return;
+  const ok = await confirmar({
+    icono: '&#128465;&#65039;', peligro: true, titulo: 'Eliminar la notificacion',
+    subtitulo: 'Se borra del historial del panel.',
+    detalle: 'Los push que ya salieron no se pueden retirar: siguen en el celular de quien los recibio.',
+    ok: 'Eliminar'
+  });
+  if (!ok) return;
   await api('/api/admin/notifications/' + id, { method: 'DELETE' });
   loadNotifs();
 }
@@ -916,35 +942,18 @@ async function sendAdminReply() {
   openAdminTicket(adminSupportActive);
 }
 
-function closeAdminTicket(id) {
+async function closeAdminTicket(id) {
   const t = adminSupportTickets.find(x => x.id === id);
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn .2s';
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-  overlay.innerHTML = `<div style="background:#16213e;border-radius:20px;padding:32px;max-width:420px;width:90%;box-shadow:0 12px 48px rgba(0,0,0,.5);animation:scaleIn .25s ease-out">
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
-      <div style="width:48px;height:48px;border-radius:50%;background:#0d2818;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        <span style="font-size:24px">✅</span>
-      </div>
-      <div>
-        <h3 style="color:#eee;margin:0 0 4px;font-size:17px">Cerrar ticket #${id}</h3>
-        <p style="color:#607d8b;font-size:12px;margin:0">${t?.email || 'Usuario'} — ${t?.subject || ''}</p>
-      </div>
-    </div>
-    <div style="background:#0d1b2a;border-radius:12px;padding:14px;margin-bottom:20px">
-      <p style="color:#aaa;font-size:13px;margin:0;line-height:1.6">
-        Al cerrar este ticket:<br>
-        <span style="color:#607d8b">•</span> El usuario no podra enviar mas mensajes<br>
-        <span style="color:#607d8b">•</span> Podra reabrir el ticket si lo necesita<br>
-        <span style="color:#607d8b">•</span> O crear uno nuevo por otro tema
-      </p>
-    </div>
-    <div style="display:flex;gap:10px">
-      <button style="flex:1;padding:12px;background:#4CAF50;color:#fff;border:none;border-radius:12px;cursor:pointer;font-weight:700;font-size:14px;transition:background .2s" onmouseover="this.style.background='#43A047'" onmouseout="this.style.background='#4CAF50'" onclick="doCloseTicket(${id});this.closest('div[style*=fixed]').remove()">Cerrar ticket</button>
-      <button style="flex:1;padding:12px;background:#1a2a3a;color:#888;border:1px solid #2a2a4a;border-radius:12px;cursor:pointer;font-size:14px;transition:background .2s" onmouseover="this.style.background='#2a3a4a'" onmouseout="this.style.background='#1a2a3a'" onclick="this.closest('div[style*=fixed]').remove()">Cancelar</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
+  const ok = await confirmar({
+    icono: '&#9989;', color: '#4CAF50', titulo: 'Cerrar ticket #' + id,
+    subtitulo: (t?.email || 'Usuario') + (t?.subject ? ' \u2014 ' + t.subject : ''),
+    detalle: 'Al cerrar este ticket:<br>' +
+      '<span style="color:#607d8b">&bull;</span> El usuario no podra enviar mas mensajes<br>' +
+      '<span style="color:#607d8b">&bull;</span> Podra reabrir el ticket si lo necesita<br>' +
+      '<span style="color:#607d8b">&bull;</span> O crear uno nuevo por otro tema',
+    ok: 'Cerrar ticket'
+  });
+  if (ok) doCloseTicket(id);
 }
 
 async function doCloseTicket(id) {
@@ -990,10 +999,19 @@ function setTab(t) {
 }
 
 async function toggleAdmin(userId, makeAdmin) {
-  if (!confirm(makeAdmin ? 'Hacer admin a este usuario?' : 'Quitar admin a este usuario?')) return;
+  const ok = await confirmar(makeAdmin ? {
+    icono: '&#128081;', color: '#ff9800', titulo: 'Dar permisos de administrador',
+    detalle: 'Va a poder ver todas las cuentas, bloquear usuarios, resetear contrase&ntilde;as y publicar versiones del agente y del cliente.',
+    ok: 'Hacerlo admin'
+  } : {
+    icono: '&#128100;', titulo: 'Quitar permisos de administrador',
+    subtitulo: 'Queda como usuario comun, con sus propias maquinas y monitores.',
+    ok: 'Quitar permisos'
+  });
+  if (!ok) return;
   const res = await api('/api/admin/toggle-admin', { method: 'POST', body: JSON.stringify({ user_id: userId, is_admin: makeAdmin }) });
   if (res.ok) loadData();
-  else alert(res.data?.error || 'Error');
+  else errorAdmin(res);
 }
 
 async function blockUser(userId, email) {
@@ -1005,34 +1023,144 @@ async function blockUser(userId, email) {
     'Violacion de terminos',
     'Otro'
   ];
-  const choice = prompt('Razon para bloquear a ' + email + ':\\n\\n' + reasons.map((r,i) => (i+1) + ') ' + r).join('\\n') + '\\n\\nIngresa el numero o escribe la razon:');
-  if (!choice) return;
-  const num = parseInt(choice);
-  const reason = (num >= 1 && num <= reasons.length) ? reasons[num - 1] : choice;
+  let reason = await elegir({
+    icono: '&#128683;', peligro: true, titulo: 'Bloquear la cuenta', subtitulo: email,
+    detalle: 'No va a poder entrar al panel ni a la app, y sus agentes dejan de reportar. El motivo le aparece al intentar entrar.',
+    opciones: [...reasons.slice(0, -1), 'Otro motivo...']
+  });
+  if (reason === null) return;
+  if (reason === 'Otro motivo...') {
+    reason = await pedirTexto({
+      icono: '&#9999;&#65039;', peligro: true, titulo: 'Motivo del bloqueo', subtitulo: email,
+      marcador: 'Se lo mostramos al usuario', ok: 'Bloquear'
+    });
+    if (!reason || !reason.trim()) return;
+    reason = reason.trim();
+  }
   const res = await api('/api/admin/block-user', { method: 'POST', body: JSON.stringify({ user_id: userId, is_blocked: true, block_reason: reason }) });
-  if (res.ok) { alert('Usuario bloqueado: ' + reason); loadData(); }
-  else alert(res.data?.error || 'Error');
+  if (res.ok) { await avisar('Cuenta bloqueada', email + ' \u2014 ' + reason, '&#128683;'); loadData(); }
+  else errorAdmin(res);
 }
 
 async function unblockUser(userId) {
-  if (!confirm('Desbloquear este usuario?')) return;
+  const ok = await confirmar({
+    icono: '&#128275;', color: '#00e676', titulo: 'Desbloquear la cuenta',
+    subtitulo: 'Vuelve a entrar al panel y a la app, y sus agentes reportan de nuevo.',
+    ok: 'Desbloquear'
+  });
+  if (!ok) return;
   const res = await api('/api/admin/block-user', { method: 'POST', body: JSON.stringify({ user_id: userId, is_blocked: false }) });
   if (res.ok) loadData();
-  else alert(res.data?.error || 'Error');
+  else errorAdmin(res);
 }
 
 async function setPlan(userId, plan) {
   const res = await api('/api/admin/set-plan', { method: 'POST', body: JSON.stringify({ user_id: userId, plan }) });
   if (res.ok) loadData();
-  else alert(res.data?.error || 'Error');
+  else errorAdmin(res);
 }
 
 async function resetPassword(userId, email) {
-  const newPass = prompt('Nueva contraseña para ' + email + ':');
-  if (!newPass || newPass.length < 6) { if (newPass !== null) alert('Minimo 6 caracteres'); return; }
+  const newPass = await pedirTexto({
+    icono: '&#128273;', color: '#ff9800', titulo: 'Resetear la contraseña', subtitulo: email,
+    detalle: 'Se guarda tal cual la escribas, asi que despues se la tenes que pasar vos. La anterior deja de servir al instante.',
+    marcador: 'Minimo 6 caracteres', ok: 'Resetear'
+  });
+  if (newPass === null) return;
+  if (newPass.length < 6) {
+    await avisar('Muy corta', 'La contraseña necesita al menos 6 caracteres.', '&#9888;&#65039;');
+    return resetPassword(userId, email);
+  }
   const res = await api('/api/admin/reset-password', { method: 'POST', body: JSON.stringify({ user_id: userId, new_password: newPass }) });
-  if (res.ok) alert('Contraseña reseteada para ' + email);
-  else alert(res.data?.error || 'Error');
+  if (res.ok) avisar('Contraseña cambiada', 'Pasale la nueva a ' + email + ' por un canal seguro.', '&#9989;');
+  else errorAdmin(res);
+}
+
+// ── DIALOGOS ──
+//
+// alert(), confirm() y prompt() salen con el cartel gris del navegador, con el
+// "servereyes.app dice" arriba y la pagina congelada atras. Ademas prompt() no
+// deja explicar nada: entra todo en una linea de texto. Estos usan la misma
+// caja que el resto del panel y dejan poner icono, explicacion y opciones.
+let _resolverDlg = null;
+
+function escApp(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function _teclaDlg(e) { if (e.key === 'Escape') cerrarDlg(null); }
+
+function cerrarDlg(valor) {
+  const r = _resolverDlg;
+  _resolverDlg = null;
+  const ov = document.getElementById('dlg-overlay');
+  if (ov) ov.remove();
+  document.removeEventListener('keydown', _teclaDlg);
+  if (r) r(valor);
+}
+
+function aceptarDlg() {
+  const c = document.getElementById('dlg-campo');
+  cerrarDlg(c ? (c.value || '') : true);
+}
+
+function dialogo(op) {
+  cerrarDlg(null); // si habia uno abierto, no dejarlo colgado
+  return new Promise(resolve => {
+    _resolverDlg = resolve;
+    const color = op.peligro ? '#ff5252' : (op.color || '#00d4ff');
+    const fondo = op.peligro ? '#2d1117' : '#0a3d62';
+    const ov = document.createElement('div');
+    ov.id = 'dlg-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px;animation:fadeIn .2s';
+    ov.onclick = e => { if (e.target === ov) cerrarDlg(null); };
+    ov.innerHTML = `<div class="dlg-box">
+      <div class="dlg-head">
+        <div class="dlg-icon" style="background:${fondo}">${op.icono || '&#8505;&#65039;'}</div>
+        <div style="min-width:0">
+          <h3>${escApp(op.titulo || '')}</h3>
+          ${op.subtitulo ? `<p>${escApp(op.subtitulo)}</p>` : ''}
+        </div>
+      </div>
+      ${op.detalle ? `<div class="dlg-detalle">${op.detalle}</div>` : ''}
+      ${op.opciones ? `<div class="dlg-opciones">${op.opciones.map(o =>
+        `<button type="button" class="dlg-opcion" data-v="${escApp(o)}" onclick="cerrarDlg(this.dataset.v)">${escApp(o)}</button>`).join('')}</div>` : ''}
+      ${op.campo ? `<input class="dlg-input" id="dlg-campo" placeholder="${escApp(op.marcador || '')}" value="${escApp(op.valor || '')}">` : ''}
+      <div class="dlg-btns">
+        ${op.sinCancelar ? '' : `<button type="button" class="dlg-btn dlg-cancel" onclick="cerrarDlg(null)">${escApp(op.cancelar || 'Cancelar')}</button>`}
+        ${op.opciones ? '' : `<button type="button" class="dlg-btn dlg-ok" style="background:${color}" onclick="aceptarDlg()">${escApp(op.ok || 'Aceptar')}</button>`}
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    document.addEventListener('keydown', _teclaDlg);
+    const c = document.getElementById('dlg-campo');
+    if (c) {
+      c.focus();
+      c.select();
+      c.onkeydown = e => { if (e.key === 'Enter') aceptarDlg(); };
+    }
+  });
+}
+
+// Cancelar (Escape, click afuera o el boton) siempre devuelve null, asi que
+// tanto "if (!await confirmar(...))" como "if (texto === null)" funcionan.
+function avisar(titulo, mensaje, icono, op) {
+  return dialogo({ titulo, subtitulo: mensaje, icono: icono || '&#8505;&#65039;', ok: 'Entendido', sinCancelar: true, ...op });
+}
+function confirmar(op) {
+  return dialogo(op).then(v => v === true);
+}
+function pedirTexto(op) {
+  return dialogo({ ...op, campo: true }).then(v => (typeof v === 'string' ? v : null));
+}
+function elegir(op) {
+  return dialogo(op).then(v => (typeof v === 'string' ? v : null));
+}
+
+// Todos los endpoints de esta pantalla fallan igual: mostrar el motivo que
+// mando el server, y si no mando ninguno al menos decir que no se guardo.
+function errorAdmin(res) {
+  return avisar('No se pudo completar', res.data?.error || 'El servidor rechazo la operacion y no dio un motivo.', '&#10060;');
 }
 
 // Init
