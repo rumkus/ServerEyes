@@ -1048,7 +1048,12 @@ async function initDB() {
   // Cuantas veces seguidas se le ofrecio el mismo update a esta maquina sin que
   // cambie de version. Sirve para cortar el bucle de updates que no prenden.
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS update_offers INTEGER DEFAULT 0`).catch(() => {});
-  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS update_offer_version VARCHAR(20)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS update_offer_version VARCHAR(40)`).catch(() => {});
+  // Guarda "tipo:version" y no solo la version: en una maquina puede haber
+  // instalados el agente y el client de escritorio, y los dos latidos escriben
+  // en este mismo registro. Sin el tipo, los intentos fallidos de uno frenaban
+  // los updates legitimos del otro.
+  await pool.query(`ALTER TABLE machines ALTER COLUMN update_offer_version TYPE VARCHAR(40)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS inventory_at TIMESTAMP`).catch(() => {});
 
   // Wake-on-LAN
@@ -2050,8 +2055,12 @@ app.post('/api/heartbeat', async (req, res) => {
     // que estar aca: es el unico lado que se puede arreglar para los que ya
     // estan en la calle.
     const MAX_OFERTAS = 5;
+    // La clave lleva el tipo de programa: el agente y el client comparten el
+    // registro de la maquina, y sin esto los intentos fallidos de uno dejaban
+    // sin actualizar al otro.
+    const claveOferta = updateInfo ? `${agent_type || 'agent'}:${updateInfo.version}` : null;
     if (updateInfo) {
-      const mismaOferta = updatedMachine.update_offer_version === updateInfo.version;
+      const mismaOferta = updatedMachine.update_offer_version === claveOferta;
       const ofertas = mismaOferta ? (updatedMachine.update_offers || 0) : 0;
       if (ofertas >= MAX_OFERTAS) {
         // El aviso sale una sola vez, en el latido que cruza el limite. Repetirlo
@@ -2065,11 +2074,13 @@ app.post('/api/heartbeat', async (req, res) => {
       } else {
         pool.query(
           'UPDATE machines SET update_offers = $1, update_offer_version = $2 WHERE id = $3',
-          [ofertas + 1, updateInfo.version, updatedMachine.id]
+          [ofertas + 1, claveOferta, updatedMachine.id]
         ).catch(() => {});
       }
-    } else if (updatedMachine.update_offer_version) {
-      // No hay nada que ofrecer: o se actualizo, o el admin publico otra cosa.
+    } else if (updatedMachine.update_offer_version && updatedMachine.update_offer_version.startsWith(`${agent_type || 'agent'}:`)) {
+      // Nada que ofrecerle a ESTE programa: o se actualizo, o el admin publico
+      // otra cosa. No se toca el contador del otro, que puede estar frenado con
+      // razon.
       pool.query(
         'UPDATE machines SET update_offers = 0, update_offer_version = NULL WHERE id = $1',
         [updatedMachine.id]
