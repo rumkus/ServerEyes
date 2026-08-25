@@ -138,7 +138,25 @@ async function sincronizarDestinatarios(tipo, monitorId, correos, owner, nombreM
     );
     await pedirPermiso(owner, email, token, nombreMonitor, queSeVigila);
   }
+  await recomputarNotifyEmails(tipo, monitorId);
   return { agregados: nuevos.length, quitados: sacados.length };
+}
+
+// La tabla manda: notify_emails queda como reflejo para que el campo del
+// editor muestre lo mismo que la pantalla de asignar. Sin esto, cargar por un
+// lado y mirar por el otro da la sensacion de que no se guardo nada.
+async function recomputarNotifyEmails(tipo, monitorId) {
+  try {
+    const tabla = tipo === 'ssl' ? 'ssl_monitors' : 'url_monitors';
+    const q = await pool.query(
+      "SELECT email FROM monitor_recipients WHERE tipo = $1 AND monitor_id = $2 AND estado <> 'baja' ORDER BY email",
+      [tipo, monitorId]
+    );
+    await pool.query(`UPDATE ${tabla} SET notify_emails = $1 WHERE id = $2`,
+      [JSON.stringify(q.rows.map(r => r.email)), monitorId]);
+  } catch (e) {
+    console.error('[AVISO] Error sincronizando notify_emails:', e.message);
+  }
 }
 
 // El mail que decide todo: quien lo agrego, que se vigila, que le va a llegar,
@@ -4624,10 +4642,62 @@ app.post('/api/notificaciones/asignar', authenticateToken, async (req, res) => {
       }
     }
 
+    // Todos los monitores que cambiaron, agregados y quitados
+    const tocados = new Set([...actuales.map(a => clave(a.tipo, a.monitor_id)), ...deseados]);
+    for (const k of tocados) {
+      const [t, id] = k.split(':');
+      await recomputarNotifyEmails(t, Number(id));
+    }
+
     logAudit(req.user.id, 'asignar_destinatario', 'monitor_recipients', null, `${correo}: +${nuevos.length} -${quitados}`, req.ip);
     res.json({ email: correo, agregados: nuevos.length, quitados });
   } catch (error) {
     console.error('Error asignando destinatario:', error.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Reenviar el pedido de permiso a alguien que todavia no acepto. Mismo token:
+// si el mail anterior aparece despues, los dos enlaces siguen sirviendo.
+app.post('/api/notificaciones/reenviar', authenticateToken, async (req, res) => {
+  try {
+    const { tipo, monitor_id, email } = req.body;
+    if (!['url', 'ssl'].includes(tipo) || !monitor_id || !email) {
+      return res.status(400).json({ error: 'Faltan datos' });
+    }
+    const correo = String(email).trim().toLowerCase();
+
+    // Que el monitor sea suyo
+    const tabla = tipo === 'ssl' ? 'ssl_monitors' : 'url_monitors';
+    const m = await pool.query(`SELECT * FROM ${tabla} WHERE id = $1 AND user_id = $2`, [monitor_id, req.user.id]);
+    if (m.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
+
+    const d = await pool.query(
+      'SELECT token, estado FROM monitor_recipients WHERE tipo = $1 AND monitor_id = $2 AND email = $3',
+      [tipo, monitor_id, correo]
+    );
+    if (d.rows.length === 0) return res.status(404).json({ error: 'Ese correo no esta en este monitor' });
+    if (d.rows[0].estado === 'confirmado') return res.status(400).json({ error: 'Ya habia aceptado, no hace falta reenviar' });
+
+    // Si se habia dado de baja y el dueño reenvia, vuelve a pendiente: le
+    // estamos volviendo a preguntar, no dandolo de alta por la fuerza.
+    if (d.rows[0].estado === 'baja') {
+      await pool.query("UPDATE monitor_recipients SET estado = 'pendiente', baja_at = NULL WHERE tipo = $1 AND monitor_id = $2 AND email = $3",
+        [tipo, monitor_id, correo]);
+    }
+
+    const duenio = await traerDuenio(req.user.id);
+    if (!duenio) return res.status(500).json({ error: 'Error interno' });
+    const fila = m.rows[0];
+    const nombre = fila.name || fila.url || fila.hostname;
+    const que = tipo === 'ssl'
+      ? `Que el certificado de ${fila.hostname} no venza sin aviso.`
+      : `Que ${fila.url} responda correctamente.`;
+    await pedirPermiso(duenio, correo, d.rows[0].token, nombre, que);
+    await recomputarNotifyEmails(tipo, monitor_id);
+    res.json({ message: `Reenviado a ${correo}` });
+  } catch (error) {
+    console.error('Error reenviando permiso:', error.message);
     res.status(500).json({ error: 'Error interno' });
   }
 });

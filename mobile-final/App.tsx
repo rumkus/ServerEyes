@@ -984,6 +984,51 @@ function AppContent() {
   // "a@b.com, c@d.com" -> ['a@b.com','c@d.com']. El servidor valida el formato.
   const correosDeTexto = (txt: string) => txt.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
 
+  // Un correo cargado que todavia no acepto no recibe nada: decirlo evita creer
+  // que esta avisando cuando en realidad no.
+  const reenviarPermiso = async (tipo: string, monitorId: number, email: string) => {
+    const res = await apiRequest('/api/notificaciones/reenviar', {
+      method: 'POST', body: JSON.stringify({ tipo, monitor_id: monitorId, email })
+    }, token);
+    if (res.ok) {
+      showModal('✉️', 'Reenviado', `Le volvimos a mandar el pedido de permiso a ${email}. Va a recibir avisos recien cuando acepte.`);
+      await loadUrlMonitors();
+      await loadSSLMonitors();
+    } else {
+      showModal('⚠️', 'No se pudo reenviar', res.data?.error || 'Error');
+    }
+  };
+
+  const DetalleDestinatarios = ({ tipo, monitorId, lista }: any) => {
+    if (!Array.isArray(lista) || lista.length === 0) return null;
+    return (
+      <View style={{backgroundColor: th.card, borderRadius: 8, paddingHorizontal: 12, marginTop: -8, marginBottom: 14}}>
+        {lista.map((d: any, i: number) => {
+          const confirmado = d.estado === 'confirmado';
+          const baja = d.estado === 'baja';
+          return (
+            <View key={d.email + i} style={{flexDirection: 'row', alignItems: 'center', paddingVertical: 9,
+              borderBottomWidth: i === lista.length - 1 ? 0 : 1, borderBottomColor: th.border}}>
+              <Text style={{fontSize: 14, marginRight: 8}}>{confirmado ? '✅' : baja ? '🚫' : '⏳'}</Text>
+              <View style={{flex: 1}}>
+                <Text style={{color: th.text, fontSize: 12}} numberOfLines={1}>{d.email}</Text>
+                <Text style={{color: confirmado ? '#00e676' : baja ? th.sub : '#ff9800', fontSize: 11}}>
+                  {confirmado ? 'Recibe los avisos' : baja ? 'Se dio de baja' : 'Aun no confirmo la recepcion de mail'}
+                </Text>
+              </View>
+              {!confirmado && (
+                <TouchableOpacity onPress={() => reenviarPermiso(tipo, monitorId, d.email)}
+                  style={{backgroundColor: '#1a2a3a', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5}}>
+                  <Text style={{color: '#00d4ff', fontSize: 11, fontWeight: '600'}}>Reenviar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   // Asignar una direccion a varios monitores de una, en vez de entrar a cada
   // monitor por separado. Un solo mail de permiso por todo lo que se tilde.
   const marcarSegunCorreo = (email: string, datos: any) => {
@@ -1103,6 +1148,7 @@ function AppContent() {
           <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14}}>
             A cada uno le llega un mail pidiendole permiso, con tu nombre y que se vigila. No recibe alertas hasta que acepta, y puede darse de baja solo.
           </Text>
+          {urlEditId && <DetalleDestinatarios tipo="url" monitorId={urlEditId} lista={urlMonitors.find((x: any) => x.id === urlEditId)?.destinatarios} />}
           {!urlEditId && (
             <TouchableOpacity onPress={() => setUrlVigilarSsl(!urlVigilarSsl)}
               style={{flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, paddingRight: 8}}>
@@ -1316,7 +1362,7 @@ function AppContent() {
         <BackHeader title="Monitoreo de URLs" subtitle={`${urlMonitors.length} monitores`} />
         <TouchableOpacity style={{backgroundColor: '#3d2a5c', borderRadius: 8, padding: 10, marginHorizontal: 16, marginBottom: 8, alignItems: 'center'}}
           onPress={abrirAsignar}>
-          <Text style={{color: '#b388ff', fontSize: 13, fontWeight: '600'}}>{'✉'} Avisar a una persona</Text>
+          <Text style={{color: '#b388ff', fontSize: 13, fontWeight: '600'}}>{'✉'} Avisar a una persona de varios dominios</Text>
         </TouchableOpacity>
         <ScrollView contentContainerStyle={{padding: 16, paddingBottom: 100}}>
           {urlMonitors.length === 0 ? (
@@ -1356,7 +1402,7 @@ function AppContent() {
                     setUrlEditId(u.id);
                     setUrlUrl(u.url);
                     setUrlName(u.name || '');
-                    setUrlCorreos((u.notify_emails || []).join(', '));
+                    setUrlCorreos((u.destinatarios || []).filter((d: any) => d.estado !== 'baja').map((d: any) => d.email).join(', '));
                     setUrlInterval(String(u.interval_seconds || 300));
                     setShowAddUrl(true);
                   }}>
@@ -2146,6 +2192,7 @@ function AppContent() {
           <Text style={{color: th.sub, fontSize: 11, marginTop: -8, marginBottom: 14}}>
             A cada uno le llega un mail pidiendole permiso. No recibe alertas hasta que acepta, y puede darse de baja solo.
           </Text>
+          {sslEditando && <DetalleDestinatarios tipo="ssl" monitorId={sslEditando.id} lista={sslMonitors.find((x: any) => x.id === sslEditando.id)?.destinatarios} />}
           <TouchableOpacity style={s.btn} onPress={async () => {
             const host = sslHostname.trim().replace(/^https?:\/\//i, '').split('/')[0];
             if (!host) { showModal('⚠️', 'Error', 'Dominio requerido'); return; }
@@ -2253,7 +2300,7 @@ function AppContent() {
                       setSslHostname(mon.hostname);
                       setSslName(mon.name || '');
                       setSslDias((mon.alert_days || [30, 14, 7, 1]).join(', '));
-                      setSslCorreos((mon.notify_emails || []).join(', '));
+                      setSslCorreos((mon.destinatarios || []).filter((d: any) => d.estado !== 'baja').map((d: any) => d.email).join(', '));
                       setSslEditando(mon);
                     }}>
                     <Text style={{color: '#00d4ff', fontSize: 12}}>✏ Editar</Text>
@@ -4239,7 +4286,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.7.0</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.7.1</Text>
             </View>
           </View>
         </TouchableOpacity>
