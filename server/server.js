@@ -1981,15 +1981,21 @@ app.post('/api/heartbeat', async (req, res) => {
       const urlKey = type === 'client' ? 'client_url' : 'agent_url';
       const verRow = await pool.query("SELECT value FROM app_settings WHERE key = $1", [verKey]);
       const urlRow = await pool.query("SELECT value FROM app_settings WHERE key = $1", [urlKey]);
-      if (verRow.rows.length > 0 && urlRow.rows.length > 0) {
-        const latestVersion = verRow.rows[0].value;
-        const updateUrl = urlRow.rows[0].value;
-        if (latestVersion && updateUrl && reportedVersion && isNewerVersion(reportedVersion, latestVersion)) {
-          updateInfo = { version: latestVersion, url: updateUrl, origen: type };
-        }
+      const latestVersion = verRow.rows.length > 0 ? verRow.rows[0].value : null;
+      const updateUrl = urlRow.rows.length > 0 ? urlRow.rows[0].value : null;
+      const hayVersionPropia = !!(latestVersion && updateUrl);
+      if (hayVersionPropia && reportedVersion && isNewerVersion(reportedVersion, latestVersion)) {
+        updateInfo = { version: latestVersion, url: updateUrl, origen: type };
       }
-      // Fallback: si no hay version especifica para client, probar con agent
-      if (!updateInfo && type === 'client') {
+      // Fallback para el client: solo si NO tiene una version propia publicada.
+      //
+      // Antes la condicion era "no hay update que ofrecerle", que tambien se
+      // cumple cuando el client YA ESTA AL DIA. Ahi caia al fallback y se le
+      // ofrecia el binario del AGENTE, que es otro programa: lo bajaba, lo
+      // instalaba, seguia reportando su propia version y volvia a pedirlo en el
+      // siguiente latido. Un client al dia quedaba pidiendo el ejecutable del
+      // agente para siempre.
+      if (!hayVersionPropia && type === 'client') {
         const verRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'");
         const urlRow2 = await pool.query("SELECT value FROM app_settings WHERE key = 'agent_url'");
         if (verRow2.rows.length > 0 && urlRow2.rows.length > 0 && verRow2.rows[0].value && urlRow2.rows[0].value && reportedVersion && isNewerVersion(reportedVersion, verRow2.rows[0].value)) {
