@@ -570,6 +570,20 @@ function render() {
   }
 }
 
+// Una maquina con una version MAS NUEVA que la publicada no esta
+// desactualizada. Comparando con !== se la marcaba igual, y encima decia que se
+// iba a actualizar sola: el server compara bien y nunca la baja de version.
+function versionAtrasada(actual, publicada) {
+  if (!actual || !publicada) return false;
+  const a = String(actual).split('.').map(Number);
+  const b = String(publicada).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((b[i] || 0) > (a[i] || 0)) return true;
+    if ((b[i] || 0) < (a[i] || 0)) return false;
+  }
+  return false;
+}
+
 function buildLayout() {
   const filtered = getFiltered();
   const online  = machines.filter(m=>m.is_online).length;
@@ -589,7 +603,7 @@ function buildLayout() {
   const avgDisk = Math.round(avgArr(disks));
   const avgPing = Math.round(avgArr(pings));
 
-  const updateOutdated = machines.filter(m=>m.agent_version&&agentInfo.version&&m.agent_version!==agentInfo.version);
+  const updateOutdated = machines.filter(m=>versionAtrasada(m.agent_version, agentInfo.version));
 
   let updateBanner = '';
   if (!dismissedUpdate && updateOutdated.length>0) {

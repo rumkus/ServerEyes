@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.3.3';
+const AGENT_VERSION = '1.3.4';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -728,8 +728,29 @@ async function selfUpdate(url, newVersion, config, sha256Esperado) {
       // Windows deja renombrar un exe aunque este en uso
       `if exist "${EXE_PATH}" rename "${EXE_PATH}" servereyes-old.exe`,
       `if exist "${newPath}" move /y "${newPath}" "${EXE_PATH}"`,
-      // Si el reemplazo no quedo, volver a la version anterior en vez de dejar
-      // la carpeta sin agente.
+      // Comprobar que lo que quedo instalado es de verdad lo que bajamos. El
+      // sha256 del archivo descargado ya se verifico antes, asi que lo que se
+      // esta cubriendo aca es que el rename y el move hayan salido bien: si
+      // fallan a medias, sin esto arrancaria lo que haya quedado.
+      //
+      // certutil devuelve el hash en la segunda linea, con espacios entre bytes
+      // en los Windows viejos y sin espacios en los nuevos, asi que se los saca
+      // antes de comparar. El encabezado va traducido segun el idioma, por eso
+      // se salta por posicion y no por texto.
+      `set "esperado=${String(sha256Esperado).toLowerCase()}"`,
+      'set "calculado="',
+      `for /f "skip=1 delims=" %%H in ('certutil -hashfile "${EXE_PATH}" SHA256 2^>nul') do if not defined calculado set "calculado=%%H"`,
+      'set "calculado=%calculado: =%"',
+      // Si certutil no esta, se aplica igual: quedarse sin poder actualizar
+      // nunca mas seria peor que no poder verificar esta vez.
+      'if not defined calculado (',
+      `  echo [update] No se pudo calcular el hash, se aplica sin verificar >> "${LOG_FILE}"`,
+      ') else if /i not "%calculado%"=="%esperado%" (',
+      `  echo [update] El binario instalado no coincide con el descargado, se vuelve a la version anterior >> "${LOG_FILE}"`,
+      `  if exist "${EXE_PATH}" del /f /q "${EXE_PATH}"`,
+      ')',
+      // Si el reemplazo no quedo (o lo acabamos de descartar por el hash),
+      // volver a la version anterior en vez de dejar la carpeta sin agente.
       `if not exist "${EXE_PATH}" if exist "${oldPath}" rename "${oldPath}" "${exeName}"`,
       // El lock quedo con el pid del proceso que acabamos de matar
       `if exist "${LOCK_FILE}" del /f /q "${LOCK_FILE}"`,

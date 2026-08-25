@@ -262,7 +262,7 @@ function renderMachines() {
 function renderAgent() {
   const a = data.latestAgent;
   const cv = data.configuredVersion;
-  const outdated = data.machines.filter(m => m.agent_version && cv && m.agent_version !== cv);
+  const outdated = data.machines.filter(m => versionAtrasada(m.agent_version, cv));
 
   return `
     <div class="section"><h2 class="orange">&#128228; Agente Actual</h2>
@@ -1083,6 +1083,20 @@ async function resetPassword(userId, email) {
 // deja explicar nada: entra todo en una linea de texto. Estos usan la misma
 // caja que el resto del panel y dejan poner icono, explicacion y opciones.
 let _resolverDlg = null;
+
+// Una maquina con una version MAS NUEVA que la publicada no esta
+// desactualizada. Comparando con !== se la marcaba igual, y encima decia que se
+// iba a actualizar sola: el server compara bien y nunca la baja de version.
+function versionAtrasada(actual, publicada) {
+  if (!actual || !publicada) return false;
+  const a = String(actual).split('.').map(Number);
+  const b = String(publicada).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((b[i] || 0) > (a[i] || 0)) return true;
+    if ((b[i] || 0) < (a[i] || 0)) return false;
+  }
+  return false;
+}
 
 function escApp(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
