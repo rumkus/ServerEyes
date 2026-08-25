@@ -2642,12 +2642,44 @@ app.get('/api/admin/overview', authenticateToken, requireAdmin, async (req, res)
 });
 
 // Subir nuevo agente (base64)
+// Rechazar publicar un binario identico al que ya esta publicado, pero con otro
+// numero de version.
+//
+// Esto existe por el bucle de updates que nos costo una noche: se subio el
+// ejecutable viejo declarando una version nueva. El server lo sirvio fielmente,
+// los agentes lo instalaron bien y siguieron reportando su version real, asi que
+// el server volvia a ofrecerles la actualizacion en cada latido, para siempre.
+//
+// Se compara por hash y no leyendo la version de adentro del ejecutable: pkg
+// empaqueta el codigo como bytecode, y un binario de 37 MB con Node adentro trae
+// cadenas de version de todas sus dependencias, asi que buscar "1.3.4" ahi da
+// falsos positivos en cualquier direccion.
+async function mismoBinarioYaPublicado(sha256, version, claveSha, claveVersion) {
+  const shaRow = await pool.query('SELECT value FROM app_settings WHERE key = $1', [claveSha]).catch(() => null);
+  const verRow = await pool.query('SELECT value FROM app_settings WHERE key = $1', [claveVersion]).catch(() => null);
+  const shaPublicado = shaRow?.rows?.[0]?.value;
+  const versionPublicada = verRow?.rows?.[0]?.value;
+  if (!shaPublicado || shaPublicado !== sha256) return null;
+  if (versionPublicada === version) return null; // republicar lo mismo es inofensivo
+  return `Este ejecutable es exactamente el mismo que ya esta publicado como version ${versionPublicada}, `
+    + `pero lo estas subiendo como ${version}. Si se publica, los agentes lo van a instalar y van a seguir `
+    + `reportando ${versionPublicada}, asi que el servidor les va a ofrecer la actualizacion una y otra vez. `
+    + `Fijate de subir el ejecutable recien compilado (el de la carpeta dist).`;
+}
+
 app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { version, filename, file_base64, changelog } = req.body;
     if (!version || !file_base64) return res.status(400).json({ error: 'version y file_base64 requeridos' });
     const buffer = Buffer.from(file_base64, 'base64');
     if (buffer.length < 1024 * 100) return res.status(400).json({ error: 'Archivo muy chico, parece invalido' });
+
+    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+    const repetido = await mismoBinarioYaPublicado(sha256, version, 'agent_sha256', 'agent_version');
+    if (repetido) {
+      console.warn('[UPLOAD] Publicacion de agente rechazada:', repetido);
+      return res.status(400).json({ error: repetido });
+    }
 
     await pool.query(
       'INSERT INTO agent_files (version, filename, file_data, file_size, changelog) VALUES ($1, $2, $3, $4, $5)',
@@ -2662,7 +2694,6 @@ app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req,
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
     // Hash del binario que acabamos de guardar: el agente lo verifica antes de
     // reemplazar su propio ejecutable.
-    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256]);
 
     res.json({ message: 'Agente subido', version, size: buffer.length, downloadUrl, sha256 });
@@ -2692,13 +2723,22 @@ app.post('/api/admin/client/upload', authenticateToken, requireAdmin, subirBinar
     const buffer = req.file.buffer;
     if (buffer.length < 1024 * 1024) return res.status(400).json({ error: 'Archivo muy chico, parece invalido' });
 
+    const shaClient = crypto.createHash('sha256').update(buffer).digest('hex');
+    const repetidoClient = await mismoBinarioYaPublicado(shaClient, version, 'client_sha256', 'client_version');
+    if (repetidoClient) {
+      console.warn('[UPLOAD] Publicacion de client rechazada:', repetidoClient);
+      return res.status(400).json({ error: repetidoClient });
+    }
+
     await pool.query(
       'INSERT INTO client_files (version, filename, file_data, file_size, changelog) VALUES ($1, $2, $3, $4, $5)',
       [version, req.file.originalname || 'ServerEyes-Portable.exe', buffer, buffer.length, changelog || '']
     );
 
     const downloadUrl = `${urlPublica()}/api/client/download`;
-    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+    // Reusa el hash ya calculado: el client pesa ~90 MB y no vale la pena
+    // recorrerlo dos veces.
+    const sha256 = shaClient;
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_sha256', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [sha256]);
