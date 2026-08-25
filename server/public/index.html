@@ -768,7 +768,7 @@ function buildNocView(healthPct, alerts, avgCpu, avgRam, avgDisk, avgPing, filte
           <button class="action-btn" onclick="activeNav='servidores';render()"><span class="ab-icon">🖥️</span>Servidores</button>
           <button class="action-btn" onclick="exportCSV()"><span class="ab-icon">📄</span>CSV Export</button>
           <button class="action-btn" onclick="exportPDF()"><span class="ab-icon">📋</span>Informe PDF</button>
-          <button class="action-btn" onclick="openAgentModal()"><span class="ab-icon">📦</span>Agente</button>
+
           <button class="action-btn" onclick="openCmdHistory()"><span class="ab-icon">💻</span>Historial CMD</button>
           <button class="action-btn" onclick="activeNav='alertas';render()"><span class="ab-icon">🔔</span>Alertas</button>
           <button class="action-btn" onclick="activeNav='urls';render()"><span class="ab-icon">🌐</span>URLs ${urlMonitors.filter(u=>!u.is_up).length>0?'('+urlMonitors.filter(u=>!u.is_up).length+' ⚠)':''}</button>
@@ -1002,9 +1002,10 @@ function buildAjustesView() {
     ${buildMaintenanceSection()}
     ${buildAuditSection()}
     <div class="panel">
-      <div class="panel-title"><span class="dot" style="background:#FF9800"></span>${t('agent_management')}<button class="help-btn" onclick="event.stopPropagation();showHelp('agent',this)">?</button></div>
-      <p style="font-size:13px;color:#666;margin-bottom:14px">Versión configurada: <strong>${agentInfo.version||'No configurada'}</strong>${agentInfo.url?` · <a href="${agentInfo.url}" target="_blank" style="color:#2196F3;font-size:12px">URL</a>`:''}</p>
-      <button class="modal-btn sm" onclick="openAgentModal()">⚙️ Configurar versión de agente</button>
+      <div class="panel-title"><span class="dot" style="background:#FF9800"></span>${t('agent_management')}</div>
+      <p style="font-size:13px;color:#666;margin-bottom:8px">Versión publicada del agente: <strong>${agentInfo.version||'No configurada'}</strong></p>
+      <p style="font-size:12px;color:#888;line-height:1.5;margin:0">Los agentes se actualizan solos en el proximo heartbeat. Publicar una version
+      nueva se hace desde el panel de administracion, que es donde se sube el ejecutable y se calcula su hash.</p>
     </div>
     <div class="panel">
       <div class="panel-title"><span class="dot" style="background:#4CAF50"></span>Descargas y Guia de Instalacion<button class="help-btn" onclick="event.stopPropagation();showHelp('downloads',this)">?</button></div>
@@ -1546,7 +1547,7 @@ function buildModal() {
     case 'logs':     return buildLogsModal();
     case 'metrics':  return buildMetricsModal();
     case 'cmd':      return buildCmdModal();
-    case 'agent':    return buildAgentModal();
+
     case 'mapfull':  return buildMapFullModal();
     case 'services': return renderServicesModal();
     case 'ports':    return renderPortsModal();
@@ -2490,11 +2491,12 @@ function buildCmdModal() {
 }
 
 // ── AGENT MODAL ──
-function openAgentModal() {
-  activeModal={type:'agent'};
-  render();
-}
-function buildAgentModal() {
+//
+// Sacado del panel del usuario: publicar una version la descarga y ejecuta cada
+// agente instalado, asi que /api/agent/version pide admin. Dejarlo aca solo
+// servia para que un usuario comun apretara Guardar y recibiera un 403. Se
+// publica desde /admin, que ademas sube el binario y calcula su hash.
+function buildAgentModalSinUso() {
   const outdated=machines.filter(m=>m.agent_version&&agentInfo.version&&m.agent_version!==agentInfo.version);
   return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
   <div class="modal-box">
@@ -2920,7 +2922,7 @@ async function saveUrlMonitor() {
   loadUrlMonitors();
 }
 // confirm() y avisar('Aviso', , 'ℹ️') del navegador cortan la pagina con un cartel gris que
-// dice "servereyes-production.up.railway.app dice". Estos son del mismo estilo
+// dice "servereyes.app dice". Estos son del mismo estilo
 // que el resto y devuelven una promesa, asi que se usan igual de simple.
 let _resolverConfirm = null;
 function confirmar(op) {
@@ -3309,15 +3311,17 @@ function buildAuditSection() {
         }
         if (a.target_type) detailText += (detailText?' ':'') + '('+a.target_type+' #'+a.target_id+')';
         const fullLabel = actionLabels[a.action]||a.action;
-        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);font-size:13px">
-          <span style="font-size:16px">${fullLabel.split(' ')[0]}</span>
-          <div style="flex:1">
+        // La fecha va a la izquierda, en una sola linea y con ancho fijo: a la
+        // derecha quedaba apretada contra el borde y partida en dos renglones
+        // diminutos, que es lo que hacia imposible leerla.
+        const cuando = date.toLocaleDateString('es', { day: '2-digit', month: '2-digit' }) +
+          ' ' + date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+        return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border2);font-size:13px">
+          <span style="font-size:16px;flex-shrink:0">${fullLabel.split(' ')[0]}</span>
+          <div style="flex-shrink:0;min-width:95px;font-size:12px;color:var(--text);opacity:.75;font-variant-numeric:tabular-nums">${cuando}</div>
+          <div style="flex:1;min-width:0">
             <div style="font-weight:600;color:var(--text)">${fullLabel.split(' ').slice(1).join(' ')}</div>
-            <div style="font-size:11px;color:#999">${detailText}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:11px;color:#999">${date.toLocaleDateString('es',{day:'2-digit',month:'short'})}</div>
-            <div style="font-size:11px;color:#ccc">${date.toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}</div>
+            ${detailText ? `<div style="font-size:11px;color:#999;overflow:hidden;text-overflow:ellipsis">${detailText}</div>` : ''}
           </div>
         </div>`;
       }).join('')}
@@ -3354,7 +3358,7 @@ function buildAddUrlModal() {
     <input type="hidden" id="um-status" value="${m ? (m.expected_status || 200) : 200}"/>
     <label class="modal-label">Avisar tambien a (opcional)</label>
     <input class="modal-input" id="um-correos" placeholder="cliente@empresa.com, soporte@empresa.com" value="${m ? escHtml((m.destinatarios || []).filter(d => d.estado !== 'baja').map(d => d.email).join(', ')) : ''}"/>
-    <p style="font-size:11px;color:#888;margin:-6px 0 12px">A cada uno le llega un mail pidiendole permiso, con tu nombre y que se vigila. <strong>No recibe alertas hasta que acepta</strong>, y puede darse de baja solo. Separados por coma.</p>
+    <p style="font-size:11px;color:#888;margin:2px 0 16px;line-height:1.5">A cada uno le llega un mail pidiendole permiso, con tu nombre y que se vigila. <strong>No recibe alertas hasta que acepta</strong>, y puede darse de baja solo. Separados por coma.</p>
     ${m ? detalleDestinatarios('url', m.id, m.destinatarios) : ''}
     <input type="hidden" id="um-timeout" value="${m ? (m.timeout_ms || 10000) : 10000}"/>
     ${m ? '' : `<label style="display:flex;align-items:flex-start;gap:8px;margin:4px 0 12px;cursor:pointer">
@@ -3397,7 +3401,7 @@ function buildEditSslModal() {
     <input class="modal-input" id="sm-dias" placeholder="30, 14, 7, 1" value="${escHtml(dias)}"/>
     <label class="modal-label">Avisar tambien a (opcional)</label>
     <input class="modal-input" id="sm-correos" placeholder="cliente@empresa.com" value="${escHtml((m.destinatarios || []).filter(d => d.estado !== 'baja').map(d => d.email).join(', '))}"/>
-    <p style="font-size:11px;color:#888;margin:-6px 0 12px">A cada uno le llega un mail pidiendole permiso. <strong>No recibe alertas hasta que acepta</strong>, y puede darse de baja solo.</p>
+    <p style="font-size:11px;color:#888;margin:2px 0 16px;line-height:1.5">A cada uno le llega un mail pidiendole permiso. <strong>No recibe alertas hasta que acepta</strong>, y puede darse de baja solo.</p>
     ${detalleDestinatarios('ssl', m.id, m.destinatarios)}
     <button class="modal-btn" onclick="saveSslMonitor()">Guardar cambios</button>
     <button class="modal-btn ghost" onclick="crearUrlDesdeSsl(${m.id})">🌐 Vigilar tambien que el sitio responda</button>

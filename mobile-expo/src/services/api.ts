@@ -1,4 +1,4 @@
-const API_URL = 'https://servereyes-production.up.railway.app';
+const API_URL = 'https://servereyes.app';
 
 export async function apiRequest(path: string, options: any = {}, token: string | null = null) {
   const headers: any = { 'Content-Type': 'application/json', ...options.headers };

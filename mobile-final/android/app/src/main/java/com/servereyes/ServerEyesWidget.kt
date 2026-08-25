@@ -24,7 +24,7 @@ import kotlin.concurrent.thread
 class ServerEyesWidget : AppWidgetProvider() {
 
     companion object {
-        private const val API_URL = "https://servereyes-production.up.railway.app"
+        private const val API_URL = "https://servereyes.app"
         private const val ACTION_REFRESH = "com.servereyes.WIDGET_REFRESH"
         private const val PREFS_NAME = "ServerEyesWidgetPrefs"
         private const val KEY_TOKEN = "servereyes_token"

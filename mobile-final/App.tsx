@@ -44,7 +44,7 @@ const almacenSeguro = {
 };
 const rnBiometrics = new ReactNativeBiometrics();
 
-const API_URL = 'https://servereyes-production.up.railway.app';
+const API_URL = 'https://servereyes.app';
 
 // i18n
 const LANGS: {[k:string]: {name:string, flag:string, [k:string]:string}} = {
@@ -4310,7 +4310,7 @@ function AppContent() {
                 <Text style={{fontSize: 18, marginRight: 14, width: 28, textAlign: 'center'}}>{'🚪'}</Text>
                 <Text style={{color: '#ff5252', fontSize: 14, fontWeight: '600'}}>{t('logout')}</Text>
               </TouchableOpacity>
-              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.8.1</Text>
+              <Text style={{color: '#444', fontSize: 10, textAlign: 'center', paddingBottom: 8}}>ServerEyes v3.9.0</Text>
             </View>
           </View>
         </TouchableOpacity>

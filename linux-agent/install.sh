@@ -1,6 +1,6 @@
 #!/bin/bash
 # ServerEyes Linux Agent - Instalador
-# Uso: curl -sSL https://servereyes-production.up.railway.app/linux-install.sh | bash
+# Uso: curl -sSL https://servereyes.app/linux-install.sh | bash
 
 set -e
 
@@ -9,7 +9,7 @@ CONFIG_FILE="$INSTALL_DIR/config.json"
 LOG_FILE="$INSTALL_DIR/agent.log"
 SERVICE_NAME="servereyes-agent"
 AGENT_VERSION="1.0.0"
-DEFAULT_SERVER="https://servereyes-production.up.railway.app"
+DEFAULT_SERVER="https://servereyes.app"
 
 echo ""
 echo "========================================="

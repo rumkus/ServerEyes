@@ -729,9 +729,9 @@ async function setup() {
   console.log(`  Clave:    ${config.machineKey ? config.machineKey.slice(0, 8) + '...' : '(no configurado)'}`);
   console.log(`  Nombre:   ${config.machineName}\n`);
 
-  const serverUrl = await ask(`URL del servidor [${config.serverUrl || 'https://servereyes-production.up.railway.app'}]: `);
+  const serverUrl = await ask(`URL del servidor [${config.serverUrl || 'https://servereyes.app'}]: `);
   if (serverUrl.trim()) config.serverUrl = serverUrl.trim().replace(/\/$/, '');
-  else if (!config.serverUrl) config.serverUrl = 'https://servereyes-production.up.railway.app';
+  else if (!config.serverUrl) config.serverUrl = 'https://servereyes.app';
 
   const name = await ask(`Nombre de esta maquina [${config.machineName}]: `);
   if (name.trim()) config.machineName = name.trim();

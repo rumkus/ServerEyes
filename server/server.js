@@ -113,7 +113,7 @@ function normalizarCorreos(lista) {
 // La URL con la que se arman los enlaces de los mails. Cuando el dominio
 // propio apunte al servicio, alcanza con definir PUBLIC_URL.
 function urlPublica() {
-  return (process.env.PUBLIC_URL || 'https://servereyes-production.up.railway.app').replace(/\/+$/, '');
+  return (process.env.PUBLIC_URL || 'https://servereyes.app').replace(/\/+$/, '');
 }
 
 // Pone la lista de destinatarios de un monitor en el estado que pidio el dueño.
@@ -828,6 +828,24 @@ async function initDB() {
   // los avisos de su propio sitio, sin darle acceso a la cuenta.
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
   await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
+
+  // Las URLs de descarga guardadas apuntan al host con el que se subio el
+  // binario. Si cambio el dominio, los agentes seguirian yendo al viejo.
+  try {
+    const base = urlPublica();
+    const r = await pool.query(
+      `UPDATE app_settings
+       SET value = $1 || substring(value from position('/api/' in value))
+       WHERE key IN ('agent_url', 'client_url')
+         AND value LIKE 'http%'
+         AND position('/api/' in value) > 0
+         AND value NOT LIKE $2`,
+      [base, base + '%']
+    );
+    if (r.rowCount > 0) console.log(`[SETUP] ${r.rowCount} URL(s) de descarga reapuntadas a ${base}`);
+  } catch (e) {
+    console.error('[SETUP] Error reapuntando URLs de descarga:', e.message);
+  }
 
   // Nadie recibe avisos por haber sido cargado en una lista: primero se le
   // pide permiso y recien cuando acepta pasa a confirmado. La baja la puede
@@ -2479,8 +2497,9 @@ app.post('/api/admin/agent/upload', authenticateToken, requireAdmin, async (req,
     );
 
     // Actualizar version configurada y URL de descarga automaticamente
-    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
-    const downloadUrl = `${protocol}://${req.get('host')}/api/agent/download`;
+    // Antes salia del host con el que entro el admin al panel: si subia desde
+    // la URL de Railway, todos los agentes quedaban apuntando ahi.
+    const downloadUrl = `${urlPublica()}/api/agent/download`;
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('agent_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
     // Hash del binario que acabamos de guardar: el agente lo verifica antes de
@@ -2520,8 +2539,7 @@ app.post('/api/admin/client/upload', authenticateToken, requireAdmin, subirBinar
       [version, req.file.originalname || 'ServerEyes-Portable.exe', buffer, buffer.length, changelog || '']
     );
 
-    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
-    const downloadUrl = `${protocol}://${req.get('host')}/api/client/download`;
+    const downloadUrl = `${urlPublica()}/api/client/download`;
     const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_version', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [version]);
     await pool.query("INSERT INTO app_settings (key, value) VALUES ('client_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [downloadUrl]);
