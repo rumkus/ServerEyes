@@ -83,11 +83,19 @@ tr:hover { background: #1a1a3e; }
 .agent-info .row .val { font-weight: 600; }
 
 /* History */
-.history-item { background: #0f0f23; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-.history-item .ver { color: #00d4ff; font-weight: 700; }
-.history-item .date { color: #888; font-size: 12px; }
-.history-item .size { color: #555; font-size: 12px; }
-.history-item .log { color: #aaa; font-size: 12px; flex: 1; margin: 0 16px; }
+/* Con space-between y sin changelog, el tamano y la fecha quedaban pegados y se
+   leian como una sola cosa ("36.0 MB25/8/2026"). Ahora la separacion la da un
+   gap, que no depende de que haya texto en el medio. */
+.history-item { background: #0f0f23; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 16px; }
+.history-item .ver { color: #00d4ff; font-weight: 700; flex-shrink: 0; min-width: 56px; }
+.history-item .log { color: #aaa; font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-item .size { color: #777; font-size: 12px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.history-item .date { color: #888; font-size: 12px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* En pantallas angostas el renglon se parte en vez de apretujarse */
+@media (max-width: 620px) {
+  .history-item { flex-wrap: wrap; gap: 6px 14px; }
+  .history-item .log { flex-basis: 100%; white-space: normal; }
+}
 
 @keyframes toastIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
