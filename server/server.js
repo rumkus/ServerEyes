@@ -828,6 +828,9 @@ async function initDB() {
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
   await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
 
+  setTimeout(censarVersiones, 20000);
+  setInterval(censarVersiones, 60 * 60 * 1000);
+
   // Las URLs de descarga guardadas apuntan al host con el que se subio el
   // binario. Si cambio el dominio, los agentes seguirian yendo al viejo.
   try {
@@ -2313,6 +2316,33 @@ app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
 
 // Obtener historial de IPs de una maquina
 // Sparkline data: ultimos 12 puntos de CPU/RAM por maquina del usuario
+// Censo de versiones del agente: una linea en el log con cuantas maquinas hay
+// en cada version, separando las que estan online de las que no.
+//
+// Sale al arrancar y una vez por hora. Sirve para contestar "cuantas tomaron la
+// version nueva" sin tener que abrir el panel y mirar de a una, que era la
+// unica forma que habia.
+async function censarVersiones() {
+  try {
+    const r = await pool.query(
+      `SELECT COALESCE(agent_version, 'sin reportar') AS version,
+              COUNT(*) FILTER (WHERE is_online) AS online,
+              COUNT(*) AS total
+       FROM machines GROUP BY 1 ORDER BY 3 DESC`);
+    if (r.rows.length === 0) { console.log('[VERSIONES] No hay maquinas registradas'); return; }
+    const publicada = (await pool.query("SELECT value FROM app_settings WHERE key = 'agent_version'")
+      .catch(() => null))?.rows?.[0]?.value;
+    const detalle = r.rows
+      .map(f => `${/^[0-9]/.test(f.version) ? 'v' : ''}${f.version}: ${f.total}${Number(f.online) < Number(f.total) ? ` (${f.online} online)` : ''}`)
+      .join(' · ');
+    const total = r.rows.reduce((a, f) => a + Number(f.total), 0);
+    const alDia = r.rows.filter(f => f.version === publicada).reduce((a, f) => a + Number(f.total), 0);
+    console.log(`[VERSIONES] ${total} maquina(s), ${alDia} en la publicada (v${publicada || '?'}) — ${detalle}`);
+  } catch (e) {
+    console.error('[VERSIONES] No se pudo censar:', e.message);
+  }
+}
+
 // Inventario del parque, para armar el relevamiento de un cliente.
 // Devuelve una fila por maquina con los datos ya aplanados.
 function filasInventario(maquinas) {
