@@ -1292,6 +1292,17 @@ function tarjetaInventario(m) {
 }
 
 async function bajarInventario(boton) {
+  // Antes se bajaba igual y llegaba un archivo con solo el encabezado, sin
+  // ninguna pista de por que. Es mejor decirlo aca.
+  const relevadas = inventario.filter(m => m.inventory).length;
+  if (relevadas === 0) {
+    await avisar('Todavia no hay nada que exportar',
+      'Ninguna maquina relevo su inventario, asi que la planilla saldria vacia.', '📋',
+      { detalle: 'El relevamiento lo hace el agente: aparece cuando las maquinas actualicen a la version nueva y manden su primer latido. '
+        + 'Las que tengan Windows anterior a 10 o Server 2016 no se relevan.' });
+    return;
+  }
+
   const original = boton.textContent;
   boton.disabled = true;
   boton.textContent = 'Generando...';
@@ -3100,8 +3111,10 @@ function confirmar(op) {
     if (op.campo) setTimeout(() => { const c = document.getElementById('confirm-campo'); if (c) { c.focus(); c.select(); } }, 60);
   });
 }
-function avisar(titulo, mensaje, icono) {
-  return confirmar({ titulo, mensaje, icono: icono || 'ℹ️', soloAceptar: true });
+// El cuarto argumento deja agregar lo que acepte confirmar(), por ejemplo un
+// detalle con la explicacion larga debajo del mensaje.
+function avisar(titulo, mensaje, icono, op) {
+  return confirmar({ titulo, mensaje, icono: icono || 'ℹ️', soloAceptar: true, ...op });
 }
 function responderConfirm(valor) {
   const r = _resolverConfirm;

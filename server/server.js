@@ -2363,9 +2363,15 @@ function filasInventario(maquinas) {
 
 // Excel en castellano abre el CSV con punto y coma, no con coma: con coma mete
 // todo en una sola columna. El BOM es para que no rompa los acentos.
-function aCsv(filas) {
-  if (!filas.length) return '\uFEFF';
-  const columnas = Object.keys(filas[0]);
+// Las columnas no dependen de que haya datos: salen de una fila vacia, para
+// poder emitir el encabezado aunque todavia no haya ninguna maquina relevada.
+function columnasInventario() {
+  return Object.keys(filasInventario([{}])[0]);
+}
+
+function aCsv(filas, columnasForzadas) {
+  const columnas = columnasForzadas || (filas.length ? Object.keys(filas[0]) : []);
+  if (!columnas.length) return '\uFEFF';
   const escapar = v => {
     const t = String(v ?? '');
     return /[";\n\r]/.test(t) ? '"' + t.split('"').join('""') + '"' : t;
@@ -2395,7 +2401,7 @@ app.get('/api/machines/inventory.csv', authenticateToken, async (req, res) => {
     // Solo las que ya reportaron: una fila vacia por maquina sin agente nuevo
     // no aporta nada al relevamiento.
     const conDatos = r.rows.filter(m => m.inventory);
-    const csv = aCsv(filasInventario(conDatos));
+    const csv = aCsv(filasInventario(conDatos), columnasInventario());
     const fecha = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="inventario-servereyes-${fecha}.csv"`);
