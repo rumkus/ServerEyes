@@ -8,7 +8,7 @@ const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
 
-const AGENT_VERSION = '1.3.6';
+const AGENT_VERSION = '1.3.7';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -581,8 +581,17 @@ function windowsSoportaInventario() {
 function getInventario() {
   return new Promise((resolve) => {
     if (!windowsSoportaInventario()) {
-      log(`Inventario omitido: Windows ${require('os').release()} es anterior a Windows 10 / Server 2016`);
-      resolve(null);
+      // Se manda el motivo en vez de no mandar nada: asi el panel puede
+      // distinguir "esta maquina no se releva" de "esta maquina todavia no
+      // actualizo el agente", que antes se veian igual.
+      const version = require('os').release();
+      log(`Inventario omitido: Windows ${version} es anterior a Windows 10 / Server 2016`);
+      resolve({
+        no_relevado: true,
+        motivo: `Windows ${version} es anterior a Windows 10 / Server 2016`,
+        so_version: version,
+        recolectado: new Date().toISOString()
+      });
       return;
     }
     const { spawn } = require('child_process');
@@ -816,7 +825,9 @@ async function sendHeartbeat(config) {
       if (inv) {
         cachedInventario = inv;
         inventarioTomadoEn = Date.now();
-        log(`Inventario actualizado: ${(inv.discos || []).length} disco(s), ${(inv.placas || []).length} placa(s) de red`);
+        if (!inv.no_relevado) {
+          log(`Inventario actualizado: ${(inv.discos || []).length} disco(s), ${(inv.placas || []).length} placa(s) de red`);
+        }
       } else {
         // Si fallo, reintentar al siguiente heartbeat y no dentro de 24 horas
         inventarioTomadoEn = 0;

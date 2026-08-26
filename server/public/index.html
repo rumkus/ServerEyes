@@ -1221,7 +1221,12 @@ async function loadInventario() {
 function renderInventario() {
   const el = document.getElementById('inv-list');
   if (!el) return;
-  const conDatos = inventario.filter(m => m.inventory);
+  // Tres estados distintos, que antes se veian como dos:
+  //   relevada        el agente mando los datos
+  //   no se releva    el agente contesto que esa maquina no aplica (Windows viejo)
+  //   sin relevar     todavia no llego nada
+  const conDatos = inventario.filter(m => m.inventory && !m.inventory.no_relevado);
+  const noAplican = inventario.filter(m => m.inventory && m.inventory.no_relevado);
   const sinDatos = inventario.filter(m => !m.inventory);
 
   if (inventario.length === 0) { pintar(el, '<p style="color:#888;font-size:12px">Todavia no hay maquinas.</p>'); return; }
@@ -1230,8 +1235,20 @@ function renderInventario() {
     ${sinDatos.length} maquina(s) todavia sin relevar: <strong>${sinDatos.map(m => escHtml(m.machine_name)).join(', ')}</strong>.
     Aparecen cuando actualicen el agente y manden el primer latido.</div>` : '';
 
-  pintar(el, aviso + (conDatos.length ? conDatos.map(tarjetaInventario).join('') :
-    '<p style="color:#888;font-size:12px">Ninguna maquina relevada todavia. Publicá la version nueva del agente desde el panel de administracion.</p>'));
+  const noRelevadas = noAplican.map(m => `<div style="border:1px solid var(--border2);border-radius:12px;padding:12px 14px;margin-bottom:12px;opacity:.75">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:16px">➖</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:var(--text);font-size:13px">${escHtml(m.machine_name || '')}</div>
+        <div style="font-size:11px;color:#888">No se releva — ${escHtml(m.inventory.motivo || 'sistema no soportado')}</div>
+      </div>
+    </div>
+  </div>`).join('');
+
+  const nada = conDatos.length === 0 && noAplican.length === 0
+    ? '<p style="color:#888;font-size:12px">Ninguna maquina relevada todavia. Se completa cuando los agentes actualicen y manden su primer latido.</p>'
+    : '';
+  pintar(el, aviso + conDatos.map(tarjetaInventario).join('') + noRelevadas + nada);
 }
 
 function dato(etiqueta, valor, resaltar) {

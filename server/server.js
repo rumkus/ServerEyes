@@ -2385,6 +2385,9 @@ function filasInventario(maquinas) {
       'Proxy del sistema': i.proxy?.winhttp || '',
       'Archivo hosts con entradas': i.hosts_tiene_entradas === true ? 'Si' : i.hosts_tiene_entradas === false ? 'No' : '',
       'Entradas del hosts': (i.hosts_entradas || []).join(' | '),
+      // Una maquina que no se releva no es lo mismo que una sin datos: en un
+      // inventario de cliente conviene que quede dicho por que.
+      'Estado del relevamiento': i.no_relevado ? (i.motivo || 'No se releva') : 'Relevado',
       'Inventario tomado': m.inventory_at ? new Date(m.inventory_at).toLocaleString('es-AR') : '',
       'Ultimo contacto': m.last_heartbeat ? new Date(m.last_heartbeat).toLocaleString('es-AR') : ''
     };
