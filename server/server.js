@@ -3166,6 +3166,54 @@ app.get('/api/machines/:id/logs', authenticateToken, async (req, res) => {
 });
 
 // Historial de versiones del agente
+// Volver a publicar una version que ya esta en el historial.
+//
+// No sube nada: apunta la version publicada a un binario que ya esta guardado y
+// recalcula su hash. Sirve para deshacer una publicacion equivocada sin tener
+// que recompilar, que era la unica salida.
+async function republicar(req, res, tipo) {
+  const tabla = tipo === 'client' ? 'client_files' : 'agent_files';
+  const rutaDescarga = tipo === 'client' ? '/api/client/download' : '/api/agent/download';
+  const claves = tipo === 'client'
+    ? { version: 'client_version', url: 'client_url', sha: 'client_sha256' }
+    : { version: 'agent_version', url: 'agent_url', sha: 'agent_sha256' };
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'id invalido' });
+
+    const r = await pool.query(`SELECT id, version, file_data FROM ${tabla} WHERE id = $1`, [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Esa version ya no esta guardada' });
+    const fila = r.rows[0];
+
+    // Se reapunta al binario mas nuevo con ese numero de version: si se subio
+    // varias veces el mismo numero, el que vale es el ultimo.
+    const ultima = await pool.query(
+      `SELECT id FROM ${tabla} WHERE version = $1 ORDER BY uploaded_at DESC LIMIT 1`, [fila.version]);
+    const elegido = ultima.rows[0]?.id === fila.id
+      ? fila
+      : (await pool.query(`SELECT id, version, file_data FROM ${tabla} WHERE id = $1`, [ultima.rows[0].id])).rows[0];
+
+    const sha256 = crypto.createHash('sha256').update(elegido.file_data).digest('hex');
+    const downloadUrl = `${urlPublica()}${rutaDescarga}`;
+    await pool.query(`INSERT INTO app_settings (key, value) VALUES ('${claves.version}', $1) ON CONFLICT (key) DO UPDATE SET value = $1`, [elegido.version]);
+    await pool.query(`INSERT INTO app_settings (key, value) VALUES ('${claves.url}', $1) ON CONFLICT (key) DO UPDATE SET value = $1`, [downloadUrl]);
+    await pool.query(`INSERT INTO app_settings (key, value) VALUES ('${claves.sha}', $1) ON CONFLICT (key) DO UPDATE SET value = $1`, [sha256]);
+
+    // Igual que al publicar: cambio el binario, todas las maquinas tienen otra
+    // oportunidad aunque se hubieran frenado con el anterior.
+    await pool.query('UPDATE machines SET update_offers = 0, update_offer_version = NULL WHERE update_offer_version IS NOT NULL').catch(() => {});
+
+    console.log(`[UPLOAD] ${tipo} vuelto a la version ${elegido.version} (sha ${sha256.slice(0, 12)})`);
+    res.json({ message: `Publicada la version ${elegido.version}`, version: elegido.version, sha256, downloadUrl });
+  } catch (error) {
+    console.error(`Error republicando ${tipo}:`, error.message);
+    res.status(500).json({ error: 'No se pudo volver a esa version' });
+  }
+}
+
+app.post('/api/admin/agent/republicar/:id', authenticateToken, requireAdmin, (req, res) => republicar(req, res, 'agent'));
+app.post('/api/admin/client/republicar/:id', authenticateToken, requireAdmin, (req, res) => republicar(req, res, 'client'));
+
 app.get('/api/admin/agent/history', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query('SELECT id, version, filename, file_size, changelog, uploaded_at FROM agent_files ORDER BY uploaded_at DESC LIMIT 20');

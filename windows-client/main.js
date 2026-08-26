@@ -43,6 +43,33 @@ function saveConfig(config) {
   fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// Un update puede "aplicarse" y dejar corriendo la misma version de antes. Sin
+// freno, el client vuelve a bajar el mismo binario en cada latido para siempre;
+// al agente le paso, con 186 descargas de 36 MB acumuladas.
+//
+// La cuenta va por version Y por hash: si se publica un ejecutable corregido con
+// el mismo numero, el numero solo no alcanza para notar que algo cambio. Y va al
+// archivo de configuracion porque el proceso se reinicia en cada vuelta.
+const MAX_INTENTOS_UPDATE = 3;
+
+function claveIntento(version, sha256) {
+  return `${version}#${String(sha256 || 'sin-hash').slice(0, 12)}`;
+}
+
+function intentosDeUpdate(config, version, sha256) {
+  return (config.updateIntentos || {})[claveIntento(version, sha256)] || 0;
+}
+
+function anotarIntentoUpdate(config, version, sha256) {
+  const clave = claveIntento(version, sha256);
+  config.updateIntentos = { [clave]: intentosDeUpdate(config, version, sha256) + 1 };
+  saveConfig(config);
+}
+
+function seAplicoElUpdate(config, version) {
+  return Object.keys(config.updateIntentos || {}).some(k => k.split('#')[0] === version);
+}
+
 // HTTP request simple
 function httpRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -263,10 +290,34 @@ async function selfUpdateClient(url, newVersion, sha256Esperado) {
   const exeName = path.basename(exePath);
   const batContent = [
     '@echo off',
-    'timeout /t 5 /nobreak >nul',
-    `if exist "${oldPath}" del /f "${oldPath}"`,
+    'timeout /t 3 /nobreak >nul',
+    // Electron deja varios procesos con el mismo nombre. Si queda alguno vivo,
+    // el reemplazo del ejecutable falla y arranca de nuevo la version anterior.
+    `taskkill /F /IM "${exeName}" >nul 2>&1`,
+    'taskkill /F /IM "servereyes-client-old.exe" >nul 2>&1',
+    'timeout /t 2 /nobreak >nul',
+    `if exist "${oldPath}" del /f /q "${oldPath}"`,
     `if exist "${exePath}" rename "${exePath}" servereyes-client-old.exe`,
     `if exist "${newPath}" move /y "${newPath}" "${exePath}"`,
+    // Comprobar que lo instalado es lo que se bajo. El hash del archivo
+    // descargado ya se verifico; esto cubre que el rename y el move hayan salido
+    // bien, que es donde el agente terminaba arrancando un binario viejo.
+    //
+    // certutil devuelve el hash en la segunda linea, con espacios entre bytes en
+    // los Windows viejos y sin espacios en los nuevos, asi que se los saca antes
+    // de comparar. El encabezado va traducido, por eso se salta por posicion.
+    `set "esperado=${String(sha256Esperado).toLowerCase()}"`,
+    'set "calculado="',
+    `for /f "skip=1 delims=" %%H in ('certutil -hashfile "${exePath}" SHA256 2^>nul') do if not defined calculado set "calculado=%%H"`,
+    'set "calculado=%calculado: =%"',
+    'if not defined calculado (',
+    '  rem certutil no disponible: se aplica igual, no poder actualizar nunca seria peor',
+    ') else if /i not "%calculado%"=="%esperado%" (',
+    `  if exist "${exePath}" del /f /q "${exePath}"`,
+    ')',
+    // Si el reemplazo no quedo, volver a la version anterior en vez de dejar la
+    // carpeta sin client.
+    `if not exist "${exePath}" if exist "${oldPath}" rename "${oldPath}" "${exeName}"`,
     `if exist "${exePath}" start "" "${exePath}"`,
     'del "%~f0"'
   ].join('\r\n') + '\r\n';
@@ -315,11 +366,19 @@ async function sendHeartbeat() {
       if (!firmaValida(sig, esperada)) {
         clog(`Update IGNORADO: firma invalida para v${version} (${url})`);
       } else {
-        clog(`Update disponible: v${version}`);
-        if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Actualizando a v${version}...`);
-        try {
-          await selfUpdateClient(url, version, sha256);
-        } catch (e) { clog(`Update error: ${e.message}`); }
+        const yaIntentado = intentosDeUpdate(config, version, sha256);
+        if (yaIntentado >= MAX_INTENTOS_UPDATE) {
+          // Una linea por vuelta y nada de red: el problema queda visible en vez
+          // de esconderse detras de miles de reintentos.
+          clog(`Update a v${version} DESISTIDO: se intento ${yaIntentado} veces y seguimos en v${CLIENT_VERSION}. Hay que actualizarlo a mano.`);
+        } else {
+          clog(`Update disponible: v${version} (intento ${yaIntentado + 1} de ${MAX_INTENTOS_UPDATE})`);
+          anotarIntentoUpdate(config, version, sha256);
+          if (tray) tray.setToolTip(`ServerEyes v${CLIENT_VERSION} - Actualizando a v${version}...`);
+          try {
+            await selfUpdateClient(url, version, sha256);
+          } catch (e) { clog(`Update error: ${e.message}`); }
+        }
       }
     }
 
@@ -439,6 +498,15 @@ if (!gotTheLock) {
 
 // App ready
 app.whenReady().then(() => {
+  // Si arrancamos siendo la version que se venia intentando, el update salio
+  // bien y el contador de intentos vuelve a cero.
+  const cfgInicial = loadConfig();
+  if (seAplicoElUpdate(cfgInicial, CLIENT_VERSION)) {
+    clog(`Update a v${CLIENT_VERSION} aplicado correctamente`);
+    delete cfgInicial.updateIntentos;
+    saveConfig(cfgInicial);
+  }
+
   // IPC
   ipcMain.handle('get-config', () => loadConfig());
   ipcMain.handle('save-config', (e, config) => {

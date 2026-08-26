@@ -91,6 +91,9 @@ tr:hover { background: #1a1a3e; }
 .history-item .log { color: #aaa; font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-item .size { color: #777; font-size: 12px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .history-item .date { color: #888; font-size: 12px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.history-item .actual { color: #00e676; font-size: 11px; font-weight: 700; flex-shrink: 0; min-width: 86px; text-align: right; }
+.history-item .volver { background: #1a2a3a; color: #8ba0b3; border: 1px solid #2a2a4a; border-radius: 8px; padding: 5px 10px; font-size: 11px; font-family: inherit; cursor: pointer; flex-shrink: 0; min-width: 86px; }
+.history-item .volver:hover { border-color: #ff9800; color: #eee; }
 /* En pantallas angostas el renglon se parte en vez de apretujarse */
 @media (max-width: 620px) {
   .history-item { flex-wrap: wrap; gap: 6px 14px; }
@@ -513,12 +516,46 @@ function pintarHistorial(idContenedor, filas) {
   const el = document.getElementById(idContenedor);
   if (!el) return;
   el.innerHTML = (!Array.isArray(filas) || filas.length === 0) ? '<p style="color:#888">Sin historial</p>' :
-    filas.map(h => `<div class="history-item">
-      <span class="ver">v${h.version}</span>
-      <span class="log">${h.changelog || ''}</span>
+    filas.map(h => {
+      const esCliente = idContenedor.includes('client');
+      const publicada = esCliente ? data.configuredClientVersion : data.configuredVersion;
+      const esLaActual = String(h.version) === String(publicada);
+      return `<div class="history-item">
+      <span class="ver">v${escApp(h.version)}</span>
+      <span class="log">${escApp(h.changelog || '')}</span>
       <span class="size">${fmtSize(h.file_size)}</span>
       <span class="date">${fmtDate(h.uploaded_at)}</span>
-    </div>`).join('');
+      ${esLaActual
+        ? '<span class="actual">publicada</span>'
+        : `<button class="volver" onclick="volverAVersion('${esCliente ? 'client' : 'agent'}', ${h.id}, '${escApp(h.version)}')">Volver a esta</button>`}
+    </div>`;
+    }).join('');
+}
+
+// Deshacer una publicacion equivocada sin recompilar: los binarios anteriores
+// estan guardados, asi que se vuelve a apuntar la version publicada a uno de
+// ellos.
+async function volverAVersion(tipo, id, version) {
+  const esCliente = tipo === 'client';
+  const publicada = esCliente ? data.configuredClientVersion : data.configuredVersion;
+  const ok = await confirmar({
+    icono: '&#8617;&#65039;', color: '#ff9800',
+    titulo: `Volver a la version ${version}`,
+    subtitulo: `Cada ${esCliente ? 'client' : 'agente'} instalado va a descargar y ejecutar ese ejecutable.`,
+    detalle: `Se publica el binario que ya esta guardado de la ${escApp(version)}, sin subir nada.`
+      + (publicada ? ` La version publicada pasa de <strong>${escApp(publicada)}</strong> a <strong>${escApp(version)}</strong>.` : '')
+      + ` Las maquinas que ya esten en ${escApp(version)} no se van a tocar; las que esten en otra, van a bajar a esta.`,
+    ok: 'Volver a esta version'
+  });
+  if (!ok) return;
+
+  const r = await api(`/api/admin/${tipo}/republicar/${id}`, { method: 'POST' });
+  if (!r.ok) { avisar('No se pudo', r.data?.error || 'El servidor rechazo el pedido.', '&#10060;'); return; }
+  await loadData();
+  await loadHistory();
+  avisar(`Publicada la version ${r.data.version}`,
+    'Las maquinas la van a tomar en el proximo latido.', '&#9989;',
+    { detalle: `sha256: ${escApp(r.data.sha256 || '')}` });
 }
 
 async function loadHistory() {
