@@ -93,6 +93,11 @@ console.error = (...args: any[]) => {
   origConsoleError(...args);
 };
 
+// El servidor responde 401 con code SESSION_REVOKED cuando la sesion fue
+// cerrada a proposito (cambio de contraseña, reseteo por el admin, "cerrar
+// todas las sesiones"). Se avisa una sola vez y se vuelve al login.
+let _onSesionRevocada: (() => void) | null = null;
+
 async function apiRequest(path: string, options: any = {}, token: string | null = null) {
   const headers: any = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -101,6 +106,10 @@ async function apiRequest(path: string, options: any = {}, token: string | null 
     const response = await fetch(`${API_URL}${path}`, { ...options, headers });
     const data = await response.json();
     if (!response.ok) log.warn(`API ${path} -> ${response.status}: ${JSON.stringify(data)}`);
+    if (response.status === 401 && data && data.code === 'SESSION_REVOKED' && token && _onSesionRevocada) {
+      const cb = _onSesionRevocada; _onSesionRevocada = null;
+      cb();
+    }
     return { ok: response.ok, status: response.status, data };
   } catch (err: any) {
     log.error(`API ${path} FAILED: ${err.message}`);
@@ -622,6 +631,17 @@ function AppContent() {
 
   const tokenRef = useRef(token);
   tokenRef.current = token;
+
+  useEffect(() => {
+    if (!token) return;
+    _onSesionRevocada = () => {
+      log.warn('Sesion revocada por el servidor');
+      setAndSaveToken(null);
+      almacenSeguro.borrar(TOKEN_BIO).then(() => setHasSavedCreds(false));
+      showModal('🔒', 'Sesion cerrada', 'La sesion se cerro porque cambio la contraseña o se cerraron todas las sesiones. Ingresa de nuevo.');
+    };
+    return () => { _onSesionRevocada = null; };
+  }, [token]);
 
   const loadMachines = async (t?: string) => {
     try {
@@ -2728,7 +2748,12 @@ function AppContent() {
               method: 'POST', body: JSON.stringify({ current_password: currentPass, new_password: newPass })
             }, token);
             if (res.ok) {
-              showModal('✅', 'Listo', 'Contraseña actualizada');
+              // El cambio cierra las demas sesiones; este dispositivo sigue con el token nuevo.
+              if (res.data.token) {
+                await setAndSaveToken(res.data.token);
+                if (biometricAvailable) await saveBiometricToken(res.data.token);
+              }
+              showModal('✅', 'Listo', 'Contraseña actualizada. Las sesiones en otros dispositivos se cerraron.');
               setShowChangePass(false); setCurrentPass(''); setNewPass('');
             } else {
               setChangePassError(res.data.error || 'Error');

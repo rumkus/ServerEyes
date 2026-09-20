@@ -51,6 +51,12 @@
       // Consultar cada 2 segundos si fue confirmado
       pollInterval = setInterval(async () => {
         const check = await api.checkPairing(code);
+        if (check.error) {
+          clearInterval(pollInterval);
+          document.getElementById('status').className = 'status error';
+          document.getElementById('status').textContent = check.error;
+          return;
+        }
         if (check.confirmed) {
           clearInterval(pollInterval);
           document.getElementById('status').className = 'status success';

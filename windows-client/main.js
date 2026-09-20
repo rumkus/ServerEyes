@@ -6,8 +6,9 @@ const https = require('https');
 const http = require('http');
 
 const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, dialog } = electron;
+const { RegistroComandos } = require('./comandos');
 
-const CLIENT_VERSION = '1.1.0';
+const CLIENT_VERSION = '1.2.0';
 let tray = null;
 const _clientLogs = [];
 function clog(msg) { const line = `[${new Date().toLocaleString()}] ${msg}`; _clientLogs.push(line); if (_clientLogs.length > 50) _clientLogs.splice(0, _clientLogs.length - 50); }
@@ -15,6 +16,35 @@ function getClientLogs() { return _clientLogs.slice(-30).join('\n'); }
 let configWindow = null;
 let heartbeatTimer = null;
 let configPath = null;
+// Un latido a la vez, y registro persistente de comandos (ver comandos.js)
+let heartbeatEnCurso = false;
+let registroComandos = null;
+
+function ejecutarComando(command) {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec(command, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
+      resolve((stdout || '') + (stderr ? '\n[STDERR] ' + stderr : '') + (err && err.killed ? '\n[TIMEOUT]' : ''));
+    });
+  });
+}
+
+function armarRegistroComandos() {
+  registroComandos = new RegistroComandos({
+    archivo: path.join(app.getPath('userData'), 'comandos.json'),
+    log: clog,
+    ejecutar: ejecutarComando,
+    enviar: (id, resultado) => {
+      const config = loadConfig();
+      return httpRequest(`${config.serverUrl}/api/command-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machine_key: config.machineKey, command_id: Number(id), status: resultado.status, output: resultado.output })
+      });
+    }
+  });
+  registroComandos.marcarReinicio();
+}
 
 // Config con JSON simple
 function getConfigPath() {
@@ -334,6 +364,18 @@ async function sendHeartbeat() {
     if (tray) tray.setToolTip('ServerEyes - No configurado');
     return;
   }
+  if (heartbeatEnCurso) { clog('Latido anterior todavia en curso, se salta este'); return; }
+  heartbeatEnCurso = true;
+  try {
+    if (!registroComandos) armarRegistroComandos();
+    await registroComandos.reenviarPendientes().catch(e => clog('Reenvio de resultados: ' + e.message));
+    await sendHeartbeatInterno(config);
+  } finally {
+    heartbeatEnCurso = false;
+  }
+}
+
+async function sendHeartbeatInterno(config) {
 
   try {
     const publicIP = await getPublicIP();
@@ -394,29 +436,17 @@ async function sendHeartbeat() {
       }
     }
 
-    // Ejecutar comandos remotos
-    if (res.ok && res.data && res.data.commands && res.data.commands.length > 0) {
+    // Ejecutar comandos remotos: solo los firmados; el registro no repite y
+    // reenvia resultados (ver comandos.js).
+    if (res.ok && res.data && res.data.commands && res.data.commands.length > 0 && registroComandos) {
+      const validos = [];
       for (const cmd of res.data.commands) {
         const esperadaCmd = firmaEsperada(config.machineKey, 'cmd', String(cmd.id), cmd.command);
-        if (!firmaValida(cmd.sig, esperadaCmd)) {
-          clog(`Comando #${cmd.id} IGNORADO: firma invalida`);
-          continue;
-        }
+        if (!firmaValida(cmd.sig, esperadaCmd)) { clog(`Comando #${cmd.id} IGNORADO: firma invalida`); continue; }
         clog(`Comando remoto #${cmd.id}: ${cmd.command}`);
-        try {
-          const { exec } = require('child_process');
-          const output = await new Promise((resolve) => {
-            exec(cmd.command, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
-              resolve((stdout || '') + (stderr ? '\n[STDERR] ' + stderr : '') + (err && err.killed ? '\n[TIMEOUT]' : ''));
-            });
-          });
-          await httpRequest(`${config.serverUrl}/api/command-result`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ machine_key: config.machineKey, command_id: cmd.id, output })
-          });
-        } catch (e) { clog(`Comando #${cmd.id} error: ${e.message}`); }
+        validos.push(cmd);
       }
+      await registroComandos.procesar(validos).catch(e => clog(`Error procesando comandos: ${e.message}`));
     }
   } catch (error) {
     if (tray) tray.setToolTip('ServerEyes - Sin conexion');
@@ -525,7 +555,9 @@ app.whenReady().then(() => {
     }
   });
 
-  // Pairing IPC
+  // Pairing IPC. El token secreto de cada codigo queda en el proceso principal:
+  // la ventana solo ve el codigo, y es este proceso el que retira la clave.
+  const pairingTokens = new Map();
   ipcMain.handle('request-pairing', async () => {
     const config = loadConfig();
     if (!config.serverUrl) return { success: false, message: 'Configura la URL del servidor primero' };
@@ -537,8 +569,13 @@ app.whenReady().then(() => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ machine_name: machineName, os_info: osInfo })
       });
-      if (res.ok) return { success: true, code: res.data.code };
-      return { success: false, message: res.data.error || 'Error' };
+      if (res.ok && res.data.pairing_token) {
+        pairingTokens.set(res.data.code, res.data.pairing_token);
+        // El server lo mantiene 5 min + 2 de gracia tras confirmar; aca un poco mas
+        setTimeout(() => pairingTokens.delete(res.data.code), 8 * 60 * 1000);
+        return { success: true, code: res.data.code };
+      }
+      return { success: false, message: res.data.error || 'El servidor no devolvio el token de vinculacion' };
     } catch (error) {
       return { success: false, message: `Error: ${error.message}` };
     }
@@ -546,13 +583,22 @@ app.whenReady().then(() => {
 
   ipcMain.handle('check-pairing', async (e, code) => {
     const config = loadConfig();
+    const pairingToken = pairingTokens.get(String(code));
+    if (!pairingToken) return { confirmed: false, error: 'Codigo desconocido o vencido' };
     try {
-      const res = await httpRequest(`${config.serverUrl}/api/pairing/status/${code}`);
+      const res = await httpRequest(`${config.serverUrl}/api/pairing/status/${code}`, {
+        headers: { 'X-Pairing-Token': pairingToken }
+      });
       if (res.ok && res.data.confirmed) {
+        pairingTokens.delete(String(code));
         // Guardar la clave automaticamente
         saveConfig({ ...config, machineKey: res.data.machine_key });
         startHeartbeat();
         return { confirmed: true };
+      }
+      if (res.status === 401 || res.status === 404) {
+        pairingTokens.delete(String(code));
+        return { confirmed: false, error: res.data.error || 'Codigo invalido' };
       }
       return { confirmed: false };
     } catch {

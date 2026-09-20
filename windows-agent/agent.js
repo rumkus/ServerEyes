@@ -7,8 +7,9 @@ const readline = require('readline');
 const { execSync } = require('child_process');
 
 const { spawn } = require('child_process');
+const { RegistroComandos } = require('./comandos');
 
-const AGENT_VERSION = '1.3.7';
+const AGENT_VERSION = '1.4.0';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
@@ -19,6 +20,8 @@ const WATCHDOG_FILE = path.join(EXE_DIR, 'ServerEyes-Watchdog.vbs');
 // relance el binario viejo justo cuando el update esta moviendo los archivos.
 const FLAG_UPDATE = path.join(EXE_DIR, 'servereyes-actualizando.flag');
 const TASK_NAME = 'ServerEyes Agent';
+// Registro persistente de comandos remotos (ver comandos.js)
+const COMANDOS_FILE = path.join(EXE_DIR, 'servereyes-comandos.json');
 
 function loadConfig() {
   try { if (fs.existsSync(CONFIG_FILE)) return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch {}
@@ -118,8 +121,9 @@ function httpRequest(url, options = {}) {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, data: JSON.parse(data) }); }
-        catch { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, data }); }
+        const ok = res.statusCode >= 200 && res.statusCode < 300;
+        try { resolve({ ok, status: res.statusCode, data: JSON.parse(data) }); }
+        catch { resolve({ ok, status: res.statusCode, data }); }
       });
     });
     req.on('error', reject);
@@ -801,6 +805,33 @@ async function selfUpdate(url, newVersion, config, sha256Esperado) {
 
 let heartbeatCount = 0;
 let cachedSecurityInfo = null;
+// Un latido a la vez. setInterval no espera a que termine el anterior, y con
+// un comando de 30s adentro se solapaban dos latidos con la misma tanda.
+let heartbeatEnCurso = false;
+let registroComandos = null;
+
+function ejecutarComando(command) {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec(command, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
+      resolve((stdout || '') + (stderr ? '\n[STDERR] ' + stderr : '') + (err && err.killed ? '\n[TIMEOUT]' : ''));
+    });
+  });
+}
+
+function armarRegistroComandos(config) {
+  registroComandos = new RegistroComandos({
+    archivo: COMANDOS_FILE,
+    log,
+    ejecutar: ejecutarComando,
+    enviar: (id, resultado) => httpRequest(`${config.serverUrl}/api/command-result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machine_key: config.machineKey, command_id: Number(id), status: resultado.status, output: resultado.output })
+    })
+  });
+  registroComandos.marcarReinicio();
+}
 // El inventario cambia muy de vez en cuando (se agrega un disco, se cambia la
 // IP): recolectarlo en cada heartbeat seria tirar CPU a la basura. Se arma al
 // arrancar y despues una vez por dia.
@@ -811,7 +842,19 @@ const INVENTARIO_CADA = 24 * 60 * 60 * 1000;
 // Heartbeat
 async function sendHeartbeat(config) {
   if (!config.serverUrl || !config.machineKey) return;
+  if (heartbeatEnCurso) { log('Latido anterior todavia en curso, se salta este'); return; }
+  heartbeatEnCurso = true;
   try {
+    await sendHeartbeatInterno(config);
+  } finally {
+    heartbeatEnCurso = false;
+  }
+}
+
+async function sendHeartbeatInterno(config) {
+  try {
+    // Resultados que quedaron sin mandar en latidos anteriores
+    if (registroComandos) await registroComandos.reenviarPendientes().catch(e => log('Reenvio de resultados: ' + e.message));
     const publicIP = await getPublicIP();
     const pingMs = await measurePing();
     const metrics = await getSystemMetrics();
@@ -911,32 +954,17 @@ async function sendHeartbeat(config) {
         }
       }
 
-      // Ejecutar comandos remotos pendientes
-      if (res.data && res.data.commands && res.data.commands.length > 0) {
+      // Ejecutar comandos remotos pendientes. Solo los firmados; el registro
+      // se ocupa de no repetir y de reenviar resultados (ver comandos.js).
+      if (res.data && res.data.commands && res.data.commands.length > 0 && registroComandos) {
+        const validos = [];
         for (const cmd of res.data.commands) {
           const esperada = firmaEsperada(config.machineKey, 'cmd', String(cmd.id), cmd.command);
-          if (!firmaValida(cmd.sig, esperada)) {
-            log(`Comando #${cmd.id} IGNORADO: firma invalida`);
-            continue;
-          }
+          if (!firmaValida(cmd.sig, esperada)) { log(`Comando #${cmd.id} IGNORADO: firma invalida`); continue; }
           log(`Comando remoto #${cmd.id}: ${cmd.command}`);
-          try {
-            const { exec } = require('child_process');
-            const output = await new Promise((resolve) => {
-              exec(cmd.command, { timeout: 30000, windowsHide: true }, (err, stdout, stderr) => {
-                resolve((stdout || '') + (stderr ? '\n[STDERR] ' + stderr : '') + (err && err.killed ? '\n[TIMEOUT]' : ''));
-              });
-            });
-            log(`Comando #${cmd.id} resultado: ${(output || '').substring(0, 100)}...`);
-            await httpRequest(`${config.serverUrl}/api/command-result`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ machine_key: config.machineKey, command_id: cmd.id, output })
-            });
-          } catch (e) {
-            log(`Comando #${cmd.id} error: ${e.message}`);
-          }
+          validos.push(cmd);
         }
+        await registroComandos.procesar(validos).catch(e => log(`Error procesando comandos: ${e.message}`));
       }
     } else log(`Heartbeat ERROR: ${JSON.stringify(res.data)}`);
   } catch (err) { log(`Heartbeat FAILED: ${err.message}`); }
@@ -957,6 +985,7 @@ function startHeartbeatLoop(config) {
   }
   log(`Servidor: ${config.serverUrl}`);
   log(`Intervalo: ${config.heartbeatInterval}s`);
+  armarRegistroComandos(config);
   sendHeartbeat(config);
   setInterval(() => sendHeartbeat(config), (config.heartbeatInterval || 30) * 1000);
 }
@@ -971,6 +1000,11 @@ function startPairing(config) {
         body: JSON.stringify({ machine_name: config.machineName, os_info: getOSInfo() })
       });
       if (!res.ok) { console.log('Error:', res.data.error); resolve(false); return; }
+      // El token secreto es lo que autoriza a retirar la machine_key: no se
+      // muestra ni se guarda en el log. El codigo de 6 digitos solo sirve
+      // para que el usuario confirme desde la app.
+      const pairingToken = res.data.pairing_token;
+      if (!pairingToken) { console.log('Error: el servidor no devolvio pairing_token (servidor desactualizado?)'); resolve(false); return; }
 
       console.log(`\n  CODIGO: ${res.data.code}\n`);
       console.log('  Ingresa este codigo en la app del celular.');
@@ -981,7 +1015,12 @@ function startPairing(config) {
         attempts++;
         if (attempts > 150) { clearInterval(poll); console.log('  Codigo expirado.'); resolve(false); return; }
         try {
-          const check = await httpRequest(`${config.serverUrl}/api/pairing/status/${res.data.code}`);
+          const check = await httpRequest(`${config.serverUrl}/api/pairing/status/${res.data.code}`, {
+            headers: { 'X-Pairing-Token': pairingToken }
+          });
+          if (check.status === 401 || check.status === 404) {
+            clearInterval(poll); console.log('  Error:', check.data.error || 'codigo invalido'); resolve(false); return;
+          }
           if (check.ok && check.data.confirmed) {
             clearInterval(poll);
             config.machineKey = check.data.machine_key;
@@ -1218,6 +1257,9 @@ function acquireLock() {
 // Main
 async function main() {
   const args = process.argv.slice(2);
+  // Para saber que version es un .exe sin abrirlo (y para verificar que el
+  // binario empaquetado carga todos sus modulos: comandos.js se requiere arriba).
+  if (args.includes('--version') || args.includes('-v')) { console.log(AGENT_VERSION); return; }
 
   if (args.includes('--setup') || args.includes('-s')) {
     await setup();

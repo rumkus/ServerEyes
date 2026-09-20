@@ -4,6 +4,7 @@
   "description": "ServerEyes - Backend de monitoreo de maquinas",
   "main": "server.js",
   "scripts": {
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
     "start": "node server.js",
     "dev": "node --watch server.js"
   },

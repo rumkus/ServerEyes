@@ -5,6 +5,23 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const { PairingStore } = require('./lib/pairing');
+const urlGuard = require('./lib/url-guard');
+const sesiones = require('./lib/sesiones');
+const comandos = require('./lib/comandos');
+
+// Temporizadores de la aplicacion (detector offline, SSL, URLs, reportes...).
+// Se registran para poder detenerlos: los tests importan este modulo y
+// necesitan que el proceso termine solo cuando cierran el servidor, sin
+// process.exit. En produccion no cambia nada.
+const temporizadores = new Set();
+function cadaTanto(fn, ms) { const t = setInterval(fn, ms); temporizadores.add(t); return t; }
+function dentroDe(fn, ms) {
+  const t = setTimeout(() => { temporizadores.delete(t); fn(); }, ms);
+  temporizadores.add(t);
+  return t;
+}
+let firebaseApp = null;
 
 // Sin default: un secreto hardcodeado hace que cualquiera pueda firmar tokens
 // validos si la variable falta en el entorno. Preferimos no arrancar.
@@ -452,10 +469,10 @@ try {
       if (!serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
         console.error('Firebase private_key no tiene formato PEM valido');
       }
-      const fbApp = initializeApp({ credential: cert(serviceAccount) });
+      firebaseApp = initializeApp({ credential: cert(serviceAccount) });
       // Conservamos la forma .messaging().send() para no tocar los tres lugares
       // del archivo que mandan push.
-      firebaseAdmin = { messaging: () => getMessaging(fbApp) };
+      firebaseAdmin = { messaging: () => getMessaging(firebaseApp) };
       console.log('Firebase Admin inicializado');
     }
   } else {
@@ -467,6 +484,25 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Cuantos proxies hay delante. En Railway hay exactamente uno (el edge que
+// termina TLS y agrega la IP real al final de X-Forwarded-For), por eso el
+// default es 1: req.ip toma la ULTIMA direccion de la cabecera, la que puso el
+// proxy, y lo que el cliente haya escrito antes se ignora. Sin esto req.ip
+// seria siempre la IP del proxy: el limite por IP del pairing seria global y
+// la auditoria inutil.
+//
+// Si el servidor corre sin proxy delante (local, otro hosting), TRUST_PROXY=0:
+// con 1 y conexion directa, cualquiera podria elegir su req.ip escribiendo la
+// cabecera. Acepta tambien una lista de redes ("loopback, 10.0.0.0/8").
+function configurarTrustProxy() {
+  const v = (process.env.TRUST_PROXY ?? '1').trim();
+  if (v === '0' || v.toLowerCase() === 'false') return false;
+  if (/^\d+$/.test(v)) return parseInt(v, 10);
+  if (v.toLowerCase() === 'true') return true;
+  return v; // lista de redes/nombres que express entiende
+}
+app.set('trust proxy', configurarTrustProxy());
 
 // Middleware
 app.use(cors());
@@ -541,6 +577,31 @@ async function initDB() {
     )
   `);
 
+  // Columnas que el codigo usa desde siempre pero que initDB no creaba: en
+  // produccion existen porque se agregaron a mano o con migraciones que ya no
+  // estan en el codigo. Sin esto, una base nueva (tests, otro entorno) arranca
+  // rota. Son IF NOT EXISTS: en produccion no hacen nada.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS uptime_log (
+      id SERIAL PRIMARY KEY,
+      machine_id INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+      status VARCHAR(10) NOT NULL,
+      timestamp TIMESTAMP DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS grupo VARCHAR(100)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS orden INTEGER DEFAULT 0`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS ping_ms INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS download_mbps REAL`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS speed_test_at TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS previous_public_ip VARCHAR(45)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS ip_changed_at TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS ip_change_seen BOOLEAN DEFAULT true`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS dns_update_url TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS dns_host VARCHAR(255)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS dns_last_update TIMESTAMP`).catch(() => {});
+
   // Agregar columnas nuevas si no existen
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS check_ip_change BOOLEAN DEFAULT true`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`).catch(() => {});
@@ -577,6 +638,8 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS cf_zone_id VARCHAR(255)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS cf_record_id VARCHAR(64)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS dns_last_result TEXT`).catch(() => {});
+  // Version de sesion: sube al cambiar la contraseña y deja fuera a los JWT anteriores
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER DEFAULT 1`).catch(() => {});
 
   // Historial de metricas (1 registro por heartbeat, limpieza automatica)
   await pool.query(`
@@ -606,6 +669,25 @@ async function initDB() {
       executed_at TIMESTAMP
     )
   `);
+  // Columnas nuevas de remote_commands. Van DESPUES del CREATE TABLE: en una
+  // base nueva, un ALTER antes de crear la tabla falla en silencio y la tabla
+  // queda sin las columnas (paso en los tests contra base fresca).
+  // Comandos remotos: cuando se entrego y cuantas veces (ver lib/comandos.js)
+  await pool.query(`ALTER TABLE remote_commands ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP`).catch(() => {});
+  await pool.query(`ALTER TABLE remote_commands ADD COLUMN IF NOT EXISTS delivery_count INTEGER DEFAULT 0`).catch(() => {});
+  await pool.query(`ALTER TABLE remote_commands ADD COLUMN IF NOT EXISTS retry_of INTEGER`).catch(() => {});
+  // Clave de idempotencia de un reenvio: la genera el panel por cada
+  // confirmacion del usuario y la repite si reintenta la misma peticion. Unica
+  // por (usuario, comando original, clave): la misma clave devuelve el mismo
+  // comando aunque ya este delivered o completed.
+  await pool.query(`ALTER TABLE remote_commands ADD COLUMN IF NOT EXISTS idem_key VARCHAR(64)`).catch(() => {});
+  // Una version intermedia (nunca publicada, pero pudo correr en alguna base)
+  // creaba un indice unico parcial por retry_of WHERE status = 'pending'. Con
+  // la clave de idempotencia ese indice sobra y ademas impediria dos
+  // reenvios deliberados pendientes a la vez. Se retira si existe; las filas
+  // no se tocan.
+  await pool.query(`DROP INDEX IF EXISTS remote_commands_reenvio_pendiente`).catch(() => {});
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS remote_commands_reenvio_idem ON remote_commands (user_id, retry_of, idem_key) WHERE idem_key IS NOT NULL`).catch(() => {});
   // Umbrales de alerta (null = desactivado)
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_cpu INTEGER`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS alert_ram INTEGER`).catch(() => {});
@@ -835,10 +917,9 @@ async function initDB() {
   // Destinatarios extra por monitor: al cliente dueño de ese sitio le llegan
   // los avisos de su propio sitio, sin darle acceso a la cuenta.
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
-  await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
 
-  setTimeout(censarVersiones, 20000);
-  setInterval(censarVersiones, 60 * 60 * 1000);
+  dentroDe(censarVersiones, 20000);
+  cadaTanto(censarVersiones, 60 * 60 * 1000);
 
   // Las URLs de descarga guardadas apuntan al host con el que se subio el
   // binario. Si cambio el dominio, los agentes seguirian yendo al viejo.
@@ -994,7 +1075,6 @@ async function initDB() {
   await pool.query(`INSERT INTO app_settings (key, value) VALUES ('support_email', 'soporte@servereyes.app') ON CONFLICT (key) DO NOTHING`).catch(() => {});
 
   // Soporte / chat
-  await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS hidden_by_user BOOLEAN DEFAULT false`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS support_tickets (
@@ -1006,6 +1086,8 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  // (estaba antes del CREATE TABLE: en una base nueva no se creaba)
+  await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS hidden_by_user BOOLEAN DEFAULT false`).catch(() => {});
   await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP`).catch(() => {});
   await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP`).catch(() => {});
   await pool.query(`ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS reopen_count INTEGER DEFAULT 0`).catch(() => {});
@@ -1039,6 +1121,10 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  // (estaba antes del CREATE TABLE: en una base nueva no se creaba)
+  await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
+  // Motivo del ultimo fallo de un monitor SSL (destino no permitido, timeout...)
+  await pool.query(`ALTER TABLE ssl_monitors ADD COLUMN IF NOT EXISTS last_error TEXT`).catch(() => {});
 
   // Network scans
   await pool.query(`
@@ -1107,7 +1193,7 @@ app.post('/api/auth/register', async (req, res) => {
       `UPDATE users SET plan = 'pro', max_machines = 999, plan_expires_at = NOW() + INTERVAL '14 days' WHERE id = $1`,
       [user.id]
     );
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    const token = sesiones.firmarToken(user, JWT_SECRET, '30d');
     logAudit(user.id, 'register', 'user', user.id, null, req.ip);
     res.status(201).json({ user, token, trial: true, trial_days: 14 });
   } catch (error) {
@@ -1130,7 +1216,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (user.is_blocked) return res.status(403).json({ error: `Cuenta bloqueada: ${user.block_reason || 'Contacta al administrador'}` });
 
     const sessionDur = user.session_duration || '30d';
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: sessionDur });
+    const token = sesiones.firmarToken(user, JWT_SECRET, sessionDur);
     logAudit(user.id, 'login', 'user', user.id, null, req.ip);
     res.json({ user: { id: user.id, email: user.email, nombre: user.nombre, organization_id: user.organization_id, role: user.role || 'owner', is_admin: user.is_admin || false }, token, session_duration: sessionDur });
   } catch (error) {
@@ -1169,11 +1255,25 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
 
     const newHash = await bcrypt.hash(new_password, 10);
     await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, req.user.id]);
-    res.json({ message: 'Contraseña actualizada' });
+    // Cambiar la contraseña cierra todas las sesiones anteriores. Quien la
+    // cambio recibe un token nuevo para no quedar afuera el tambien.
+    const sv = await sesiones.revocarSesiones(pool, req.user.id);
+    const token = sesiones.firmarToken({ ...user.rows[0], session_version: sv }, JWT_SECRET, user.rows[0].session_duration || '30d');
+    logAudit(req.user.id, 'change_password', 'user', req.user.id, null, req.ip);
+    res.json({ message: 'Contraseña actualizada', token, sessions_revoked: true });
   } catch (error) {
     console.error('Error al cambiar contraseña:', error);
     res.status(500).json({ error: 'Error interno' });
   }
+});
+
+// Cerrar todas las sesiones (todos los dispositivos), incluida la actual.
+app.post('/api/auth/logout-all', authenticateToken, async (req, res) => {
+  try {
+    await sesiones.revocarSesiones(pool, req.user.id);
+    logAudit(req.user.id, 'logout_all', 'user', req.user.id, null, req.ip);
+    res.json({ message: 'Todas las sesiones fueron cerradas' });
+  } catch (error) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 app.get('/api/auth/session', authenticateToken, async (req, res) => {
@@ -1442,6 +1542,15 @@ async function resolvePendingChange(changeId, ownerId, doApply) {
     } else if (change.change_type === 'delete' && change.target_type === 'machine') {
       await pool.query('DELETE FROM machines WHERE id = $1 AND user_id = $2', [change.target_id, ownerId]);
     } else if (change.change_type === 'edit' && change.target_type === 'url') {
+      // El tecnico propone, el dueño aprueba: la URL se valida igual que si la
+      // cargara el dueño a mano. Un cambio a un destino interno se rechaza.
+      if (d.url !== undefined && d.url !== null) {
+        try { await urlGuard.validarDestino(d.url); }
+        catch (e) {
+          await pool.query('UPDATE pending_changes SET status = $1, resolved_at = NOW(), resolved_by = $2 WHERE id = $3', ['rejected', ownerId, changeId]);
+          const err = new Error(`Cambio rechazado: ${e.message}`); err.code = 'DESTINO_NO_PERMITIDO'; throw err;
+        }
+      }
       const sets = []; const vals = []; let i = 1;
       for (const [k, v] of Object.entries(d)) {
         if (['url','name','method','expected_status','timeout_ms','interval_seconds','is_active','notify_down'].includes(k)) {
@@ -1468,6 +1577,7 @@ app.post('/api/pending-changes/:id/approve', authenticateToken, async (req, res)
     if (!change) return res.status(404).json({ error: 'No encontrado' });
     res.json({ message: 'Aprobado' });
   } catch (error) {
+    if (error.code === 'DESTINO_NO_PERMITIDO') return res.status(400).json({ error: error.message });
     console.error('Error aprobando:', error);
     res.status(500).json({ error: 'Error interno' });
   }
@@ -1618,79 +1728,71 @@ async function sendPush(userId, title, body, data = {}) {
   }
 }
 
-// ============== PAIRING (vinculacion por codigo) ==============
+// ============== PAIRING (VINCULACION DE AGENTES) ==============
+//
+// Protocolo (ver lib/pairing.js):
+//   1. El agente hace POST /api/pairing/request y recibe { code, pairing_token }.
+//      Muestra el code; el pairing_token no se muestra ni se comparte.
+//   2. El usuario tipea el code en la app: POST /api/pairing/confirm (con JWT).
+//   3. El agente consulta GET /api/pairing/status/:code con el header
+//      X-Pairing-Token. Sin el token no se sabe ni siquiera si se confirmo.
+//      Cuando esta confirmado la respuesta trae la machine_key; el mismo token
+//      puede volver a pedirla hasta que el codigo venza (respuestas perdidas).
+//      Con el codigo solo nunca se obtiene nada, ni se anula la vinculacion.
+// Los limites viven en memoria: valen por instancia. Con mas de una replica
+// el pedido y la consulta del agente pueden caer en instancias distintas y la
+// vinculacion falla (ver SEGURIDAD-DESPLIEGUE.md). Hoy hay una sola.
+const pairingStore = new PairingStore({
+  maxRequestsPerIp: parseInt(process.env.PAIRING_MAX_POR_IP || '20', 10) || 20
+});
 
-// Almacen temporal de codigos de pairing (en memoria, expiran en 5 min)
-const pairingCodes = new Map();
-
-// Windows solicita un codigo de pairing
 app.post('/api/pairing/request', async (req, res) => {
   try {
     const { machine_name, os_info } = req.body;
     if (!machine_name) return res.status(400).json({ error: 'machine_name requerido' });
-
-    // Generar codigo de 6 digitos
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-
-    pairingCodes.set(code, {
-      machine_name,
-      os_info: os_info || '',
-      created_at: Date.now(),
-      confirmed: false,
-      machine_key: null
-    });
-
-    // Limpiar despues de 5 minutos
-    setTimeout(() => pairingCodes.delete(code), 5 * 60 * 1000);
-
-    res.json({ code, expires_in: 300 });
+    const r = pairingStore.request({ machine_name: String(machine_name).slice(0, 255), os_info: String(os_info || '').slice(0, 500), ip: req.ip });
+    if (r.error) return res.status(r.status).json({ error: r.error });
+    res.json(r);
   } catch (error) {
     console.error('Error en pairing request:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });
 
-// Android confirma el codigo y crea la maquina
+// La app confirma el codigo y crea la maquina
 app.post('/api/pairing/confirm', authenticateToken, async (req, res) => {
   try {
     const { code } = req.body;
     if (!code) return res.status(400).json({ error: 'code requerido' });
-
-    const pairing = pairingCodes.get(code);
-    if (!pairing) return res.status(404).json({ error: 'Codigo invalido o expirado' });
-    if (pairing.confirmed) return res.status(409).json({ error: 'Codigo ya fue usado' });
-
-    // Crear la maquina
-    const machine_key = require('crypto').randomBytes(32).toString('hex').slice(0, 32);
-    const result = await pool.query(
-      'INSERT INTO machines (user_id, machine_name, machine_key) VALUES ($1, $2, $3) RETURNING *',
-      [req.user.id, pairing.machine_name, machine_key]
-    );
-
-    // Marcar como confirmado
-    pairing.confirmed = true;
-    pairing.machine_key = machine_key;
-
-    res.json({ machine: result.rows[0] });
+    const r = await pairingStore.confirm({
+      code, userId: req.user.id,
+      crearMaquina: async (p) => {
+        const machine_key = crypto.randomBytes(32).toString('hex').slice(0, 32);
+        const ins = await pool.query(
+          'INSERT INTO machines (user_id, machine_name, machine_key) VALUES ($1, $2, $3) RETURNING *',
+          [req.user.id, p.machine_name, machine_key]
+        );
+        return ins.rows[0];
+      }
+    });
+    if (r.error) return res.status(r.status).json({ error: r.error });
+    logAudit(req.user.id, 'pair_machine', 'machine', r.machine.id, r.machine.machine_name, req.ip);
+    // La machine_key no vuelve a la app: la retira el agente con su token.
+    const { machine_key: _mk, ...sinClave } = r.machine;
+    res.json({ machine: sinClave });
   } catch (error) {
     console.error('Error en pairing confirm:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });
 
-// Windows consulta si el codigo fue confirmado
+// El agente consulta si el codigo fue confirmado. Exige el token secreto.
 app.get('/api/pairing/status/:code', (req, res) => {
-  const pairing = pairingCodes.get(req.params.code);
-  if (!pairing) return res.status(404).json({ error: 'Codigo invalido o expirado' });
-
-  if (pairing.confirmed) {
-    // Devolver la clave y limpiar
-    const machine_key = pairing.machine_key;
-    pairingCodes.delete(req.params.code);
-    res.json({ confirmed: true, machine_key });
-  } else {
-    res.json({ confirmed: false });
-  }
+  const token = req.get('X-Pairing-Token');
+  if (!token) return res.status(401).json({ error: 'Falta el header X-Pairing-Token. Actualiza el agente.' });
+  const r = pairingStore.status({ code: req.params.code, token });
+  if (r.error) return res.status(r.status).json({ error: r.error });
+  res.json(r);
 });
 
 // ============== MIDDLEWARE AUTH JWT ==============
@@ -1703,13 +1805,18 @@ async function authenticateToken(req, res, next) {
 
   try {
     const token = authHeader.split(' ')[1];
-    const payload = jwt.verify(token, JWT_SECRET);
-    const user = await pool.query('SELECT id, email, nombre, is_blocked, block_reason FROM users WHERE id = $1', [payload.id]);
-    if (user.rows.length === 0) return res.status(401).json({ error: 'Usuario no encontrado' });
-    if (user.rows[0].is_blocked) return res.status(403).json({ error: `Cuenta bloqueada: ${user.rows[0].block_reason || 'Contacta al administrador'}` });
-    req.user = user.rows[0];
+    const user = await sesiones.verificarToken(token, JWT_SECRET, async (id) => {
+      const q = await pool.query('SELECT id, email, nombre, is_blocked, block_reason, session_version FROM users WHERE id = $1', [id]);
+      return q.rows[0] || null;
+    });
+    if (user.is_blocked) return res.status(403).json({ error: `Cuenta bloqueada: ${user.block_reason || 'Contacta al administrador'}` });
+    req.user = user;
     next();
   } catch (error) {
+    if (error.code === 'USER_NOT_FOUND') return res.status(401).json({ error: 'Usuario no encontrado' });
+    // Distinguimos la revocacion para que los clientes avisen "cerraste sesion
+    // en todos lados" en vez de "token invalido".
+    if (error.code === 'SESSION_REVOKED') return res.status(401).json({ error: 'Sesion cerrada. Volve a iniciar sesion.', code: 'SESSION_REVOKED' });
     res.status(401).json({ error: 'Token invalido' });
   }
 }
@@ -1898,7 +2005,10 @@ app.post('/api/heartbeat', async (req, res) => {
     if (public_ip && updatedMachine && !updatedMachine.geo_manual && (!updatedMachine.geo_city || updatedMachine.public_ip !== public_ip)) {
       try {
         const https = require('https');
-        https.get('https://ipwho.is/' + public_ip, (geoRes) => {
+        // Consulta suelta: con timeout, y el socket sin ref para que no
+        // mantenga vivo el proceso (los tests cierran el servidor y esperan
+        // que termine solo).
+        https.get('https://ipwho.is/' + public_ip, { timeout: 10000 }, (geoRes) => {
           let geoData = '';
           geoRes.on('data', c => geoData += c);
           geoRes.on('end', () => {
@@ -1910,7 +2020,7 @@ app.post('/api/heartbeat', async (req, res) => {
               }
             } catch {}
           });
-        }).on('error', () => {});
+        }).on('error', () => {}).on('timeout', function () { this.destroy(); }).on('socket', s => s.unref());
       } catch {}
     }
 
@@ -2124,13 +2234,12 @@ app.post('/api/heartbeat', async (req, res) => {
     // Comandos remotos pendientes
     let pendingCommands = [];
     try {
-      const cmds = await pool.query(
-        "SELECT id, command FROM remote_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT 5",
-        [updatedMachine.id]
-      );
+      // Reserva atomica: el comando pasa a "delivered" en el mismo UPDATE que lo
+      // lee, asi dos latidos solapados no se llevan el mismo (lib/comandos.js).
+      const cmds = await comandos.reservarComandos(pool, updatedMachine.id, 5);
       // Firmamos cada comando para que el agente pueda verificar que salio de
       // este servidor antes de pasarselo a exec().
-      pendingCommands = cmds.rows.map(c => ({
+      pendingCommands = cmds.map(c => ({
         ...c,
         sig: firmarParaMaquina(machine_key, 'cmd', String(c.id), c.command)
       }));
@@ -2620,7 +2729,7 @@ app.get('/api/machines/:id/history', authenticateToken, async (req, res) => {
 });
 
 // ============== TRIAL EXPIRATION CHECK (cada hora) ==============
-setInterval(async () => {
+cadaTanto(async () => {
   try {
     const expired = await pool.query(
       `UPDATE users SET plan = 'free', max_machines = 3
@@ -2634,20 +2743,18 @@ setInterval(async () => {
 }, 3600000);
 
 // ============== SSL CERTIFICATE CHECKER (cada 6 horas) ==============
+// Lee el certificado pasando por lib/url-guard: solo direcciones publicas, y
+// la conexion va a la direccion validada con el hostname original como SNI.
+// Devuelve el resumen, o { error } con el motivo (destino no permitido, red).
 async function checkSSLCert(hostname) {
-  return new Promise((resolve) => {
-    const tls = require('tls');
-    const socket = tls.connect(443, hostname, { servername: hostname, timeout: 10000 }, () => {
-      const cert = socket.getPeerCertificate();
-      socket.destroy();
-      if (!cert || !cert.valid_to) return resolve(null);
-      const expiresAt = new Date(cert.valid_to);
-      const daysLeft = Math.ceil((expiresAt - Date.now()) / 86400000);
-      resolve({ issuer: cert.issuer?.O || cert.issuer?.CN || '?', expires_at: expiresAt, days_left: daysLeft, status: daysLeft <= 0 ? 'expired' : daysLeft <= 14 ? 'warning' : 'ok' });
-    });
-    socket.on('error', () => resolve(null));
-    socket.on('timeout', () => { socket.destroy(); resolve(null); });
-  });
+  try {
+    const { cert } = await urlGuard.inspeccionarCertificado(hostname);
+    const expiresAt = new Date(cert.valid_to);
+    const daysLeft = Math.ceil((expiresAt - Date.now()) / 86400000);
+    return { issuer: cert.issuer?.O || cert.issuer?.CN || '?', expires_at: expiresAt, days_left: daysLeft, status: daysLeft <= 0 ? 'expired' : daysLeft <= 14 ? 'warning' : 'ok' };
+  } catch (e) {
+    return { error: e.message, bloqueado: e.code === 'DESTINO_NO_PERMITIDO' };
+  }
 }
 
 // Los certificados se miran cada 6 horas, pero la tarea corre cada 15 minutos
@@ -2668,12 +2775,15 @@ async function revisarCertificados() {
     if (monitors.rows.length > 0) console.log(`[SSL] Revisando ${monitors.rows.length} certificado(s)`);
     for (const mon of monitors.rows) {
       const result = await checkSSLCert(mon.hostname);
-      if (!result) {
-        await pool.query('UPDATE ssl_monitors SET last_check = NOW(), last_status = $1 WHERE id = $2', ['error', mon.id]);
+      if (result.error) {
+        // Un registro guardado antes del filtro que apunte adentro queda aca,
+        // con el motivo visible, y no se conecta nunca.
+        if (result.bloqueado) console.warn(`[SSL] ${mon.hostname}: ${result.error}`);
+        await pool.query('UPDATE ssl_monitors SET last_check = NOW(), last_status = $1, last_error = $2 WHERE id = $3', ['error', result.error.slice(0, 300), mon.id]);
         continue;
       }
       await pool.query(
-        'UPDATE ssl_monitors SET last_check = NOW(), last_days_left = $1, last_issuer = $2, last_expiry = $3, last_status = $4 WHERE id = $5',
+        'UPDATE ssl_monitors SET last_check = NOW(), last_days_left = $1, last_issuer = $2, last_expiry = $3, last_status = $4, last_error = NULL WHERE id = $5',
         [result.days_left, result.issuer, result.expires_at, result.status, mon.id]
       );
       const alertDays = mon.alert_days || [30, 14, 7, 1];
@@ -2695,15 +2805,15 @@ async function revisarCertificados() {
   }
 }
 
-setInterval(revisarCertificados, 15 * 60 * 1000);
+cadaTanto(revisarCertificados, 15 * 60 * 1000);
 // Y una pasada al ratito de arrancar, para que un despliegue no deje los
 // certificados sin datos hasta la proxima vuelta.
-setTimeout(revisarCertificados, 45000);
+dentroDe(revisarCertificados, 45000);
 
 // ============== DETECTOR DE OFFLINE ==============
 
 // Cada 30 segundos, marcar maquinas sin heartbeat en 60s como offline
-setInterval(async () => {
+cadaTanto(async () => {
   try {
     const offlineMachines = await pool.query(
       `UPDATE machines SET is_online = false
@@ -2965,7 +3075,10 @@ app.post('/api/admin/reset-password', authenticateToken, requireAdmin, async (re
     if (!new_password || new_password.length < 6) return res.status(400).json({ error: 'Minimo 6 caracteres' });
     const hash = await bcrypt.hash(new_password, 10);
     await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, user_id]);
-    res.json({ message: 'Contraseña reseteada' });
+    // Un reseteo desde el admin tambien saca a quien estuviera usando la cuenta.
+    await sesiones.revocarSesiones(pool, user_id);
+    logAudit(req.user.id, 'admin_reset_password', 'user', parseInt(user_id), null, req.ip);
+    res.json({ message: 'Contraseña reseteada', sessions_revoked: true });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -3031,7 +3144,7 @@ app.get('/api/machines/:id/metrics', authenticateToken, async (req, res) => {
 });
 
 // Limpieza automatica de metricas viejas (>7 dias) cada hora
-setInterval(async () => {
+cadaTanto(async () => {
   try {
     const result = await pool.query("DELETE FROM metrics_history WHERE timestamp < NOW() - INTERVAL '7 days'");
     if (result.rowCount > 0) console.log(`[CLEANUP] Eliminadas ${result.rowCount} metricas viejas`);
@@ -3140,15 +3253,16 @@ app.get('/api/machines/report/pdf', async (req, res, next) => {
 // Resultado de comando remoto (desde el agente, sin auth)
 app.post('/api/command-result', async (req, res) => {
   try {
-    const { machine_key, command_id, output } = req.body;
+    const { machine_key, command_id, output, status } = req.body;
     if (!machine_key || !command_id) return res.status(400).json({ error: 'machine_key y command_id requeridos' });
+    if (!Number.isInteger(Number(command_id))) return res.status(400).json({ error: 'command_id invalido' });
     const machine = await pool.query('SELECT id FROM machines WHERE machine_key = $1', [machine_key]);
     if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
-    await pool.query(
-      "UPDATE remote_commands SET status = 'completed', output = $1, executed_at = NOW() WHERE id = $2 AND machine_id = $3",
-      [(output || '').substring(0, 10000), command_id, machine.rows[0].id]
-    );
-    res.json({ status: 'ok' });
+    // Idempotente: el agente reenvia si no vio la respuesta, y la segunda vez
+    // no debe fallar ni pisar el resultado ya guardado.
+    const r = await comandos.registrarResultado(pool, machine.rows[0].id, parseInt(command_id, 10), { status, output });
+    if (!r.aplicado && r.motivo === 'no_existe') return res.status(404).json({ error: 'Comando no encontrado' });
+    res.json({ status: 'ok', aplicado: r.aplicado });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -3171,6 +3285,62 @@ app.post('/api/machines/:id/command', authenticateToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error enviando comando:', error);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Reenviar un comando que quedo sin resultado (entregado y perdido, fallido o
+// indeterminado). Es una decision del usuario, nunca automatica: el servidor no
+// sabe si el original llego a ejecutarse. Se crea un comando NUEVO con el mismo
+// texto (id nuevo: el registro del agente no lo confunde con el anterior) y el
+// original queda como historia.
+app.post('/api/commands/:id/retry', authenticateToken, async (req, res) => {
+  try {
+    const orig = await pool.query(
+      `SELECT rc.* FROM remote_commands rc JOIN machines m ON m.id = rc.machine_id
+       WHERE rc.id = $1 AND m.user_id = $2`, [req.params.id, req.user.id]);
+    if (orig.rows.length === 0) return res.status(404).json({ error: 'Comando no encontrado' });
+    const c = orig.rows[0];
+    // Idempotencia por accion del usuario. El panel genera una clave al
+    // confirmar y la repite si reintenta una peticion cuyo resultado no vio
+    // (doble clic, respuesta perdida). La misma clave devuelve siempre el
+    // mismo comando, este como este (pending, delivered, completed). Una
+    // confirmacion nueva trae otra clave y crea otro comando: eso es lo que
+    // el usuario pidio.
+    //
+    // Orden: dueño (arriba) -> clave -> estado del original. La busqueda por
+    // clave va ANTES del chequeo de estado: si el original cambio de estado
+    // entre la confirmacion y el reintento HTTP (el agente termino por fin de
+    // informar), el reintento tiene que devolver el comando ya creado, no 409.
+    const idemKey = String(req.get('Idempotency-Key') || req.body?.idempotency_key || '').trim();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(idemKey)) {
+      return res.status(400).json({ error: 'Falta Idempotency-Key (8-64 caracteres [A-Za-z0-9_-]), una por confirmacion del usuario' });
+    }
+    const buscarPorClave = () => pool.query(
+      'SELECT * FROM remote_commands WHERE user_id = $1 AND retry_of = $2 AND idem_key = $3', [req.user.id, c.id, idemKey]);
+    const previo = await buscarPorClave();
+    if (previo.rows.length > 0) return res.json({ ...previo.rows[0], duplicado: true });
+    if (!['delivered', 'failed', 'indeterminate'].includes(c.status)) {
+      return res.status(409).json({ error: `Solo se reenvian comandos entregados sin resultado, fallidos o indeterminados (este esta "${c.status}")` });
+    }
+    let nuevo;
+    try {
+      nuevo = await pool.query(
+        'INSERT INTO remote_commands (machine_id, user_id, command, retry_of, idem_key) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+        [c.machine_id, req.user.id, c.command, c.id, idemKey]
+      );
+    } catch (e) {
+      // Dos POST con la misma clave en el mismo instante: el indice unico deja
+      // pasar uno; el otro devuelve el que quedo.
+      if (e.code !== '23505') throw e;
+      const ganador = await buscarPorClave();
+      if (ganador.rows.length === 0) throw e;
+      return res.json({ ...ganador.rows[0], duplicado: true });
+    }
+    await logAudit(req.user.id, 'remote_command_retry', 'command', nuevo.rows[0].id, `reenvio de #${c.id} (${c.status}) en maquina ${c.machine_id}, clave ${idemKey}: ${c.command}`, req.ip);
+    res.json(nuevo.rows[0]);
+  } catch (error) {
+    console.error('Error reenviando comando:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 });
@@ -3759,23 +3929,25 @@ app.post('/api/ssl-check', authenticateToken, async (req, res) => {
   try {
     const { hostname } = req.body;
     if (!hostname) return res.status(400).json({ error: 'hostname requerido' });
-    const tls = require('tls');
-    const socket = tls.connect(443, hostname, { servername: hostname, timeout: 10000 }, () => {
-      const cert = socket.getPeerCertificate();
-      socket.destroy();
-      if (!cert || !cert.valid_to) return res.json({ error: 'No se pudo obtener certificado' });
-      const expiresAt = new Date(cert.valid_to);
-      const daysLeft = Math.ceil((expiresAt - Date.now()) / 86400000);
-      res.json({
-        hostname, issuer: cert.issuer?.O || cert.issuer?.CN || 'Desconocido',
-        subject: cert.subject?.CN || hostname,
-        valid_from: cert.valid_from, valid_to: cert.valid_to,
-        expires_at: expiresAt.toISOString(), days_left: daysLeft,
-        status: daysLeft <= 0 ? 'expired' : daysLeft <= 14 ? 'warning' : 'ok'
-      });
+    let info;
+    try {
+      info = await urlGuard.inspeccionarCertificado(hostname);
+    } catch (e) {
+      if (e.code === 'DESTINO_NO_PERMITIDO') return res.status(400).json({ hostname, error: e.message, status: 'error' });
+      return res.json({ hostname, error: e.message, status: 'error' });
+    }
+    const cert = info.cert;
+    const expiresAt = new Date(cert.valid_to);
+    const daysLeft = Math.ceil((expiresAt - Date.now()) / 86400000);
+    res.json({
+      hostname, issuer: cert.issuer?.O || cert.issuer?.CN || 'Desconocido',
+      subject: cert.subject?.CN || hostname,
+      valid_from: cert.valid_from, valid_to: cert.valid_to,
+      expires_at: expiresAt.toISOString(), days_left: daysLeft,
+      status: daysLeft <= 0 ? 'expired' : daysLeft <= 14 ? 'warning' : 'ok',
+      // Vencido o cadena rota se informa, no se esconde detras de "error"
+      chain_ok: info.authorized, chain_error: info.authorized ? null : (info.authorizationError && String(info.authorizationError))
     });
-    socket.on('error', (err) => { res.json({ hostname, error: err.message, status: 'error' }); });
-    socket.on('timeout', () => { socket.destroy(); res.json({ hostname, error: 'Timeout', status: 'error' }); });
   } catch (error) {
     res.status(500).json({ error: 'Error: ' + error.message });
   }
@@ -4128,7 +4300,10 @@ app.post('/api/ssl-monitors', authenticateToken, async (req, res) => {
   try {
     const { hostname, name, alert_days, notify_emails } = req.body;
     if (!hostname) return res.status(400).json({ error: 'hostname requerido' });
-    const h = hostname.replace(/^https?:\/\//, '').split('/')[0];
+    const h = String(hostname).trim().replace(/^[a-z]+:\/\//i, '').split('/')[0].split(':')[0].toLowerCase();
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(h) && !require('net').isIP(h)) return res.status(400).json({ error: 'Hostname invalido' });
+    try { await urlGuard.validarDestino('https://' + h + '/'); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
     const days = alert_days || [30, 14, 7, 1];
     const correos = notify_emails === undefined ? [] : normalizarCorreos(notify_emails);
     if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
@@ -4160,13 +4335,17 @@ app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
     const fields = [];
     const vals = [];
     let idx = 1;
-    if (alert_days !== undefined) { fields.push(`alert_days = ${idx++}`); vals.push(JSON.stringify(alert_days)); }
-    if (name !== undefined) { fields.push(`name = ${idx++}`); vals.push(name); }
+    // Los placeholders iban sin "$" (alert_days = 1): editar un monitor SSL
+    // devolvia 500 siempre. Corregido junto con la validacion del destino.
+    if (alert_days !== undefined) { fields.push(`alert_days = $${idx++}`); vals.push(JSON.stringify(alert_days)); }
+    if (name !== undefined) { fields.push(`name = $${idx++}`); vals.push(name); }
     if (hostname !== undefined) {
       // Aceptamos que peguen una URL entera y nos quedamos con el host.
       let limpio = String(hostname).trim().replace(/^[a-z]+:\/\//i, '').split('/')[0].split(':')[0];
-      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(limpio)) return res.status(400).json({ error: 'Hostname invalido' });
-      fields.push(`hostname = ${idx++}`); vals.push(limpio.toLowerCase());
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(limpio) && !require('net').isIP(limpio)) return res.status(400).json({ error: 'Hostname invalido' });
+      try { await urlGuard.validarDestino('https://' + limpio + '/'); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
+      fields.push(`hostname = $${idx++}`); vals.push(limpio.toLowerCase());
       // Lo chequeado corresponde al host anterior: se limpia para que el
       // proximo ciclo lo vuelva a mirar en vez de mostrar datos de otro dominio.
       fields.push('last_check = NULL', 'last_days_left = NULL', 'last_issuer = NULL', 'last_expiry = NULL', 'last_status = NULL', 'last_alerted_days = NULL');
@@ -4175,11 +4354,12 @@ app.put('/api/ssl-monitors/:id', authenticateToken, async (req, res) => {
       const correos = normalizarCorreos(notify_emails);
       if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
       if (correos.error) return res.status(400).json({ error: correos.error });
-      fields.push(`notify_emails = ${idx++}`); vals.push(JSON.stringify(correos));
+      fields.push(`notify_emails = $${idx++}`); vals.push(JSON.stringify(correos));
     }
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
     vals.push(req.params.id, req.user.id);
-    await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = ${idx++} AND user_id = ${idx}`, vals);
+    const upd = await pool.query(`UPDATE ssl_monitors SET ${fields.join(', ')} WHERE id = $${idx++} AND user_id = $${idx}`, vals);
+    if (upd.rowCount === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
     if (notify_emails !== undefined) {
       const m = await pool.query('SELECT id, hostname, name FROM ssl_monitors WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
       const duenio = await traerDuenio(req.user.id);
@@ -4612,6 +4792,8 @@ app.post('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
     const { url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails } = req.body;
     if (!url) return res.status(400).json({ error: 'url requerido' });
+    try { await urlGuard.validarDestino(url); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
     const correos = notify_emails === undefined ? [] : normalizarCorreos(notify_emails);
     if (correos && correos.error) return res.status(400).json({ error: correos.error });
     if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
@@ -4634,6 +4816,10 @@ app.post('/api/url-monitors', authenticateToken, async (req, res) => {
 app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
   try {
     const { url, name, method, expected_status, timeout_ms, interval_seconds, is_active, notify_emails } = req.body;
+    if (url !== undefined && url !== null) {
+      try { await urlGuard.validarDestino(url); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
+    }
     let correos = null;
     if (notify_emails !== undefined) {
       correos = normalizarCorreos(notify_emails);
@@ -4716,76 +4902,13 @@ const URL_MONITOR_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/53
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function followRedirects(urlStr, method, timeoutMs, maxRedirects) {
-  const https = require('https');
-  const http = require('http');
-  const totalTimeout = timeoutMs || 10000;
-  return new Promise((resolve, reject) => {
-    let redirects = 0;
-    let settled = false;
-    let current = null;
-    // Un unico timer para toda la cadena de redirecciones. Antes se creaba uno
-    // por salto sin limpiar el anterior, y el timer viejo rechazaba la promesa
-    // aunque la respuesta hubiera llegado bien.
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      if (current) current.destroy();
-      reject(new Error('Timeout'));
-    }, totalTimeout);
-    const finish = (err, val) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (err) reject(err); else resolve(val);
-    };
-    function doRequest(url) {
-      let urlObj;
-      try { urlObj = new URL(url); } catch (e) { return finish(new Error('URL invalida: ' + url)); }
-      const client = urlObj.protocol === 'https:' ? https : http;
-      const opts = {
-        method: method || 'GET',
-        timeout: totalTimeout,
-        headers: {
-          'User-Agent': URL_MONITOR_UA,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
-          'Accept-Encoding': 'identity',
-          'Cache-Control': 'no-cache',
-          'X-Monitor': 'ServerEyes/1.0'
-        },
-        // Un certificado vencido o con cadena incompleta no es "sitio caido":
-        // eso ya lo vigila ssl_monitors con su propia alerta.
-        // (antes decia rejectAuthorized, que es un typo y no hacia nada)
-        rejectUnauthorized: false,
-        // Happy Eyeballs como un navegador: si el AAAA no responde, cae a IPv4
-        // en vez de fallar el chequeo.
-        autoSelectFamily: true
-      };
-      const r = client.request(urlObj, opts, (res) => {
-        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-          res.resume();
-          // Un loop de redirecciones deja la pagina inservible para el visitante:
-          // es una caida, no un 302 sano. Antes se devolvia el 302 como "arriba".
-          if (redirects >= (maxRedirects || 5)) return finish(new Error('Demasiadas redirecciones (' + redirects + ')'));
-          redirects++;
-          let next = null;
-          try { next = new URL(res.headers.location, urlObj).href; } catch (e) { next = null; }
-          if (!next) return finish(new Error('Redirect invalido: ' + res.headers.location));
-          doRequest(next);
-          return;
-        }
-        res.resume(); // drenamos sin acumular el body en memoria
-        res.on('end', () => finish(null, { status: res.statusCode, redirects }));
-      });
-      current = r;
-      r.on('error', (e) => finish(e));
-      r.on('timeout', () => r.destroy(new Error('Timeout')));
-      r.end();
-    }
-    doRequest(urlStr);
-  });
-}
+// followRedirects vive en lib/url-guard.js: valida cada destino (solo http/https,
+// solo direcciones publicas) y conecta a la direccion validada, no a lo que
+// resuelva el DNS en ese momento. Las URLs guardadas antes de esa validacion
+// pasan por el mismo filtro en cada chequeo: si apuntan adentro, el monitor
+// queda caido con el motivo en last_error y no se hace ninguna conexion.
+const followRedirects = (urlStr, method, timeoutMs, maxRedirects) =>
+  urlGuard.followRedirects(urlStr, method, timeoutMs, maxRedirects, { userAgent: URL_MONITOR_UA });
 
 // Un intento suelto contra la URL. Nunca lanza: devuelve el resultado.
 async function probeUrl(mon) {
@@ -4854,7 +4977,7 @@ async function checkUrlMonitor(mon) {
 }
 
 let urlCheckRunning = false;
-setInterval(async () => {
+cadaTanto(async () => {
   if (urlCheckRunning) return; // evitamos solapar ciclos: con reintentos un ciclo puede pasar los 60s
   urlCheckRunning = true;
   try {
@@ -4894,8 +5017,8 @@ async function purgarHistorialUrls() {
   }
 }
 
-setInterval(purgarHistorialUrls, 60 * 60 * 1000);
-setTimeout(purgarHistorialUrls, 120000);
+cadaTanto(purgarHistorialUrls, 60 * 60 * 1000);
+dentroDe(purgarHistorialUrls, 120000);
 
 // ============== WEEKLY REPORT ==============
 
@@ -5010,8 +5133,8 @@ async function mandarReportesSemanales() {
   }
 }
 
-setInterval(mandarReportesSemanales, 15 * 60 * 1000);
-setTimeout(mandarReportesSemanales, 90000);
+cadaTanto(mandarReportesSemanales, 15 * 60 * 1000);
+dentroDe(mandarReportesSemanales, 90000);
 
 // ============== WAKE-ON-LAN ==============
 
@@ -5414,11 +5537,33 @@ app.get('/api/public/status/:slug', async (req, res) => {
 // Integrate maintenance windows into offline detector
 const origOfflineDetector = true;
 
-initDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`ServerEyes backend corriendo en puerto ${PORT}`);
-  });
-}).catch(err => {
+const listo = initDB().catch(err => {
   console.error('Error al inicializar DB:', err);
   process.exit(1);
 });
+
+// Los tests importan el modulo contra una base de pruebas y le hablan a `app`
+// con supertest-like fetch; solo escucha cuando se lo ejecuta directo.
+if (require.main === module) {
+  listo.then(() => {
+    app.listen(PORT, () => {
+      console.log(`ServerEyes backend corriendo en puerto ${PORT}`);
+    });
+  });
+}
+
+// Cierre explicito (tests): cancela los temporizadores, cierra Firebase y el
+// pool de Postgres. El servidor HTTP lo cierra quien lo abrio.
+let detenido = null;
+function detener() {
+  if (detenido) return detenido;
+  detenido = (async () => {
+    for (const t of temporizadores) clearTimeout(t); // clearTimeout tambien cancela intervalos
+    temporizadores.clear();
+    if (firebaseApp) { try { await firebaseApp.delete(); } catch (e) {} firebaseApp = null; }
+    await pool.end();
+  })();
+  return detenido;
+}
+
+module.exports = { app, pool, listo, detener };

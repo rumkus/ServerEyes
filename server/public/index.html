@@ -333,6 +333,11 @@ async function api(path, opts={}) {
   try {
     const r = await fetch(API + path, {...opts, headers});
     const d = await r.json();
+    if (r.status === 401 && d && d.code === 'SESSION_REVOKED' && token) {
+      // Cambio de contraseña o "cerrar todas las sesiones": se vuelve al login.
+      sessionStorage.setItem('se_aviso_login', 'La sesion se cerro porque cambio la contraseña o se cerraron todas las sesiones.');
+      logout();
+    }
     return {ok: r.ok, status: r.status, data: d};
   } catch(e) {
     return {ok:false, status:0, data:{error:e.message}};
@@ -385,6 +390,8 @@ function getFiltered() {
 
 // ── LOGIN ──
 function renderLogin(err) {
+  // Aviso de sesion revocada (lo deja api() antes de hacer logout)
+  if (!err && sessionStorage.getItem('se_aviso_login')) { err = sessionStorage.getItem('se_aviso_login'); sessionStorage.removeItem('se_aviso_login'); }
   document.getElementById('app').innerHTML = `
   <div class="login-screen">
     <div class="login-card">
@@ -2470,6 +2477,60 @@ function buildEditModal() {
     <button class="modal-btn danger" onclick="deleteMachine(${d.id})" style="margin-top:20px">Eliminar máquina</button>
   </div></div>`;
 }
+const _reenviosEnCurso = new Set();
+async function reenviarComando(id, estado) {
+  if (_reenviosEnCurso.has(id)) return; // doble clic
+  const desconocido = estado === 'delivered' || estado === 'indeterminate';
+  let ok;
+  if (desconocido) {
+    // Resultado desconocido: el original puede estar ejecutandose todavia.
+    // Se exige escribir la palabra para que no sea un clic al pasar.
+    const texto = await pedirTexto({ icono: '⚠️', titulo: 'Resultado desconocido: reenviar igual?', peligro: true, ok: 'Crear otra ejecución',
+      mensaje: (estado === 'delivered' ? 'El agente retiró este comando y no informó resultado: puede estar ejecutándose todavía o haber terminado sin que llegue el aviso.' : 'El agente se reinició mientras corría y no se sabe si terminó.') +
+        ' Reenviar crea OTRA ejecución con el mismo texto: si la original corrió, el efecto se duplica (un reinicio se hace dos veces, un archivo se borra dos veces). Revisá la máquina antes. Escribí REENVIAR para confirmar.',
+      marcador: 'REENVIAR' });
+    ok = (texto || '').trim().toUpperCase() === 'REENVIAR';
+    if (texto !== null && !ok) { avisar('No se reenvió', 'Había que escribir REENVIAR.', 'ℹ️'); return; }
+  } else {
+    ok = await confirmar({ icono: '↻', titulo: 'Reenviar este comando?', mensaje: 'El agente no pudo lanzarlo. Se crea otra ejecución con el mismo texto.', ok: 'Reenviar' });
+  }
+  if (!ok) return;
+  _reenviosEnCurso.add(id);
+  const btn = document.getElementById('reenviar-'+id); if (btn) btn.disabled = true;
+  // Una clave por confirmación. Si la petición se pierde (sin respuesta), se
+  // reintenta con la MISMA clave: el servidor devuelve el mismo comando aunque
+  // el agente ya lo haya retirado. Confirmar de nuevo genera otra clave.
+  const clave = (crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36)+Math.random().toString(36).slice(2))).replace(/[^A-Za-z0-9_-]/g,'').slice(0,64);
+  try {
+    let r;
+    for (;;) {
+      r = await api('/api/commands/'+id+'/retry', {method:'POST', headers:{'Idempotency-Key': clave}});
+      // Resultado desconocido: sin respuesta (0) o error del servidor o de un
+      // intermediario (5xx: el edge pudo cortar después de que el comando se
+      // creara). Solo se reintenta con la MISMA clave, nunca con una nueva:
+      // el servidor devuelve el comando ya creado si existe. Un 4xx sí es
+      // una respuesta definitiva y se muestra tal cual.
+      if (r.status !== 0 && r.status < 500) break;
+      if (!await confirmar({ icono: '📡', titulo: r.status === 0 ? 'Sin respuesta del servidor' : 'Error '+r.status+' del servidor', mensaje: 'No se sabe si el reenvío se creó. Reintentar la misma petición no crea otro comando; si cancelás, revisá el historial antes de volver a reenviar.', ok: 'Reintentar', cancelar: 'Cancelar' })) return;
+    }
+    if (!r.ok) { avisar('Error', r.data?.error || 'No se pudo reenviar', '⚠️'); return; }
+    if (r.data.duplicado) avisar('Ya estaba reenviado', 'Esta confirmación ya había creado el comando #'+r.data.id+' (estado: '+estadoComando(r.data.status).texto+'); no se creó otro.', 'ℹ️');
+    if (activeModal?.type === 'cmd' && activeModal.machineId) { const l = await api('/api/machines/'+activeModal.machineId+'/commands'); if (l.ok) { activeModal.data = l.data; render(); } }
+  } finally {
+    _reenviosEnCurso.delete(id);
+    const b = document.getElementById('reenviar-'+id); if (b) b.disabled = false;
+  }
+}
+// Estados de un comando remoto (ver server/lib/comandos.js)
+function estadoComando(st) {
+  switch (st) {
+    case 'completed': return {texto:'Completado', color:'#4CAF50', ayuda:'El agente lo ejecuto y mando la salida'};
+    case 'delivered': return {texto:'Entregado', color:'#2196F3', ayuda:'El agente lo retiro; falta el resultado. Si no llega, el agente pudo perderlo: no se reenvia solo.'};
+    case 'failed': return {texto:'Fallo', color:'#f44336', ayuda:'El agente no pudo lanzar el proceso'};
+    case 'indeterminate': return {texto:'Indeterminado', color:'#9C27B0', ayuda:'El agente se reinicio mientras corria. No se sabe si termino y no se repitio.'};
+    default: return {texto:'Pendiente', color:'#FF9800', ayuda:'Se entrega en el proximo latido'};
+  }
+}
 function toggleDnsProvider() {
   const cf=document.getElementById('ed-dns-provider').value==='cloudflare';
   document.getElementById('ed-dns-freedns').hidden=cf;
@@ -2701,10 +2762,11 @@ function buildCmdModal() {
     cmds.map(c=>`<div class="cmd-entry ${c.status==='completed'?'done':'pending'}">
       <div style="display:flex;justify-content:space-between;margin-bottom:4px">
         <code class="cmd-code">${c.command}</code>
-        <span style="font-size:11px;font-weight:700;color:${c.status==='completed'?'#4CAF50':'#FF9800'}">${c.status==='completed'?'Completado':'Pendiente'}</span>
+        <span style="font-size:11px;font-weight:700;color:${estadoComando(c.status).color}" title="${estadoComando(c.status).ayuda}">${estadoComando(c.status).texto}</span>
       </div>
       ${c.output?`<pre class="cmd-output">${c.output.replace(/</g,'&lt;')}</pre>`:''}
-      <div class="cmd-meta">${new Date(c.created_at).toLocaleString('es')}${c.executed_at?' → '+new Date(c.executed_at).toLocaleString('es'):''}</div>
+      <div class="cmd-meta">${new Date(c.created_at).toLocaleString('es')}${c.executed_at?' → '+new Date(c.executed_at).toLocaleString('es'):''}${c.retry_of?' · reenvío de #'+c.retry_of:''}
+        ${['delivered','failed','indeterminate'].includes(c.status)?`<button class="chip" id="reenviar-${c.id}" style="margin-left:8px" title="Crea OTRA ejecución del mismo comando. Si la original corrió o sigue corriendo, el efecto se duplica." onclick="reenviarComando(${c.id},'${c.status}')">↻ Reenviar</button>`:''}</div>
     </div>`).join('')}
     <button class="day-tab" style="margin-top:8px" onclick="openCmd(${activeModal.machineId})">🔄 Refrescar</button>
   </div></div>`;
@@ -2929,7 +2991,7 @@ function renderCmdHistoryModal() {
       <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid ${c.status==='completed'?'#4CAF50':'#FF9800'}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <strong style="color:#333;font-size:13px">${c.machine_name || 'Maquina #'+c.machine_id}</strong>
-          <span style="font-size:11px;font-weight:700;color:${c.status==='completed'?'#4CAF50':'#FF9800'}">${c.status==='completed'?'Completado':'Pendiente'}</span>
+          <span style="font-size:11px;font-weight:700;color:${estadoComando(c.status).color}" title="${estadoComando(c.status).ayuda}">${estadoComando(c.status).texto}</span>
         </div>
         <code style="color:#2196F3;font-size:12px;display:block;margin-bottom:4px">${c.command}</code>
         ${c.output ? '<pre style="background:#fff;border:1px solid #eee;border-radius:4px;padding:8px;font-size:11px;color:#555;max-height:150px;overflow-y:auto;margin:4px 0 0;white-space:pre-wrap">' + c.output.replace(/</g,'&lt;') + '</pre>' : ''}
