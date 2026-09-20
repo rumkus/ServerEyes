@@ -2375,10 +2375,26 @@ function buildEditModal() {
     ${groups.length>0?`<div class="chip-row">${groups.map(g=>`<button class="chip" onclick="document.getElementById('ed-grupo').value='${g.replace(/'/g,"\\'")}';activeModal.data.grupo='${g.replace(/'/g,"\\'")}'">` +g+ `</button>`).join('')}</div>`:''}
     <label class="modal-label">Notas</label>
     <textarea class="modal-textarea" id="ed-notes" oninput="activeModal.data.notes=this.value">${d.notes||''}</textarea>
-    <label class="modal-label">FreeDNS — Dominio</label>
+    <label class="modal-label">DNS dinámico — Proveedor</label>
+    <select class="modal-input" id="ed-dns-provider" onchange="activeModal.data.dns_provider=this.value;toggleDnsProvider()">
+      <option value="freedns" ${d.dns_provider!=='cloudflare'?'selected':''}>FreeDNS (afraid.org)</option>
+      <option value="cloudflare" ${d.dns_provider==='cloudflare'?'selected':''}>Cloudflare</option>
+    </select>
+    <label class="modal-label">Dominio</label>
     <input class="modal-input" id="ed-dns-host" value="${d.dns_host||''}" placeholder="miserver.example.com" oninput="activeModal.data.dns_host=this.value"/>
-    <label class="modal-label">FreeDNS — URL de actualización</label>
-    <input class="modal-input" id="ed-dns-url" value="${d.dns_update_url||''}" placeholder="https://freedns.afraid.org/..." style="font-size:12px" oninput="activeModal.data.dns_update_url=this.value"/>
+    <div id="ed-dns-freedns" ${d.dns_provider==='cloudflare'?'hidden':''}>
+      <label class="modal-label">FreeDNS — URL de actualización</label>
+      <input class="modal-input" id="ed-dns-url" value="${d.dns_update_url||''}" placeholder="https://freedns.afraid.org/..." style="font-size:12px" oninput="activeModal.data.dns_update_url=this.value"/>
+    </div>
+    <div id="ed-dns-cloudflare" ${d.dns_provider!=='cloudflare'?'hidden':''}>
+      <label class="modal-label">Cloudflare — Zona</label>
+      <input class="modal-input" id="ed-cf-zone" value="${d.cf_zone_id||''}" placeholder="example.com o el Zone ID" style="font-size:13px" oninput="activeModal.data.cf_zone_id=this.value"/>
+      <label class="modal-label">Cloudflare — API Token</label>
+      <input class="modal-input" id="ed-cf-token" type="password" value="" placeholder="${d.cf_token_set?'●●●●●●●● (guardado; escribí uno nuevo para reemplazarlo)':'Token con permiso Zone.DNS: Edit'}" style="font-size:13px" autocomplete="new-password"/>
+      <div style="font-size:11px;color:#999;margin-top:4px">Creá el token en Cloudflare → Mi perfil → API Tokens → plantilla "Edit zone DNS", limitado a esta zona. El registro A se crea solo si no existe.</div>
+    </div>
+    ${d.dns_last_result?`<div style="font-size:11px;margin-top:6px;color:${d.dns_last_result.startsWith('OK')?'#4CAF50':'#f44336'}">Último resultado: ${d.dns_last_result.replace(/</g,'&lt;')}${d.dns_last_update?' — '+new Date(d.dns_last_update).toLocaleString():''}</div>`:''}
+    ${(d.dns_update_url||d.cf_token_set)?`<button class="modal-btn sm" style="margin-top:8px;border-radius:8px;background:#FFF3E0;color:#E65100" onclick="forzarDns(${d.id})">🌐 Actualizar DNS ahora</button>`:''}
     <div style="margin-top:12px" class="checkbox-row" onclick="var c=document.getElementById('ed-checkip');c.checked=!c.checked;activeModal.data.check_ip_change=c.checked">
       <input type="checkbox" id="ed-checkip" ${d.check_ip_change!==false?'checked':''} onclick="event.stopPropagation();activeModal.data.check_ip_change=this.checked"/>
       <span style="font-size:13px;color:#555">Monitorear cambio de IP pública</span>
@@ -2454,6 +2470,17 @@ function buildEditModal() {
     <button class="modal-btn danger" onclick="deleteMachine(${d.id})" style="margin-top:20px">Eliminar máquina</button>
   </div></div>`;
 }
+function toggleDnsProvider() {
+  const cf=document.getElementById('ed-dns-provider').value==='cloudflare';
+  document.getElementById('ed-dns-freedns').hidden=cf;
+  document.getElementById('ed-dns-cloudflare').hidden=!cf;
+}
+async function forzarDns(id) {
+  const r=await api('/api/machines/'+id+'/update-dns',{method:'POST'});
+  if(r.ok) avisar('DNS actualizado', `${r.data.proveedor}: ${r.data.result}`, '🌐');
+  else avisar('Error', r.data?.error||'No se pudo actualizar', '⚠️');
+  loadMachines();
+}
 async function saveEdit() {
   const parseAlert = (id) => { const v=document.getElementById(id)?.value; return v?parseInt(v):null; };
   const data={
@@ -2461,7 +2488,11 @@ async function saveEdit() {
     grupo: document.getElementById('ed-grupo').value.trim()||null,
     notes: document.getElementById('ed-notes').value,
     dns_host: document.getElementById('ed-dns-host').value.trim()||null,
+    dns_provider: document.getElementById('ed-dns-provider').value,
     dns_update_url: document.getElementById('ed-dns-url').value.trim()||null,
+    cf_zone_id: document.getElementById('ed-cf-zone').value.trim()||null,
+    // Vacío = no tocar el token guardado
+    cf_api_token: document.getElementById('ed-cf-token').value.trim()||undefined,
     check_ip_change: document.getElementById('ed-checkip').checked,
     rdp_port: parseInt(document.getElementById('ed-rdp-port').value)||3389,
     rdp_user: document.getElementById('ed-rdp-user').value.trim()||null,

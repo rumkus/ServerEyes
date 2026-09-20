@@ -568,6 +568,15 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_lat REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_lon REAL`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS geo_manual BOOLEAN DEFAULT false`).catch(() => {});
+  // DNS dinamico: FreeDNS usa una URL con el token adentro (dns_update_url);
+  // Cloudflare necesita API token, zona y nombre del registro. El token se
+  // guarda cifrado como la clave SMTP. cf_record_id es cache de la busqueda
+  // por nombre, para no preguntarselo a Cloudflare en cada cambio de IP.
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS dns_provider VARCHAR(20) DEFAULT 'freedns'`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS cf_api_token TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS cf_zone_id VARCHAR(255)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS cf_record_id VARCHAR(64)`).catch(() => {});
+  await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS dns_last_result TEXT`).catch(() => {});
 
   // Historial de metricas (1 registro por heartbeat, limpieza automatica)
   await pool.query(`
@@ -1708,6 +1717,114 @@ async function authenticateToken(req, res, next) {
 // Speed test pendientes (machine_id -> true)
 const pendingSpeedTests = new Set();
 
+// ============== DNS DINAMICO ==============
+
+// Una maquina tiene DNS dinamico si le cargaron lo que su proveedor necesita.
+function dnsConfigurado(m) {
+  if (!m) return false;
+  if (m.dns_provider === 'cloudflare') return !!(m.cf_api_token && m.cf_zone_id && m.dns_host);
+  return !!m.dns_update_url;
+}
+
+// El API token de Cloudflare no sale nunca del servidor: la fila de la
+// maquina viaja al panel, a la app y al agente. En su lugar va un booleano
+// para que el editor sepa si hay uno cargado.
+function ocultarSecretosDns(m) {
+  if (!m || typeof m !== 'object') return m;
+  const { cf_api_token, ...resto } = m;
+  return { ...resto, cf_token_set: !!cf_api_token };
+}
+
+async function cloudflareApi(token, method, ruta, body) {
+  const r = await fetch('https://api.cloudflare.com/client/v4' + ruta, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15000)
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.success === false) {
+    const msg = (j.errors || []).map(e => e.message).join('; ') || `HTTP ${r.status}`;
+    throw new Error(msg);
+  }
+  return j.result;
+}
+
+// La zona se puede cargar por ID (32 hex, como lo muestra el panel de
+// Cloudflare) o por nombre del dominio; en el segundo caso se busca.
+async function cloudflareZonaId(token, zona) {
+  if (/^[0-9a-f]{32}$/i.test(zona)) return zona;
+  const zonas = await cloudflareApi(token, 'GET', `/zones?name=${encodeURIComponent(zona)}`);
+  if (!zonas || zonas.length === 0) throw new Error(`Zona "${zona}" no encontrada (revisa el nombre o que el token tenga acceso)`);
+  return zonas[0].id;
+}
+
+async function actualizarDnsCloudflare(m, ip) {
+  const token = descifrarSecreto(m.cf_api_token);
+  if (!token) throw new Error('No se pudo leer el API token de Cloudflare');
+  const zonaId = await cloudflareZonaId(token, m.cf_zone_id.trim());
+  const nombre = m.dns_host.trim();
+
+  let recordId = m.cf_record_id;
+  if (!recordId) {
+    const recs = await cloudflareApi(token, 'GET', `/zones/${zonaId}/dns_records?type=A&name=${encodeURIComponent(nombre)}`);
+    if (!recs || recs.length === 0) {
+      // Si el registro no existe lo creamos: para un DNS dinamico es lo que
+      // uno espera, no tener que crearlo a mano primero.
+      const creado = await cloudflareApi(token, 'POST', `/zones/${zonaId}/dns_records`, { type: 'A', name: nombre, content: ip, ttl: 60, proxied: false });
+      await pool.query('UPDATE machines SET cf_record_id = $1 WHERE id = $2', [creado.id, m.id]).catch(() => {});
+      return `Registro ${nombre} creado -> ${ip}`;
+    }
+    recordId = recs[0].id;
+    await pool.query('UPDATE machines SET cf_record_id = $1 WHERE id = $2', [recordId, m.id]).catch(() => {});
+  }
+
+  try {
+    await cloudflareApi(token, 'PATCH', `/zones/${zonaId}/dns_records/${recordId}`, { type: 'A', name: nombre, content: ip });
+  } catch (e) {
+    // El cache puede quedar viejo si borraron el registro desde Cloudflare.
+    // Se limpia y el proximo intento lo vuelve a buscar (o lo crea).
+    if (/not found|does not exist|81044/i.test(e.message)) {
+      await pool.query('UPDATE machines SET cf_record_id = NULL WHERE id = $1', [m.id]).catch(() => {});
+      throw new Error('El registro ya no existe en Cloudflare; se reintenta en el proximo cambio de IP');
+    }
+    throw e;
+  }
+  return `${nombre} -> ${ip}`;
+}
+
+function actualizarDnsFreedns(m, ip) {
+  const url = m.dns_update_url.includes('&address=') ? m.dns_update_url : `${m.dns_update_url}&address=${ip}`;
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? require('https') : require('http');
+    client.get(url, { timeout: 15000 }, (r) => {
+      let d = '';
+      r.on('data', c => d += c);
+      r.on('end', () => resolve(d.trim() || `HTTP ${r.statusCode}`));
+    }).on('timeout', function () { this.destroy(new Error('timeout')); })
+      .on('error', reject);
+  });
+}
+
+// Apunta el dominio de la maquina a la IP dada, con el proveedor que tenga
+// configurado. Guarda fecha y resultado (bueno o malo) para mostrarlos en el
+// editor; el que llama decide si el error corta el flujo o solo se loguea.
+async function actualizarDns(m, ip) {
+  const proveedor = m.dns_provider === 'cloudflare' ? 'Cloudflare' : 'FreeDNS';
+  try {
+    const resultado = m.dns_provider === 'cloudflare'
+      ? await actualizarDnsCloudflare(m, ip)
+      : await actualizarDnsFreedns(m, ip);
+    console.log(`[DNS] ${proveedor} ${m.dns_host || 'host'}: ${resultado}`);
+    await pool.query('UPDATE machines SET dns_last_update = NOW(), dns_last_result = $1 WHERE id = $2', [`OK: ${resultado}`.slice(0, 500), m.id]).catch(() => {});
+    return { ok: true, proveedor, resultado };
+  } catch (e) {
+    console.error(`[DNS] ${proveedor} ${m.dns_host || 'host'} error:`, e.message);
+    await pool.query('UPDATE machines SET dns_last_result = $1 WHERE id = $2', [`ERROR: ${e.message}`.slice(0, 500), m.id]).catch(() => {});
+    return { ok: false, proveedor, error: e.message };
+  }
+}
+
 // ============== RUTAS PUBLICAS (WINDOWS CLIENT) ==============
 
 // Heartbeat desde el cliente Windows
@@ -1949,20 +2066,10 @@ app.post('/api/heartbeat', async (req, res) => {
       sendPush(updatedMachine.user_id, '🌐 IP cambio', `${updatedMachine.machine_name}: ${oldPublicIp} → ${public_ip}`, { type: 'ip_change', machineId: String(updatedMachine.id) });
     }
 
-    // Auto-update DNS si cambio la IP y tiene URL configurada (solo si check_ip_change esta activo)
-    if (updatedMachine && updatedMachine.check_ip_change && updatedMachine.dns_update_url && ipActuallyChanged) {
-      try {
-        const dnsUrl = `${updatedMachine.dns_update_url}&address=${public_ip}`;
-        const dnsClient = dnsUrl.startsWith('https') ? require('https') : require('http');
-        dnsClient.get(dnsUrl, (r) => {
-          let d = '';
-          r.on('data', c => d += c);
-          r.on('end', () => {
-            console.log(`[DNS] Auto-update ${updatedMachine.dns_host || 'host'}: ${d.trim()}`);
-            pool.query('UPDATE machines SET dns_last_update = NOW() WHERE id = $1', [updatedMachine.id]);
-          });
-        }).on('error', (e) => { console.error('[DNS] Auto-update error:', e.message); });
-      } catch (e) { console.error('[DNS] Auto-update error:', e.message); }
+    // Auto-update DNS si cambio la IP y tiene proveedor configurado (solo si check_ip_change esta activo).
+    // No se espera: el latido tiene que responder rapido aunque el DNS tarde.
+    if (updatedMachine && updatedMachine.check_ip_change && dnsConfigurado(updatedMachine) && ipActuallyChanged) {
+      actualizarDns(updatedMachine, public_ip).catch(() => {});
     }
 
     // Chequear si hay speed test pendiente
@@ -2107,7 +2214,7 @@ app.post('/api/heartbeat', async (req, res) => {
         updateInfo.sig = firmarParaMaquina(machine_key, 'update', updateInfo.version, updateInfo.url, updateInfo.sha256 || '');
       }
     }
-    res.json({ status: 'ok', machine: result.rows[0], run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands, check_backup: checkBackup });
+    res.json({ status: 'ok', machine: ocultarSecretosDns(result.rows[0]), run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands, check_backup: checkBackup });
   } catch (error) {
     console.error('Error en heartbeat:', error.message, error.stack);
     res.status(500).json({ error: 'Error interno', detail: error.message });
@@ -2134,7 +2241,7 @@ app.get('/api/machines', authenticateToken, async (req, res) => {
        ORDER BY m.grupo NULLS LAST, m.machine_name`,
       [req.user.id]
     );
-    res.json([...own.rows, ...shared.rows]);
+    res.json([...own.rows, ...shared.rows].map(ocultarSecretosDns));
   } catch (error) {
     console.error('Error al obtener maquinas:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -2188,6 +2295,19 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     if (orden !== undefined) { fields.push(`orden = $${idx++}`); values.push(orden); }
     if (dns_update_url !== undefined) { fields.push(`dns_update_url = $${idx++}`); values.push(dns_update_url || null); }
     if (dns_host !== undefined) { fields.push(`dns_host = $${idx++}`); values.push(dns_host || null); }
+    if (req.body.dns_provider !== undefined) {
+      const prov = req.body.dns_provider === 'cloudflare' ? 'cloudflare' : 'freedns';
+      fields.push(`dns_provider = $${idx++}`); values.push(prov);
+    }
+    // El token solo se pisa si mandan uno nuevo: el editor no lo muestra, asi
+    // que un campo vacio significa "dejar el que esta". Para sacarlo, null.
+    if (req.body.cf_api_token === null) { fields.push(`cf_api_token = NULL`); }
+    else if (typeof req.body.cf_api_token === 'string' && req.body.cf_api_token.trim()) {
+      fields.push(`cf_api_token = $${idx++}`); values.push(cifrarSecreto(req.body.cf_api_token.trim()));
+    }
+    if (req.body.cf_zone_id !== undefined) { fields.push(`cf_zone_id = $${idx++}`); values.push((req.body.cf_zone_id || '').trim() || null); }
+    // Cambiar zona o dominio invalida el registro cacheado
+    if (req.body.cf_zone_id !== undefined || dns_host !== undefined) { fields.push(`cf_record_id = NULL`); }
     if (check_ip_change !== undefined) { fields.push(`check_ip_change = $${idx++}`); values.push(check_ip_change); }
     if (notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(notes); }
     if (alert_cpu !== undefined) { fields.push(`alert_cpu = $${idx++}`); values.push(alert_cpu); }
@@ -2219,8 +2339,10 @@ app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
-    logAudit(req.user.id, 'edit_machine', 'machine', parseInt(req.params.id), JSON.stringify(req.body), req.ip);
-    res.json(result.rows[0]);
+    // El token no va al log de auditoria ni vuelve al cliente
+    const { cf_api_token: _t, ...auditable } = req.body;
+    logAudit(req.user.id, 'edit_machine', 'machine', parseInt(req.params.id), JSON.stringify(auditable), req.ip);
+    res.json(ocultarSecretosDns(result.rows[0]));
   } catch (error) {
     console.error('Error al actualizar maquina:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -2267,28 +2389,16 @@ app.post('/api/machines/:id/update-dns', authenticateToken, async (req, res) => 
     if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
 
     const m = machine.rows[0];
-    if (!m.dns_update_url) return res.status(400).json({ error: 'No tiene URL de DNS configurada' });
+    if (!dnsConfigurado(m)) {
+      return res.status(400).json({ error: m.dns_provider === 'cloudflare'
+        ? 'Faltan datos de Cloudflare: API token, zona y dominio'
+        : 'No tiene URL de DNS configurada' });
+    }
     if (!m.public_ip) return res.status(400).json({ error: 'La maquina no tiene IP publica' });
 
-    // Llamar a FreeDNS con la IP actual
-    const updateUrl = m.dns_update_url.includes('&address=')
-      ? m.dns_update_url
-      : `${m.dns_update_url}&address=${m.public_ip}`;
-
-    const https = require('https');
-    const http = require('http');
-    const result = await new Promise((resolve, reject) => {
-      const client = updateUrl.startsWith('https') ? https : http;
-      client.get(updateUrl, (r) => {
-        let data = '';
-        r.on('data', c => data += c);
-        r.on('end', () => resolve({ status: r.statusCode, body: data }));
-      }).on('error', reject);
-    });
-
-    await pool.query('UPDATE machines SET dns_last_update = NOW() WHERE id = $1', [m.id]);
-
-    res.json({ message: 'DNS actualizado', result, ip: m.public_ip, host: m.dns_host });
+    const r = await actualizarDns(m, m.public_ip);
+    if (!r.ok) return res.status(502).json({ error: `${r.proveedor}: ${r.error}` });
+    res.json({ message: 'DNS actualizado', proveedor: r.proveedor, result: r.resultado, ip: m.public_ip, host: m.dns_host });
   } catch (error) {
     console.error('Error al actualizar DNS:', error);
     res.status(500).json({ error: 'Error al actualizar DNS' });

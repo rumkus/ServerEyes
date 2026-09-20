@@ -196,6 +196,9 @@ function AppContent() {
   const [editGrupo, setEditGrupo] = useState('');
   const [editDnsUrl, setEditDnsUrl] = useState('');
   const [editDnsHost, setEditDnsHost] = useState('');
+  const [editDnsProvider, setEditDnsProvider] = useState<'freedns' | 'cloudflare'>('freedns');
+  const [editCfZone, setEditCfZone] = useState('');
+  const [editCfToken, setEditCfToken] = useState('');
   const [editCheckIp, setEditCheckIp] = useState(true);
   const [editNotes, setEditNotes] = useState('');
   const [editAlertCpu, setEditAlertCpu] = useState('');
@@ -792,6 +795,8 @@ function AppContent() {
     updateMachine(editingMachine.id, {
       machine_name: editName, grupo: editGrupo || null,
       dns_update_url: editDnsUrl || null, dns_host: editDnsHost || null,
+      dns_provider: editDnsProvider, cf_zone_id: editCfZone || null,
+      cf_api_token: editCfToken.trim() || undefined,
       check_ip_change: editCheckIp, notes: editNotes,
       alert_cpu: editAlertCpu ? parseInt(editAlertCpu) : null,
       alert_ram: editAlertRam ? parseInt(editAlertRam) : null,
@@ -885,7 +890,7 @@ function AppContent() {
     setDnsUpdating(true);
     try {
       const res = await apiRequest(`/api/machines/${machineId}/update-dns`, { method: 'POST' }, token);
-      if (res.ok) showModal('✅', 'DNS Actualizado', `${res.data.host || 'Host'} apunta a ${res.data.ip}`);
+      if (res.ok) showModal('✅', 'DNS Actualizado', `${res.data.proveedor || 'DNS'}: ${res.data.host || 'Host'} apunta a ${res.data.ip}`);
       else showModal('⚠️', 'Error', res.data.error || 'No se pudo actualizar');
     } catch { showModal('📡', 'Error de conexion', 'No se pudo conectar con el servidor. Verifica tu conexion a internet.'); }
     setDnsUpdating(false);
@@ -3182,7 +3187,7 @@ function AppContent() {
     const pingColor = item.ping_ms ? (item.ping_ms < 50 ? '#00e676' : item.ping_ms < 150 ? '#ff9800' : '#ff5252') : '#555';
     const cpuColor = item.cpu_usage > 90 ? '#ff5252' : item.cpu_usage > 70 ? '#ff9800' : '#00e676';
     const expanded = expandedCards.has(item.id);
-    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); setGeoSearchAddr(''); setGeoSearchResult(''); setEditAlertDuration(item.alert_duration ? String(item.alert_duration) : '5'); setEditMonitoredProcs((item.monitored_processes || []).join(', ')); };
+    const openEdit = () => { setEditingMachine(item); setEditName(item.machine_name); setEditGrupo(item.grupo || ''); setEditDnsUrl(item.dns_update_url || ''); setEditDnsHost(item.dns_host || ''); setEditDnsProvider(item.dns_provider === 'cloudflare' ? 'cloudflare' : 'freedns'); setEditCfZone(item.cf_zone_id || ''); setEditCfToken(''); setEditCheckIp(item.check_ip_change !== false); setEditNotes(item.notes || ''); setEditAlertCpu(item.alert_cpu ? String(item.alert_cpu) : ''); setEditAlertRam(item.alert_ram ? String(item.alert_ram) : ''); setEditAlertDisk(item.alert_disk ? String(item.alert_disk) : ''); setEditAlertPing(item.alert_ping ? String(item.alert_ping) : ''); setEditAlertOffline(item.alert_offline !== false); setEditMac(item.mac_address || ''); setEditWolBroadcast(item.wol_broadcast || '255.255.255.255'); setEditGeoCity(item.geo_city || ''); setEditGeoRegion(item.geo_region || ''); setEditGeoCountry(item.geo_country || ''); setEditGeoLat(item.geo_lat ? String(item.geo_lat) : ''); setEditGeoLon(item.geo_lon ? String(item.geo_lon) : ''); setGeoSearchAddr(''); setGeoSearchResult(''); setEditAlertDuration(item.alert_duration ? String(item.alert_duration) : '5'); setEditMonitoredProcs((item.monitored_processes || []).join(', ')); };
 
     const filteredDisks = item.disks && Array.isArray(item.disks) ? item.disks.filter((d: any) => !item.monitored_disks || item.monitored_disks.length === 0 || item.monitored_disks.includes(d.drive)) : [];
 
@@ -4103,11 +4108,36 @@ function AppContent() {
             ))}
           </View>
         )}
-        <Text style={{color: '#888', fontSize: 12, marginBottom: 4, marginTop: 8}}>FreeDNS - Dominio:</Text>
-        <TextInput style={s.input} value={editDnsHost} onChangeText={setEditDnsHost} placeholder="ej: miserver.nuware.com.ar" placeholderTextColor="#666" />
-        <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>FreeDNS - URL de update:</Text>
-        <TextInput style={[s.input, {fontSize: 12}]} value={editDnsUrl} onChangeText={setEditDnsUrl} placeholder="https://freedns.afraid.org/dynamic/update.php?..." placeholderTextColor="#666" autoCapitalize="none" />
-        {editDnsUrl ? (
+        <Text style={{color: '#888', fontSize: 12, marginBottom: 4, marginTop: 8}}>DNS dinamico - Proveedor:</Text>
+        <View style={{flexDirection: 'row', marginBottom: 12}}>
+          {([['freedns', 'FreeDNS'], ['cloudflare', 'Cloudflare']] as const).map(([v, label]) => (
+            <TouchableOpacity key={v} onPress={() => setEditDnsProvider(v)}
+              style={{backgroundColor: editDnsProvider === v ? '#00d4ff' : '#2a2a4a', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8}}>
+              <Text style={{color: editDnsProvider === v ? '#1a1a2e' : '#888', fontSize: 13, fontWeight: '600'}}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Dominio:</Text>
+        <TextInput style={s.input} value={editDnsHost} onChangeText={setEditDnsHost} placeholder="ej: miserver.nuware.com.ar" placeholderTextColor="#666" autoCapitalize="none" />
+        {editDnsProvider === 'freedns' ? (
+          <>
+            <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>FreeDNS - URL de update:</Text>
+            <TextInput style={[s.input, {fontSize: 12}]} value={editDnsUrl} onChangeText={setEditDnsUrl} placeholder="https://freedns.afraid.org/dynamic/update.php?..." placeholderTextColor="#666" autoCapitalize="none" />
+          </>
+        ) : (
+          <>
+            <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Cloudflare - Zona:</Text>
+            <TextInput style={[s.input, {fontSize: 13}]} value={editCfZone} onChangeText={setEditCfZone} placeholder="example.com o el Zone ID" placeholderTextColor="#666" autoCapitalize="none" />
+            <Text style={{color: '#888', fontSize: 12, marginBottom: 4}}>Cloudflare - API Token:</Text>
+            <TextInput style={[s.input, {fontSize: 13}]} value={editCfToken} onChangeText={setEditCfToken} secureTextEntry autoCapitalize="none"
+              placeholder={editingMachine.cf_token_set ? 'Guardado (escribi uno nuevo para reemplazarlo)' : 'Token con permiso Zone.DNS: Edit'} placeholderTextColor="#666" />
+            <Text style={{color: '#555', fontSize: 11, marginBottom: 8}}>Crealo en Cloudflare: Mi perfil, API Tokens, plantilla "Edit zone DNS", limitado a esta zona. El registro A se crea solo si no existe.</Text>
+          </>
+        )}
+        {editingMachine.dns_last_result ? (
+          <Text style={{color: editingMachine.dns_last_result.startsWith('OK') ? '#4CAF50' : '#f44336', fontSize: 11, marginBottom: 6}}>Ultimo resultado: {editingMachine.dns_last_result}</Text>
+        ) : null}
+        {(editDnsProvider === 'freedns' ? editDnsUrl : (editingMachine.cf_token_set || editCfToken)) ? (
           <TouchableOpacity
             style={[s.btn, {backgroundColor: '#ff9800', marginBottom: 8}]}
             onPress={() => triggerDnsUpdate(editingMachine.id)}
