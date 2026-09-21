@@ -79,7 +79,11 @@ button{cursor:pointer;}
 .avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;cursor:pointer;border:none;margin-left:4px;}
 
 /* ── MAIN ── */
-.noc-main{flex:1;padding:18px 20px 24px;display:grid;gap:14px;grid-auto-rows:max-content;align-content:start;}
+.noc-main{flex:1;padding:18px 20px 24px;display:grid;grid-template-columns:minmax(0,1fr);gap:14px;grid-auto-rows:max-content;align-content:start;}
+/* Los hijos del grid deben poder achicarse al ancho del track: sin esto, un
+   contenido ancho (tabla, texto largo) desborda el padding-right y se mete
+   debajo del FAB en pantallas angostas. */
+.noc-main>*{min-width:0;}
 
 /* ── STATS: altura fija y compacta, no crecen para llenar ── */
 .stats-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start;}
@@ -423,6 +427,81 @@ select.modal-input{appearance:auto;cursor:pointer;}
   .mon-search{max-width:none;}
 }
 
+/* ── ETAPA 3: incidentes, reportes, inventario ── */
+/* Gutter permanente para el FAB de soporte: reserva la banda derecha en la
+   que flota, asi nunca tapa filas ni acciones en ningun scroll. */
+.noc-main{padding-right:76px;}
+.support-fab{bottom:22px;right:22px;width:46px;height:46px;font-size:20px;}
+
+/* Lista de incidentes */
+.inc-row{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--border);border-radius:0 var(--radius) var(--radius) 0;padding:11px 14px;cursor:pointer;}
+.inc-row:hover{background:var(--bg3);}
+.inc-row.sev-crit{border-left-color:var(--crit);}
+.inc-row.sev-warn{border-left-color:var(--warn);}
+.inc-row.sev-ok{border-left-color:var(--ok);}
+.inc-row .inc-ico{flex-shrink:0;color:var(--text3);}
+.inc-row.sev-crit .inc-ico{color:var(--crit);}
+.inc-row.sev-warn .inc-ico{color:var(--warn);}
+.inc-row .inc-main{flex:1;min-width:0;}
+.inc-row .inc-title{font-size:13.5px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inc-row .inc-meta{font-size:11.5px;color:var(--text3);margin-top:1px;}
+.inc-row .inc-dur{flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums;}
+.inc-row .inc-dur .d-num{font-size:14px;font-weight:800;}
+.inc-row .inc-dur .d-lbl{font-size:10px;color:var(--text3);text-transform:uppercase;}
+
+/* Timeline de detalle */
+.tl{border-left:2px solid var(--border);margin-left:8px;padding-left:20px;}
+.tl-item{position:relative;margin-bottom:16px;}
+.tl-item .tl-dot{position:absolute;left:-27px;top:2px;width:12px;height:12px;border-radius:50%;border:2px solid var(--card-bg);}
+.tl-item .tl-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;display:flex;align-items:center;gap:6px;}
+.tl-item .tl-msg{font-size:13px;color:var(--text);margin-top:2px;}
+.tl-item .tl-time{font-size:11px;color:var(--text3);margin-top:2px;}
+
+/* Reportes: tarjetas por proposito */
+.report-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;}
+.report-card{border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--bg2);}
+.report-card .rc-head{display:flex;align-items:center;gap:10px;}
+.report-card .rc-ico{width:38px;height:38px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.report-card .rc-title{font-size:14px;font-weight:700;color:var(--text);}
+.report-card .rc-tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:5px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);text-transform:uppercase;}
+.report-card .rc-desc{font-size:12.5px;color:var(--text3);line-height:1.5;flex:1;}
+.report-card .rc-foot{display:flex;align-items:center;gap:8px;}
+.report-card .rc-period{font-size:11px;color:var(--text3);}
+
+/* Inventario: detalle por categorias */
+.inv-detail{display:flex;flex-direction:column;gap:14px;}
+.inv-cat{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.inv-cat-h{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text2);}
+.inv-cat-h .ico{color:var(--text3);}
+.inv-kv{display:grid;grid-template-columns:150px 1fr;gap:2px 12px;padding:10px 12px;font-size:12.5px;}
+.inv-kv dt{color:var(--text3);}
+.inv-kv dd{color:var(--text);font-weight:600;word-break:break-word;}
+.inv-kv dd.unknown{color:var(--text3);font-weight:400;font-style:italic;}
+.inv-mono{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text2);background:var(--bg3);border-radius:6px;padding:8px 10px;line-height:1.6;max-height:140px;overflow:auto;}
+/* Dato ausente en la tabla: se ve distinto de un valor real. */
+.inv-unk{color:var(--text3);font-style:italic;}
+.server-table tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.inc-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+@media(max-width:600px){
+  /* Gutter derecho tambien en movil: mas angosto, pero el FAB sigue sin tapar
+     filas ni acciones en ningun punto del scroll. */
+  .noc-main{padding-right:52px;}
+  .support-fab{bottom:calc(var(--bottomnav-h) + 8px);right:6px;width:44px;height:44px;}
+  .inv-kv{grid-template-columns:1fr;}
+  .inv-kv dt{margin-top:4px;}
+  /* Que ninguna tabla ancha empuje el ancho de la pagina y meta contenido bajo
+     el FAB. Dos estrategias segun la tabla:
+     - Tablas de datos anchas (servidores, NOC, etc.): scrollean dentro de su
+       panel, con columnas legibles; el cuadro queda recortado a la izquierda
+       del FAB. Se excluye la mon-table para no recortar su menu contextual.
+     - mon-table (monitores HTTP): en vez de scroll, deja cortar el texto de las
+       celdas para entrar sola en el ancho, y asi su menu ⋯ no se recorta. */
+  .noc-main table:not(.mon-table){display:block;overflow-x:auto;}
+  .mon-table td,.mon-table th{white-space:normal;overflow-wrap:anywhere;}
+  .filter-group{flex-wrap:wrap;}
+}
+
 /* responsive */
 @media(max-width:1180px){
   .noc-grid-problemas{grid-template-columns:minmax(0,1fr) 280px;}
@@ -443,7 +522,9 @@ select.modal-input{appearance:auto;cursor:pointer;}
   .support-panel{bottom:calc(var(--bottomnav-h) + 8px);}
 }
 @media(max-width:600px){
-  .noc-main{padding:12px;gap:12px;padding-bottom:84px;}
+  /* El gutter derecho (52px) va en el shorthand para que no lo pise: reserva la
+     banda del FAB en movil. El padding-bottom deja aire sobre la barra inferior. */
+  .noc-main{padding:12px 52px 84px 12px;gap:12px;}
   .topbar{padding:0 12px;gap:8px;}
   .topbar .view-title{display:none;}
   .header-search{max-width:none;margin-left:0;}
@@ -1160,23 +1241,62 @@ function buildAlertasView(offlineAlerts) {
   </div>`;
 }
 
+// ── REPORTES ──
+// Solo se ofrecen los reportes que el backend realmente genera. No se inventan
+// periodos ni tipos que la API ignora: todos reflejan el estado actual.
+let reportesFiltro = 'todos';
+function setReportesFiltro(f){ reportesFiltro = f; render(); }
+
 function buildReportesView() {
+  // proposito: agrupa por para-que-sirve. formato: lo que produce el backend.
+  const reportes = [
+    { grupo:'parque', tag:'CSV', icon:'server', titulo:'Servidores (CSV)',
+      desc:'Planilla con todas las máquinas y sus datos actuales, para abrir en Excel o cruzar con otra información.',
+      accion:`onclick="exportCSV()"`, boton:'Descargar CSV' },
+    { grupo:'parque', tag:'PDF', icon:'file', titulo:'Informe del parque (PDF)',
+      desc:'Reporte presentable con el estado de todos los servidores en este momento.',
+      accion:`onclick="exportPDF()"`, boton:'Generar PDF' },
+    { grupo:'incidentes', tag:'PDF', icon:'siren', titulo:'Incidentes (PDF)',
+      desc:'Historial de incidentes registrados (abiertos y resueltos) con sus tiempos.',
+      accion:`onclick="exportIncidentesPDF()"`, boton:'Generar PDF' },
+    { grupo:'inventario', tag:'CSV', icon:'box', titulo:'Inventario del parque (CSV)',
+      desc:'Relevamiento de hardware, red y proxy de cada máquina. Solo incluye las máquinas ya relevadas.',
+      accion:`onclick="bajarInventario(this)"`, boton:'Descargar CSV' },
+  ];
+  const grupos = [
+    { id:'todos', label:'Todos' },
+    { id:'parque', label:'Estado del parque' },
+    { id:'incidentes', label:'Incidentes' },
+    { id:'inventario', label:'Inventario' },
+  ];
+  const visibles = reportesFiltro==='todos' ? reportes : reportes.filter(r=>r.grupo===reportesFiltro);
+  const cuenta = g => g==='todos' ? reportes.length : reportes.filter(r=>r.grupo===g).length;
+
   return `<div class="panel">
-    <div class="panel-title"><span class="dot" style="background:#9C27B0"></span>Reportes y Exportación<button class="help-btn" onclick="event.stopPropagation();showHelp('reports',this)">?</button></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-top:8px">
-      <div style="border:2px solid #E3F2FD;border-radius:12px;padding:20px;text-align:center;cursor:pointer" onclick="exportCSV()">
-        <div style="font-size:36px">📄</div>
-        <div style="font-weight:700;margin-top:8px">Exportar CSV</div>
-        <div style="font-size:12px;color:#999;margin-top:4px">Todos los servidores en CSV</div>
-      </div>
-      <div style="border:2px solid #F3E5F5;border-radius:12px;padding:20px;text-align:center;cursor:pointer" onclick="exportPDF()">
-        <div style="font-size:36px">📋</div>
-        <div style="font-weight:700;margin-top:8px">Informe PDF</div>
-        <div style="font-size:12px;color:#999;margin-top:4px">Reporte completo en PDF</div>
-      </div>
+    <div class="panel-head">
+      <div class="panel-title" style="margin:0"><span class="dot" style="background:var(--accent)"></span>Reportes<button class="help-btn" onclick="event.stopPropagation();showHelp('reports',this)" aria-label="Ayuda sobre reportes">?</button></div>
+    </div>
+    <p style="font-size:12px;color:var(--text3);line-height:1.5;margin:-4px 0 12px">Cada reporte refleja el <strong>estado actual</strong>: se genera en el momento con los datos que hay ahora. Elegí el propósito y descargá.</p>
+    <div class="filter-group" role="tablist" aria-label="Filtrar reportes por propósito">
+      ${grupos.map(g=>`<button class="filter-chip ${reportesFiltro===g.id?'active':''}" role="tab" aria-selected="${reportesFiltro===g.id}" onclick="setReportesFiltro('${g.id}')">${g.label} <span class="fc-n">${cuenta(g.id)}</span></button>`).join('')}
+    </div>
+    <div class="report-grid">
+      ${visibles.map(r=>`<div class="report-card">
+        <div class="rc-head">
+          <div class="rc-ico">${ico(r.icon)}</div>
+          <div style="min-width:0"><div class="rc-title">${r.titulo}</div><span class="rc-tag">${r.tag}</span></div>
+        </div>
+        <div class="rc-desc">${r.desc}</div>
+        <div class="rc-foot">
+          <span class="rc-period">${ico('refresh','sm')} Estado actual</span>
+          <div class="spacer" style="flex:1"></div>
+          <button class="btn primary sm" ${r.accion} aria-label="${r.boton}: ${r.titulo}">${ico('download','sm')}${r.boton}</button>
+        </div>
+      </div>`).join('')}
     </div>
   </div>`;
 }
+
 
 function buildAjustesView() {
   return `<div style="display:flex;flex-direction:column;gap:16px">
@@ -1364,16 +1484,25 @@ async function testSmtp() {
 // latido; aca solo se muestra y se baja.
 let inventario = [];
 let _ultimoInvJson = '';
+let invDetailId = null;              // maquina abierta en detalle (o null: tabla)
+const INV_STALE_DIAS = 3;           // el agente releva 1 vez/dia: +3 dias = viejo
 
 function buildInventarioView() {
+  const total = inventario.length;
   return `<div class="panel">
-    <div class="panel-title"><span class="dot" style="background:#9C27B0"></span>Inventario del parque</div>
-    <p style="font-size:12px;color:#888;line-height:1.5;margin:-4px 0 14px">
-      Cada agente releva su maquina una vez por dia: hardware, red, proxy y archivo hosts.
-      Sirve para el inventario del cliente y para ver de una si a una maquina se le puede agregar memoria.
+    <div class="panel-head">
+      <div class="panel-title" style="margin:0"><span class="dot" style="background:var(--accent)"></span>Inventario del parque</div>
+      <div class="spacer"></div>
+      <div class="header-search" style="flex:0 1 300px;margin-left:0">
+        <span class="search-icon">${ico('search','sm')}</span><input id="inv-search" type="search" placeholder="Buscar máquina, IP, serie…" oninput="renderInventario()" aria-label="Buscar en el inventario">
+      </div>
+      <button class="btn sm" onclick="bajarInventario(this)" aria-label="Descargar planilla del inventario en CSV">${ico('download','sm')}Descargar CSV</button>
+    </div>
+    <p style="font-size:12px;color:var(--text3);line-height:1.5;margin:-4px 0 12px">
+      Cada agente releva su máquina una vez por día: hardware, red, proxy y archivo hosts.
+      Los datos que faltan se muestran distinto de los relevados; un relevamiento de hace más de ${INV_STALE_DIAS} días se marca como desactualizado.
     </p>
-    <button class="modal-btn sm" onclick="bajarInventario(this)">⬇️ Descargar planilla (CSV)</button>
-    <div id="inv-list" style="margin-top:14px"><p style="color:#888;font-size:12px">Cargando...</p></div>
+    <div id="inv-list"><div class="state-block"><div class="spinner"></div><span>Cargando inventario…</span></div></div>
   </div>`;
 }
 
@@ -1381,7 +1510,7 @@ async function loadInventario() {
   const el = document.getElementById('inv-list');
   if (!el) return;
   const r = await api('/api/machines/inventory');
-  if (!r.ok) { pintar(el, '<p style="color:#F44336;font-size:12px">No se pudo leer el inventario</p>'); return; }
+  if (!r.ok) { pintar(el, `<div class="state-block error">${ico('warn','lg')}<strong>No se pudo leer el inventario</strong><span>Reintentá en unos segundos.</span></div>`); return; }
   inventario = Array.isArray(r.data) ? r.data : [];
   // Igual que la lista de certificados: solo repintar si algo cambio, para que
   // el refresco automatico no haga parpadear la pantalla.
@@ -1391,93 +1520,158 @@ async function loadInventario() {
   renderInventario();
 }
 
+function invEstado(m){
+  if (m.inventory && m.inventory.no_relevado) return 'noaplica';
+  if (m.inventory) return 'relevada';
+  return 'sinrelevar';
+}
+// Dias desde el relevamiento; null si no hay fecha. Sirve para marcar lo viejo.
+function invDias(m){
+  if (!m.inventory_at) return null;
+  return Math.floor((Date.now() - new Date(m.inventory_at).getTime())/86400000);
+}
+function openInvDetail(id){ invDetailId = id; renderInventario(); }
+function cerrarInvDetail(){ invDetailId = null; renderInventario(); }
+
 function renderInventario() {
   const el = document.getElementById('inv-list');
   if (!el) return;
-  // Tres estados distintos, que antes se veian como dos:
-  //   relevada        el agente mando los datos
-  //   no se releva    el agente contesto que esa maquina no aplica (Windows viejo)
-  //   sin relevar     todavia no llego nada
-  const conDatos = inventario.filter(m => m.inventory && !m.inventory.no_relevado);
-  const noAplican = inventario.filter(m => m.inventory && m.inventory.no_relevado);
-  const sinDatos = inventario.filter(m => !m.inventory);
 
-  if (inventario.length === 0) { pintar(el, '<p style="color:#888;font-size:12px">Todavia no hay maquinas.</p>'); return; }
+  if (invDetailId != null) {
+    const m = inventario.find(x => x.id === invDetailId);
+    if (m) { pintar(el, invDetalle(m)); return; }
+    invDetailId = null; // desaparecio: caer a la tabla
+  }
 
-  const aviso = sinDatos.length ? `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#999;line-height:1.5">
-    ${sinDatos.length} maquina(s) todavia sin relevar: <strong>${sinDatos.map(m => escHtml(m.machine_name)).join(', ')}</strong>.
-    Aparecen cuando actualicen el agente y manden el primer latido.</div>` : '';
+  if (inventario.length === 0) {
+    pintar(el, `<div class="state-block">${ico('box','lg')}<strong>Sin máquinas todavía</strong><span>Cuando vincules servidores y sus agentes releven, el inventario aparece acá.</span></div>`);
+    return;
+  }
 
-  const noRelevadas = noAplican.map(m => `<div style="border:1px solid var(--border2);border-radius:12px;padding:12px 14px;margin-bottom:12px;opacity:.75">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-size:16px">➖</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;color:var(--text);font-size:13px">${escHtml(m.machine_name || '')}</div>
-        <div style="font-size:11px;color:#888">No se releva — ${escHtml(m.inventory.motivo || 'sistema no soportado')}</div>
-      </div>
-    </div>
-  </div>`).join('');
+  const relevadas = inventario.filter(m => invEstado(m)==='relevada');
+  const noAplican = inventario.filter(m => invEstado(m)==='noaplica');
+  const sinDatos  = inventario.filter(m => invEstado(m)==='sinrelevar');
 
-  const nada = conDatos.length === 0 && noAplican.length === 0
-    ? '<p style="color:#888;font-size:12px">Ninguna maquina relevada todavia. Se completa cuando los agentes actualicen y manden su primer latido.</p>'
-    : '';
-  pintar(el, aviso + conDatos.map(tarjetaInventario).join('') + noRelevadas + nada);
-}
+  const q = (document.getElementById('inv-search')?.value || '').trim().toLowerCase();
+  const coincide = m => {
+    if (!q) return true;
+    const i = m.inventory || {};
+    return [m.machine_name, i.hostname, m.public_ip, i.ip_interna, i.serie, i.modelo, i.cpu, i.so]
+      .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+  };
+  const filas = inventario.filter(coincide);
 
-function dato(etiqueta, valor, resaltar) {
-  if (valor === null || valor === undefined || valor === '') return '';
-  return `<div style="display:flex;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border2)">
-    <span style="color:#888;min-width:130px;flex-shrink:0">${escHtml(etiqueta)}</span>
-    <span style="color:${resaltar || 'var(--text)'};font-weight:600;word-break:break-word">${escHtml(String(valor))}</span>
+  const tiles = `<div class="mon-summary">
+    <div class="mon-tile"><div class="mt-num ok">${relevadas.length}</div><div class="mt-label">Relevadas</div></div>
+    <div class="mon-tile"><div class="mt-num muted">${noAplican.length}</div><div class="mt-label">No se relevan</div></div>
+    <div class="mon-tile"><div class="mt-num ${sinDatos.length?'warn':'muted'}">${sinDatos.length}</div><div class="mt-label">Sin relevar</div></div>
+    <div class="mon-tile"><div class="mt-num muted">${inventario.length}</div><div class="mt-label">Total</div></div>
   </div>`;
+
+  if (filas.length === 0) {
+    pintar(el, tiles + `<div class="empty-state">Ninguna máquina coincide con “${escHtml(q)}”.</div>`);
+    return;
+  }
+
+  const filaHtml = m => {
+    const est = invEstado(m);
+    const i = m.inventory || {};
+    const dias = invDias(m);
+    const stale = est==='relevada' && dias != null && dias > INV_STALE_DIAS;
+    const online = `<span class="dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;background:${m.is_online?'var(--ok)':'var(--text3)'}"></span>`;
+    if (est !== 'relevada') {
+      const pill = est==='noaplica'
+        ? `<span class="pill muted">No se releva</span>`
+        : `<span class="pill warn">Sin relevar</span>`;
+      return `<tr onclick="openInvDetail(${m.id})" tabindex="0" role="button" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInvDetail(${m.id})}">
+        <td>${online} ${escHtml(m.machine_name || i.hostname || '')}</td>
+        <td colspan="4" style="color:var(--text3)">${pill}${est==='noaplica' && i.motivo ? ' '+escHtml(i.motivo) : est==='sinrelevar' ? ' El agente aún no envió datos' : ''}</td>
+        <td class="inv-unk">—</td>
+      </tr>`;
+    }
+    const ram = i.ram_gb ? i.ram_gb+' GB'+(i.ram_tipo?' '+i.ram_tipo:'') : '';
+    const amp = i.ram_ampliable===true ? `<span style="color:var(--ok);font-weight:700">Sí</span>`
+      : i.ram_ampliable===false ? `<span style="color:var(--warn);font-weight:700">No</span>`
+      : `<span class="inv-unk">—</span>`;
+    const cel = v => v ? escHtml(String(v)) : `<span class="inv-unk">—</span>`;
+    return `<tr onclick="openInvDetail(${m.id})" tabindex="0" role="button" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInvDetail(${m.id})}" aria-label="Ver inventario de ${escHtml(m.machine_name||'')}">
+      <td>${online} ${escHtml(m.machine_name || i.hostname || '')}</td>
+      <td>${cel([i.so, i.so_arch].filter(Boolean).join(' '))}</td>
+      <td>${cel(i.cpu)}</td>
+      <td>${cel(ram)} ${amp!=='' && ram? '':''}</td>
+      <td>${cel(m.public_ip)}</td>
+      <td>${stale ? `<span class="pill warn" title="Relevado hace ${dias} días">hace ${dias} d</span>` : (dias!=null ? `<span style="color:var(--text3)">hace ${dias===0?'hoy':dias+' d'}</span>` : `<span class="inv-unk">—</span>`)}</td>
+    </tr>`;
+  };
+
+  const aviso = sinDatos.length ? `<div style="background:var(--warn-soft);border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.5">
+    ${ico('warn','sm')} ${sinDatos.length} máquina(s) sin relevar: <strong>${sinDatos.map(m=>escHtml(m.machine_name)).join(', ')}</strong>. Aparecen cuando actualicen el agente y manden el primer latido.</div>` : '';
+
+  pintar(el, tiles + aviso + `<div style="overflow-x:auto"><table class="server-table">
+    <thead><tr><th>Máquina</th><th>Sistema</th><th>CPU</th><th>Memoria</th><th>IP internet</th><th>Relevado</th></tr></thead>
+    <tbody>${filas.map(filaHtml).join('')}</tbody>
+  </table></div>`);
 }
 
-function tarjetaInventario(m) {
+// dt/dd por categoria; lo que falta se muestra distinto de un dato real.
+function kv(label, val){
+  const vacio = val === null || val === undefined || val === '' || (Array.isArray(val) && val.length===0);
+  return `<dt>${escHtml(label)}</dt><dd class="${vacio?'unknown':''}">${vacio ? 'Sin dato' : escHtml(String(val))}</dd>`;
+}
+
+function invDetalle(m){
   const i = m.inventory || {};
-  const grupo = i.en_dominio ? `${i.dominio} (dominio)` : `${i.grupo_trabajo || i.dominio || ''} (grupo de trabajo)`;
-  const ram = [i.ram_gb ? i.ram_gb + ' GB' : null, i.ram_tipo].filter(Boolean).join(' ');
-  // Lo mas util del relevamiento: se le puede poner mas memoria o no
-  const libres = i.ram_slots_libres;
-  const ampliable = i.ram_ampliable === true
-    ? `${libres} slot(s) libre(s) de ${i.ram_slots_total} — se puede ampliar`
-    : i.ram_ampliable === false
-      ? `${i.ram_slots_total} slot(s), todos ocupados — hay que reemplazar modulos`
-      : null;
-  const colorAmp = i.ram_ampliable === true ? '#4CAF50' : i.ram_ampliable === false ? '#FF9800' : null;
+  const est = invEstado(m);
+  const dias = invDias(m);
+  const stale = est==='relevada' && dias != null && dias > INV_STALE_DIAS;
+  const grupo = i.en_dominio ? `${i.dominio||''} (dominio)` : (i.grupo_trabajo || i.dominio) ? `${i.grupo_trabajo || i.dominio} (grupo de trabajo)` : '';
+  const ram = i.ram_gb ? i.ram_gb+' GB'+(i.ram_tipo?' '+i.ram_tipo:'') : '';
+  const amp = i.ram_ampliable===true ? `${i.ram_slots_libres} slot(s) libre(s) de ${i.ram_slots_total} — se puede ampliar`
+    : i.ram_ampliable===false ? `${i.ram_slots_total} slot(s), todos ocupados — reemplazar módulos` : '';
 
-  const discos = (i.discos || []).map(d =>
-    `<div style="font-size:12px;color:var(--text);padding:3px 0">• ${escHtml(d.modelo || 'Disco')} — <strong>${d.gb} GB</strong> ${escHtml(d.tipo || '')} ${d.bus ? '(' + escHtml(d.bus) + ')' : ''}</div>`).join('');
-  const placas = (i.placas || []).map(p =>
-    `<div style="font-size:12px;color:var(--text);padding:3px 0">• ${escHtml(p.nombre)} — ${escHtml(p.mac)} — ${escHtml(p.ip || 's/IP')}${p.dhcp === true ? ' (DHCP)' : p.dhcp === false ? ' (fija)' : ''}</div>`).join('');
-  const hosts = (i.hosts_entradas || []).length
-    ? `<div style="background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:6px;font-family:monospace;font-size:11px;color:#999;line-height:1.6;max-height:120px;overflow:auto">${i.hosts_entradas.map(escHtml).join('<br>')}</div>`
-    : '';
+  const head = `<div class="panel-head" style="margin-bottom:14px">
+    <button class="btn sm" onclick="cerrarInvDetail()" aria-label="Volver a la tabla">← Volver</button>
+    <div class="spacer"></div>
+    ${est==='relevada'
+      ? (stale ? `<span class="pill warn">${ico('warn','sm')}Desactualizado · hace ${dias} d</span>` : `<span class="pill ok">${ico('check','sm')}Relevado ${dias===0?'hoy':'hace '+dias+' d'}</span>`)
+      : est==='noaplica' ? `<span class="pill muted">No se releva</span>` : `<span class="pill warn">Sin relevar</span>`}
+  </div>
+  <div style="font-size:18px;font-weight:800;color:var(--text)">${escHtml(m.machine_name || i.hostname || '')}</div>
+  <div style="font-size:12.5px;color:var(--text3);margin-top:2px">${escHtml(i.hostname||'')}${grupo?' · '+escHtml(grupo):''}</div>`;
 
-  return `<div style="border:1px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:12px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-      <span style="font-size:18px">${m.is_online ? '🟢' : '⚪'}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;color:var(--text);font-size:14px">${escHtml(m.machine_name || i.hostname || '')}</div>
-        <div style="font-size:11px;color:#888">${escHtml(i.hostname || '')} · ${escHtml(grupo)}</div>
-      </div>
-    </div>
-    ${dato('Usuario', i.usuario)}
-    ${dato('Sistema', [i.so, i.so_arch].filter(Boolean).join(' '))}
-    ${dato('Equipo', [i.fabricante, i.modelo].filter(Boolean).join(' '))}
-    ${dato('Numero de serie', i.serie)}
-    ${dato('CPU', [i.cpu, i.cpu_generacion ? '· ' + i.cpu_generacion : ''].filter(Boolean).join(' '))}
-    ${dato('Memoria', ram)}
-    ${dato('Ampliar memoria', ampliable, colorAmp)}
-    ${dato('IP de internet', m.public_ip)}
-    ${dato('IP interna', i.ip_interna)}
-    ${dato('Gateway', i.gateway)}
-    ${dato('DNS', (i.dns || []).join(', '))}
-    ${dato('Asignacion', i.dhcp === true ? 'DHCP' : i.dhcp === false ? 'Fija' : '')}
-    ${dato('Proxy', i.proxy ? (i.proxy.configurado ? (i.proxy.servidor || 'Configurado') : 'Sin proxy') : '')}
-    ${discos ? `<div style="margin-top:10px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:2px">DISCOS</div>${discos}</div>` : ''}
-    ${placas ? `<div style="margin-top:10px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:2px">PLACAS DE RED QUE TRANSMITEN</div>${placas}</div>` : ''}
-    ${hosts ? `<div style="margin-top:10px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:2px">ARCHIVO HOSTS</div>${hosts}</div>` : ''}
-    <div style="font-size:11px;color:#777;margin-top:10px">Relevado: ${m.inventory_at ? new Date(m.inventory_at).toLocaleString('es-AR') : 'sin fecha'}</div>
+  if (est !== 'relevada') {
+    const msg = est==='noaplica'
+      ? `No se releva — ${escHtml(i.motivo || 'sistema no soportado')}. El agente informa que esta máquina no aplica al relevamiento (por ejemplo, Windows anterior a 10 o Server 2016).`
+      : `Todavía sin relevar. Aparece cuando el agente se actualice y mande su primer latido con el inventario.`;
+    return `<div>${head}<div class="inv-detail" style="margin-top:14px"><div class="inv-cat"><div class="inv-cat-h">${ico('warn','sm')}Sin datos de inventario</div><div style="padding:12px;font-size:13px;color:var(--text2);line-height:1.5">${msg}</div></div>
+      <div class="inv-cat"><div class="inv-cat-h">${ico('server','sm')}Identificación</div><dl class="inv-kv">
+        ${kv('Nombre', m.machine_name)}${kv('Estado', m.is_online?'En línea':'Fuera de línea')}${kv('IP de internet', m.public_ip)}
+      </dl></div></div></div>`;
+  }
+
+  const discos = (i.discos||[]).map(d=>`<div>• ${escHtml(d.modelo||'Disco')} — <strong>${d.gb} GB</strong> ${escHtml(d.tipo||'')} ${d.bus?'('+escHtml(d.bus)+')':''}</div>`).join('');
+  const placas = (i.placas||[]).map(p=>`<div>• ${escHtml(p.nombre||'')} — ${escHtml(p.mac||'')} — ${escHtml(p.ip||'s/IP')}${p.dhcp===true?' (DHCP)':p.dhcp===false?' (fija)':''}</div>`).join('');
+  const hosts = (i.hosts_entradas||[]);
+
+  return `<div>${head}
+  <div class="inv-detail" style="margin-top:16px">
+    <div class="inv-cat"><div class="inv-cat-h">${ico('server','sm')}Identificación</div><dl class="inv-kv">
+      ${kv('Nombre', m.machine_name)}${kv('Hostname', i.hostname)}${kv('Usuario', i.usuario)}${kv('Grupo / dominio', grupo)}${kv('Estado', m.is_online?'En línea':'Fuera de línea')}
+    </dl></div>
+    <div class="inv-cat"><div class="inv-cat-h">${ico('cpu','sm')}Sistema y equipo</div><dl class="inv-kv">
+      ${kv('Sistema', [i.so, i.so_arch].filter(Boolean).join(' '))}${kv('Fabricante', i.fabricante)}${kv('Modelo', i.modelo)}${kv('N.º de serie', i.serie)}
+    </dl></div>
+    <div class="inv-cat"><div class="inv-cat-h">${ico('cpu','sm')}Procesador y memoria</div><dl class="inv-kv">
+      ${kv('CPU', [i.cpu, i.cpu_generacion?'· '+i.cpu_generacion:''].filter(Boolean).join(' '))}${kv('Memoria', ram)}${kv('Ampliación', amp)}
+    </dl></div>
+    ${discos ? `<div class="inv-cat"><div class="inv-cat-h">${ico('box','sm')}Discos</div><div style="padding:10px 12px;font-size:12.5px;color:var(--text);line-height:1.8">${discos}</div></div>` : ''}
+    <div class="inv-cat"><div class="inv-cat-h">${ico('globe','sm')}Red</div><dl class="inv-kv">
+      ${kv('IP de internet', m.public_ip)}${kv('IP interna', i.ip_interna)}${kv('Gateway', i.gateway)}${kv('DNS', (i.dns||[]).join(', '))}${kv('Asignación', i.dhcp===true?'DHCP':i.dhcp===false?'Fija':'')}${kv('Proxy', i.proxy?(i.proxy.configurado?(i.proxy.servidor||'Configurado'):'Sin proxy'):'')}
+    </dl></div>
+    ${placas ? `<div class="inv-cat"><div class="inv-cat-h">${ico('globe','sm')}Placas de red que transmiten</div><div style="padding:10px 12px;font-size:12.5px;color:var(--text);line-height:1.8">${placas}</div></div>` : ''}
+    ${hosts.length ? `<div class="inv-cat"><div class="inv-cat-h">${ico('file','sm')}Archivo hosts</div><div style="padding:10px 12px"><div class="inv-mono">${hosts.map(escHtml).join('<br>')}</div></div></div>` : ''}
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-top:12px">Relevado: ${m.inventory_at ? new Date(m.inventory_at).toLocaleString('es-AR') : 'sin fecha'}</div>
   </div>`;
 }
 
@@ -1644,6 +1838,7 @@ async function loadIncidents() {
   if (res.ok) {
     incidentsList = res.data;
     incidentsLoaded = true;
+    incidentsFetched = true;
     const el = document.getElementById('incidents-container');
     if (el) el.innerHTML = buildIncidentesContent();
     else if (activeNav === 'incidentes' && !notifDropdownOpen) render();
@@ -1694,82 +1889,104 @@ function buildIncidentesView() {
   return `<div id="incidents-container">${buildIncidentesContent()}</div>`;
 }
 
-function buildIncidentesContent() {
-  if (incidentDetail) {
-    const d = incidentDetail;
-    const evtIcons = { detected: '🔴', acknowledged: '👁', update: '📝', resolved: '✅' };
-    const evtColors = { detected: '#ff5252', acknowledged: '#ff9800', update: '#2196F3', resolved: '#4CAF50' };
-    return `<div class="panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${d.title}</div>
-          <div style="font-size:12px;color:#888">${d.machine_name} · ${new Date(d.started_at).toLocaleString('es')}</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span style="background:${d.status==='open'?'#ff525220':'#4CAF5020'};color:${d.status==='open'?'#ff5252':'#4CAF50'};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700">${d.status==='open'?'ABIERTO':'RESUELTO'}</span>
-          <button class="modal-btn sm" onclick="incidentDetail=null;render()">← Volver</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:16px;margin-bottom:20px">
-        <div style="background:var(--bg);border-radius:10px;padding:12px 16px;flex:1;text-align:center">
-          <div style="font-size:11px;color:#888">Duracion</div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${d.ended_at ? fmtDuration(d.duration_minutes) : fmtDuration((Date.now() - new Date(d.started_at).getTime()) / 60000)}</div>
-        </div>
-        <div style="background:var(--bg);border-radius:10px;padding:12px 16px;flex:1;text-align:center">
-          <div style="font-size:11px;color:#888">Inicio</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text)">${new Date(d.started_at).toLocaleString('es')}</div>
-        </div>
-        <div style="background:var(--bg);border-radius:10px;padding:12px 16px;flex:1;text-align:center">
-          <div style="font-size:11px;color:#888">Fin</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text)">${d.ended_at ? new Date(d.ended_at).toLocaleString('es') : 'En curso...'}</div>
-        </div>
-      </div>
-      ${d.resolution_notes ? `<div style="background:#4CAF5010;border-left:3px solid #4CAF50;border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:16px"><div style="font-size:11px;color:#4CAF50;font-weight:600;margin-bottom:4px">Resolucion</div><div style="font-size:13px;color:var(--text)">${d.resolution_notes}</div></div>` : ''}
-      <div style="font-size:13px;font-weight:700;color:#888;margin-bottom:12px;text-transform:uppercase">Timeline</div>
-      <div style="border-left:2px solid var(--border2);margin-left:10px;padding-left:20px">
-        ${(d.events||[]).map(e => `<div style="margin-bottom:16px;position:relative">
-          <div style="position:absolute;left:-27px;top:2px;width:12px;height:12px;border-radius:50%;background:${evtColors[e.event_type]||'#888'};border:2px solid var(--card-bg)"></div>
-          <div style="font-size:12px;color:${evtColors[e.event_type]||'#888'};font-weight:600">${evtIcons[e.event_type]||'📌'} ${e.event_type.toUpperCase()}</div>
-          <div style="font-size:13px;color:var(--text);margin-top:2px">${e.message||''}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px">${new Date(e.created_at).toLocaleString('es')}${e.user_email ? ' · ' + e.user_email : ''}</div>
-        </div>`).join('')}
-      </div>
-      ${d.status==='open' ? `<div style="display:flex;gap:8px;margin-top:16px">
-        <button class="modal-btn sm" onclick="addIncidentNote(${d.id})">📝 Agregar nota</button>
-        <button class="modal-btn sm" style="background:#4CAF50;color:#fff" onclick="resolveIncident(${d.id})">✅ Resolver</button>
-      </div>` : ''}
-    </div>`;
-  }
+// Gravedad derivada SOLO de datos existentes (tiempo abierto): no hay un campo
+// de severidad en el backend, asi que se ordena por duracion y se marca el
+// acento visual segun cuanto lleva abierto. No inventa un estado nuevo.
+let incidentsFetched = false;
+function incSeveridad(min){ return min>=120?'crit':min>=30?'warn':'ok'; }
 
-  const open = incidentsList.filter(i => i.status === 'open');
+function buildIncidentesContent() {
+  if (incidentDetail) return buildIncidentDetail(incidentDetail);
+
+  const open = incidentsList.filter(i => i.status === 'open')
+    .map(i => ({...i, _min:(Date.now()-new Date(i.started_at).getTime())/60000}))
+    .sort((a,b)=>b._min-a._min);   // el que lleva mas tiempo abierto, primero
   const resolved = incidentsList.filter(i => i.status === 'resolved');
-  return `<div style="display:flex;flex-direction:column;gap:16px">
-    <div class="panel">
-      <div class="panel-title"><span class="dot" style="background:#ff5252"></span>Incidentes Abiertos (${open.length})<button class="help-btn" onclick="event.stopPropagation();showHelp('incidents',this)">?</button></div>
-      <div style="display:flex;gap:8px;margin-bottom:12px"><button class="modal-btn sm" onclick="incidentsLoaded=false;loadIncidents()">🔄 Actualizar</button><a href="#" class="modal-btn sm" style="text-decoration:none;display:inline-block" onclick="event.preventDefault();window.open('/api/incidents/export/pdf','_blank').document.write('<p>Cargando...</p>');fetch('/api/incidents/export/pdf',{headers:{Authorization:'Bearer '+token}}).then(r=>r.text()).then(h=>{const w=window.open();w.document.write(h);w.document.close()})">📄 Exportar</a></div>
-      ${open.length === 0 ? '<div style="text-align:center;padding:30px;color:#888"><div style="font-size:36px;margin-bottom:8px">🎉</div>Sin incidentes abiertos</div>' :
-        open.map(i => `<div style="background:var(--bg);border-left:3px solid #ff5252;border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:8px;cursor:pointer;display:flex;align-items:center;gap:12px" onclick="openIncident(${i.id})">
-          <span style="font-size:20px">🔴</span>
-          <div style="flex:1">
-            <div style="font-weight:700;color:var(--text);font-size:14px">${i.title}</div>
-            <div style="font-size:12px;color:#888">${i.machine_name} · hace ${timeSince(i.started_at)} · ${i.event_count} eventos</div>
-          </div>
-          <span style="color:#ff5252;font-size:12px;font-weight:600">${fmtDuration((Date.now() - new Date(i.started_at).getTime()) / 60000)}</span>
-        </div>`).join('')}
+  const graves = open.filter(i=>incSeveridad(i._min)==='crit').length;
+  const loaded = incidentsFetched;
+
+  return `<div class="panel">
+    <div class="panel-head">
+      <div class="panel-title" style="margin:0"><span class="dot" style="background:${open.length?'var(--crit)':'var(--ok)'}"></span>Incidentes<button class="help-btn" onclick="event.stopPropagation();showHelp('incidents',this)" aria-label="Ayuda sobre incidentes">?</button></div>
+      <div class="spacer"></div>
+      <button class="btn sm" onclick="incidentsLoaded=false;loadIncidents()" aria-label="Actualizar incidentes">${ico('refresh','sm')}Actualizar</button>
+      <button class="btn sm" onclick="exportIncidentesPDF()" aria-label="Exportar incidentes a PDF">${ico('file','sm')}Exportar PDF</button>
     </div>
-    <div class="panel">
-      <div class="panel-title"><span class="dot" style="background:#4CAF50"></span>Resueltos (${resolved.length})</div>
-      ${resolved.length === 0 ? '<p style="text-align:center;color:#888;padding:12px 0">Sin incidentes resueltos</p>' :
-        resolved.slice(0, 20).map(i => `<div style="background:var(--bg);border-left:3px solid #4CAF50;border-radius:0 10px 10px 0;padding:10px 16px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:12px;opacity:.8" onclick="openIncident(${i.id})">
-          <span style="font-size:16px">✅</span>
-          <div style="flex:1">
-            <div style="font-weight:600;color:var(--text);font-size:13px">${i.title}</div>
-            <div style="font-size:11px;color:#888">${i.machine_name} · ${new Date(i.started_at).toLocaleDateString('es')} · ${fmtDuration(i.duration_minutes)}</div>
-          </div>
-        </div>`).join('')}
+    <div class="mon-summary">
+      <div class="mon-tile"><div class="mt-num ${open.length?'crit':'muted'}">${open.length}</div><div class="mt-label">Abiertos</div></div>
+      <div class="mon-tile"><div class="mt-num ${graves?'crit':'muted'}">${graves}</div><div class="mt-label">+2 h abiertos</div></div>
+      <div class="mon-tile"><div class="mt-num muted">${resolved.length}</div><div class="mt-label">Resueltos</div></div>
+      <div class="mon-tile"><div class="mt-num muted">${incidentsList.length}</div><div class="mt-label">Total</div></div>
     </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:6px 0 8px">Abiertos (${open.length})</div>
+    ${!loaded ? `<div class="state-block"><div class="spinner"></div><span>Cargando incidentes…</span></div>`
+      : open.length===0 ? `<div class="state-block">${ico('check','lg')}<strong>Sin incidentes abiertos</strong><span>Cuando una máquina deja de responder o supera un umbral, el incidente aparece acá.</span></div>`
+      : `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+        ${open.map(i=>{const sev=incSeveridad(i._min);return `<div class="inc-row sev-${sev}" onclick="openIncident(${i.id})" tabindex="0" role="button" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openIncident(${i.id})}" aria-label="Incidente ${escHtml(i.title)}, ${sev==='crit'?'crítico':sev==='warn'?'atención':'reciente'}">
+          <span class="inc-ico">${ico('siren')}</span>
+          <div class="inc-main">
+            <div class="inc-title">${escHtml(i.title)}</div>
+            <div class="inc-meta">${escHtml(i.machine_name||'')} · inició ${new Date(i.started_at).toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} · ${i.event_count||0} eventos</div>
+          </div>
+          <div class="inc-dur"><div class="d-num" style="color:var(--${sev})">${fmtDuration(i._min)}</div><div class="d-lbl">abierto</div></div>
+        </div>`;}).join('')}
+      </div>`}
+
+    <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:6px 0 8px">Resueltos recientes</div>
+    ${!loaded ? '' : resolved.length===0 ? `<p class="empty-state">Sin incidentes resueltos</p>`
+      : `<div style="display:flex;flex-direction:column;gap:5px">
+        ${resolved.slice(0,20).map(i=>`<div class="inc-row sev-ok" style="opacity:.85" onclick="openIncident(${i.id})" tabindex="0" role="button" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openIncident(${i.id})}" aria-label="Incidente resuelto ${escHtml(i.title)}">
+          <span class="inc-ico" style="color:var(--ok)">${ico('check')}</span>
+          <div class="inc-main"><div class="inc-title" style="font-weight:600">${escHtml(i.title)}</div>
+            <div class="inc-meta">${escHtml(i.machine_name||'')} · ${new Date(i.started_at).toLocaleDateString('es')} · duró ${fmtDuration(i.duration_minutes)}</div></div>
+        </div>`).join('')}
+      </div>`}
   </div>`;
 }
+
+function buildIncidentDetail(d){
+  const abierto = d.status==='open';
+  const dur = d.ended_at ? fmtDuration(d.duration_minutes) : fmtDuration((Date.now()-new Date(d.started_at).getTime())/60000);
+  const evtColors = { detected:'var(--crit)', acknowledged:'var(--warn)', update:'var(--accent)', resolved:'var(--ok)' };
+  const evtIco = { detected:'siren', acknowledged:'bell', update:'edit', resolved:'check' };
+  return `<div class="panel">
+    <div class="panel-head">
+      <button class="btn sm" onclick="incidentDetail=null;render()" aria-label="Volver a la lista">← Volver</button>
+      <div class="spacer"></div>
+      <span class="pill ${abierto?'crit':'ok'}">${abierto?'Abierto':'Resuelto'}</span>
+    </div>
+    <div style="font-size:18px;font-weight:800;color:var(--text)">${escHtml(d.title)}</div>
+    <div style="font-size:12.5px;color:var(--text3);margin-top:2px">${escHtml(d.machine_name||'')}</div>
+    <div class="mon-summary" style="margin:14px 0 18px">
+      <div class="mon-tile"><div class="mt-num ${abierto?'warn':'muted'}">${dur}</div><div class="mt-label">Duración</div></div>
+      <div class="mon-tile"><div class="mt-num" style="font-size:13px">${new Date(d.started_at).toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div><div class="mt-label">Inicio</div></div>
+      <div class="mon-tile"><div class="mt-num" style="font-size:13px">${d.ended_at?new Date(d.ended_at).toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'En curso'}</div><div class="mt-label">Fin</div></div>
+      <div class="mon-tile"><div class="mt-num muted">${(d.events||[]).length}</div><div class="mt-label">Eventos</div></div>
+    </div>
+    ${d.resolution_notes ? `<div style="background:var(--ok-soft);border-left:3px solid var(--ok);border-radius:0 8px 8px 0;padding:12px 14px;margin-bottom:16px"><div style="font-size:11px;color:var(--ok);font-weight:700;text-transform:uppercase;margin-bottom:4px">Resolución</div><div style="font-size:13px;color:var(--text)">${escHtml(d.resolution_notes)}</div></div>` : ''}
+    <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px">Cronología</div>
+    <div class="tl">
+      ${(d.events||[]).map(e=>`<div class="tl-item">
+        <div class="tl-dot" style="background:${evtColors[e.event_type]||'var(--text3)'}"></div>
+        <div class="tl-type" style="color:${evtColors[e.event_type]||'var(--text3)'}">${ico(evtIco[e.event_type]||'edit','sm')}${escHtml((e.event_type||'').toUpperCase())}</div>
+        <div class="tl-msg">${escHtml(e.message||'')}</div>
+        <div class="tl-time">${new Date(e.created_at).toLocaleString('es')}${e.user_email?' · '+escHtml(e.user_email):''}</div>
+      </div>`).join('') || '<div class="empty-state">Sin eventos registrados</div>'}
+    </div>
+    ${abierto ? `<div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="addIncidentNote(${d.id})">${ico('edit','sm')}Agregar nota</button>
+      <button class="btn primary" onclick="resolveIncident(${d.id})">${ico('check','sm')}Resolver incidente</button>
+    </div>` : ''}
+  </div>`;
+}
+
+function exportIncidentesPDF(){
+  fetch(API+'/api/incidents/export/pdf',{headers:{Authorization:'Bearer '+token}})
+    .then(r=>r.text()).then(h=>{const w=window.open();if(w){w.document.write(h);w.document.close();}})
+    .catch(()=>avisar('Error','No se pudo generar el informe','⚠️'));
+}
+
 
 // ── PLAN INFO ──
 let userPlan = null;
@@ -2395,6 +2612,7 @@ async function loadOutages(id,days) {
   if(r.ok){activeModal.data=r.data;render();}
 }
 function fmtDuration(min) {
+  min = Math.round(min);
   if (min < 1) return '<1 min';
   if (min < 60) return min + ' min';
   const h = Math.floor(min/60);
