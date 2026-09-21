@@ -236,6 +236,8 @@ test('diag/proxy: solo admin; refleja la cabecera cruda y lo que req.ip decide c
   assert.deepEqual(r.data.ips, ['198.51.100.9']);
   assert.match(r.data.socket, /127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/);
   assert.equal(r.data.via_cloudflare, false);
+  assert.equal(r.headers.get('cache-control'), 'no-store');
+  assert.ok(!JSON.stringify(r.data).includes(admin.token), 'nunca devuelve el token');
 });
 
 // ================= SSL =================

@@ -2874,6 +2874,7 @@ async function requireAdmin(req, res, next) {
 // evidencia (que hay detras de Cloudflare y del edge de Railway, en cada
 // ruta) en vez de inferirlo. Solo admin: expone IPs internas del proveedor.
 app.get('/api/admin/diag/proxy', authenticateToken, requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({
     trust_proxy: String(app.get('trust proxy')),
     socket: req.socket.remoteAddress,

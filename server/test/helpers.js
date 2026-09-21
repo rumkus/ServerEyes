@@ -33,7 +33,7 @@ async function levantarServer() {
     const r = await fetch(base + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
     let data = null;
     try { data = await r.json(); } catch (e) { data = null; }
-    return { status: r.status, ok: r.ok, data };
+    return { status: r.status, ok: r.ok, data, headers: r.headers };
   };
 
   // Limpia lo que crean los tests (todo cuelga de users)
