@@ -339,6 +339,90 @@ select.modal-input{appearance:auto;cursor:pointer;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
 
+/* ── MONITORES: pestañas HTTP / SSL ── */
+.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+.subtab{display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 14px;border:none;background:none;color:var(--text2);font-size:13.5px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+.subtab:hover{color:var(--text);}
+.subtab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.subtab .tab-count{font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;background:var(--bg3);color:var(--text2);}
+.subtab.active .tab-count{background:var(--accent-soft);color:var(--accent);}
+.subtab .tab-count.crit{background:var(--crit-soft);color:var(--crit);}
+
+/* Indicadores por tipo: compactos, altura fija */
+.mon-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px;}
+.mon-tile{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:9px 12px;height:56px;display:flex;flex-direction:column;justify-content:center;gap:1px;}
+.mon-tile .mt-num{font-size:19px;font-weight:800;line-height:1.1;color:var(--text);font-variant-numeric:tabular-nums;}
+.mon-tile .mt-num.ok{color:var(--ok);}.mon-tile .mt-num.warn{color:var(--warn);}.mon-tile .mt-num.crit{color:var(--crit);}.mon-tile .mt-num.muted{color:var(--text3);}
+.mon-tile .mt-label{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* Barra de herramientas: buscar + filtros */
+.mon-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+.mon-search{position:relative;flex:1;min-width:180px;max-width:320px;}
+.mon-search input{width:100%;height:34px;border:1px solid var(--border);border-radius:8px;padding:0 12px 0 32px;font-size:13px;color:var(--text);background:var(--input-bg);outline:none;}
+.mon-search input:focus{border-color:var(--accent);background:var(--bg2);}
+.mon-search .search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text3);display:flex;}
+.filter-group{display:inline-flex;gap:2px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:2px;}
+.filter-chip{height:28px;padding:0 11px;border:none;background:none;color:var(--text2);font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer;white-space:nowrap;}
+.filter-chip:hover{color:var(--text);}
+.filter-chip.active{background:var(--card-bg);color:var(--accent);box-shadow:0 1px 2px var(--shadow);}
+.filter-chip .fc-n{opacity:.7;font-weight:700;}
+
+/* Menu de acciones secundarias por fila (details/summary, accesible) */
+.rowmenu{position:relative;display:inline-block;}
+.rowmenu>summary{list-style:none;display:inline-flex;align-items:center;justify-content:center;width:30px;height:28px;border:1px solid var(--border);border-radius:7px;background:var(--bg2);color:var(--text2);cursor:pointer;}
+.rowmenu>summary::-webkit-details-marker{display:none;}
+.rowmenu>summary:hover{background:var(--bg3);color:var(--text);}
+.rowmenu[open]>summary{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
+.menu-pop{position:absolute;right:0;top:32px;z-index:50;min-width:170px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px var(--shadow);padding:5px;display:flex;flex-direction:column;gap:1px;}
+.menu-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:none;background:none;color:var(--text);font-size:13px;font-weight:500;text-align:left;border-radius:6px;cursor:pointer;}
+.menu-item:hover{background:var(--bg3);}
+.menu-item .ico{color:var(--text3);}
+.menu-item.danger{color:var(--crit);}
+.menu-item.danger .ico{color:var(--crit);}
+.menu-sep{height:1px;background:var(--border2);margin:4px 2px;}
+.btn.danger{color:var(--crit);border-color:transparent;background:var(--crit-soft);}
+.btn.danger:hover{background:var(--crit);color:#fff;}
+
+/* Chips de estado de fila (texto legible, tokens) */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:12px;white-space:nowrap;}
+.pill.ok{background:var(--ok-soft);color:var(--ok);}
+.pill.crit{background:var(--crit-soft);color:var(--crit);}
+.pill.warn{background:var(--warn-soft);color:var(--warn);}
+.pill.muted{background:var(--bg3);color:var(--text3);}
+.pill.paused{background:var(--bg3);color:var(--text2);}
+
+/* Tarjeta de certificado SSL */
+.cert-list{display:flex;flex-direction:column;gap:8px;}
+.cert-card{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--border);border-radius:0 var(--radius) var(--radius) 0;padding:10px 14px;}
+.cert-card.st-expired{border-left-color:var(--crit);}
+.cert-card.st-warning{border-left-color:var(--warn);}
+.cert-card.st-ok{border-left-color:var(--ok);}
+.cert-card.st-error{border-left-color:var(--text3);}
+.cert-card.st-pending{border-left-color:var(--border);}
+.cert-days{flex-shrink:0;width:64px;text-align:center;}
+.cert-days .cd-num{font-size:20px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+.cert-days .cd-lbl{font-size:10px;color:var(--text3);text-transform:uppercase;margin-top:2px;}
+.cert-main{flex:1;min-width:0;}
+.cert-main .cm-name{font-size:13.5px;font-weight:700;color:var(--text);}
+.cert-main .cm-host{font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cert-main .cm-meta{font-size:11px;color:var(--text3);margin-top:2px;}
+.cert-actions{display:flex;gap:4px;align-items:center;flex-shrink:0;}
+
+/* Estados carga / vacio / error */
+.state-block{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:32px 20px;color:var(--text3);}
+.state-block .sb-ico{color:var(--text3);}
+.state-block strong{color:var(--text2);font-size:14px;font-weight:700;}
+.state-block span{font-size:12.5px;max-width:360px;}
+.state-block.error .sb-ico{color:var(--crit);}
+.spinner{width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+@media(max-width:760px){
+  .mon-summary{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .col-hide-sm{display:none;}
+  .mon-search{max-width:none;}
+}
+
 /* responsive */
 @media(max-width:1180px){
   .noc-grid-problemas{grid-template-columns:minmax(0,1fr) 280px;}
@@ -359,7 +443,7 @@ select.modal-input{appearance:auto;cursor:pointer;}
   .support-panel{bottom:calc(var(--bottomnav-h) + 8px);}
 }
 @media(max-width:600px){
-  .noc-main{padding:12px;gap:12px;}
+  .noc-main{padding:12px;gap:12px;padding-bottom:84px;}
   .topbar{padding:0 12px;gap:8px;}
   .topbar .view-title{display:none;}
   .header-search{max-width:none;margin-left:0;}
@@ -625,10 +709,14 @@ function morfar(actual, nuevo) {
   }
 }
 
+let _modalOpener = null;
 function render() {
   if (notifDropdownOpen) return;
   const el = document.getElementById('app');
   if (!token) { renderLogin(); return; }
+  // Al pasar de "sin modal" a "con modal", recordamos quien tenia el foco para
+  // devolverselo al cerrar (accesibilidad de dialogos).
+  if (activeModal && !_modalOpener && document.activeElement && document.activeElement !== document.body) _modalOpener = document.activeElement;
   const campos = capturarCampos();
   const molde = document.createElement('div');
   molde.innerHTML = buildLayout();
@@ -692,7 +780,16 @@ const ICONS = {
   terminal: '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
   wifioff: '<path d="M2 2l20 20"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 12.6a10 10 0 0 1 3.6-2.2"/><path d="M19 12.6a10 10 0 0 0-8.8-2.9"/><path d="M12 20h.01"/>',
   cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/>',
-  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/>'
+  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  play: '<path d="M6 4l14 8-14 8z"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 6 10 7 10-7"/>',
+  dots: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+  chart: '<path d="M3 3v18h18"/><path d="m7 14 3-4 4 3 5-7"/>'
 };
 function ico(name, cls, label) {
   const attrs = label ? `role="img" aria-label="${label}"` : 'aria-hidden="true"';
@@ -1834,6 +1931,9 @@ function buildModal() {
 function closeModal() {
   if (editMapInstance) { editMapInstance.remove(); editMapInstance=null; editMapMarker=null; }
   activeModal=null; resumeRefresh(); render();
+  // Devolver el foco al control que abrio el dialogo, si sigue en el DOM.
+  const o=_modalOpener; _modalOpener=null;
+  if (o && document.contains(o)) { try{ o.focus(); }catch(e){} }
 }
 
 // ── HELP SYSTEM ──
@@ -2935,7 +3035,23 @@ async function requestSpeedTest(id) {
 }
 
 // ── ATTACH EVENTS (called after render) ──
+let _escInit = false;
+function initGlobalKeys(){
+  if (_escInit) return; _escInit = true;
+  document.addEventListener('keydown', (e)=>{
+    if (e.key!=='Escape') return;
+    const abierto = document.querySelector('details.rowmenu[open]');
+    if (abierto){ abierto.open=false; const sm=abierto.querySelector('summary'); if(sm) sm.focus(); e.stopPropagation(); return; }
+    if (notifDropdownOpen){ notifDropdownOpen=false; render(); return; }
+    if (activeModal){ closeModal(); }
+  });
+  // Click fuera: cerrar cualquier menu de fila abierto.
+  document.addEventListener('click', (e)=>{
+    document.querySelectorAll('details.rowmenu[open]').forEach(d=>{ if(!d.contains(e.target)) d.open=false; });
+  });
+}
 function attachEvents() {
+  initGlobalKeys();
   // search input focus restore
   const si=document.getElementById('hdr-search');
   if(si&&filter){setTimeout(()=>{si.focus();si.setSelectionRange(si.value.length,si.value.length);},0);}
@@ -3112,57 +3228,240 @@ async function loadUrlMonitors(silent) {
     const changed = newJson !== _lastUrlMonitorsJson;
     _lastUrlMonitorsJson = newJson;
     urlMonitors = Array.isArray(r.data) ? r.data : [];
+    urlMonitorsLoaded = true;
     if (!silent && changed && !activeModal && !notifDropdownOpen && activeNav !== 'ajustes') renderSiNoEstasEscribiendo();
   }
 }
+// ── MONITORES: estado de la vista (pestañas, busqueda, filtros) ──
+let monitoresTab = 'http';       // 'http' | 'ssl'
+let urlSearch = '';
+let urlStatusFilter = 'all';     // all | up | down | paused
+let urlMonitorsLoaded = false;   // para el estado de carga inicial
+let sslMonitorsLoaded = false;
+
+function setMonitoresTab(t){ monitoresTab = t; render(); }
+
+// Estado real de un monitor HTTP segun lo que devuelve la API.
+function urlEstado(u){
+  if (u.is_active === false) return 'paused';
+  if (u.last_check == null) return 'pending';
+  return u.is_up ? 'up' : 'down';
+}
+function urlFiltrados(){
+  const q = urlSearch.trim().toLowerCase();
+  return urlMonitors.filter(u=>{
+    if (q && !((u.name||'').toLowerCase().includes(q) || (u.url||'').toLowerCase().includes(q))) return false;
+    if (urlStatusFilter==='all') return true;
+    const e = urlEstado(u);
+    if (urlStatusFilter==='up') return e==='up';
+    if (urlStatusFilter==='down') return e==='down';
+    if (urlStatusFilter==='paused') return e==='paused';
+    return true;
+  });
+}
+
+// Estado de un certificado. Distingue error de consulta y sin-chequear de un
+// certificado valido: nunca se muestra "sano" sin datos.
+function sslEstado(s){
+  if (s.last_status==='expired') return 'expired';
+  if (s.last_status==='warning') return 'warning';
+  if (s.last_status==='ok') return 'ok';
+  if (s.last_status==='error' || s.last_error) return 'error';
+  return 'pending';
+}
+const SSL_ORDEN = { expired:0, warning:1, error:2, pending:3, ok:4 };
+function sslOrdenados(){
+  return [...sslMonitors].sort((a,b)=>{
+    const ea=sslEstado(a), eb=sslEstado(b);
+    if (SSL_ORDEN[ea]!==SSL_ORDEN[eb]) return SSL_ORDEN[ea]-SSL_ORDEN[eb];
+    const da=a.last_days_left, db=b.last_days_left;
+    if (da!=null && db!=null) return da-db;
+    return String(a.name||a.hostname).localeCompare(String(b.name||b.hostname));
+  });
+}
+
 function buildUrlsView() {
-  return `<div style="display:flex;flex-direction:column;gap:16px">
-    <div class="panel">
-      <div class="panel-title"><span class="dot" style="background:#2196F3"></span>Monitoreo de URLs / HTTP<button class="help-btn" onclick="event.stopPropagation();showHelp('urls',this)">?</button></div>
-      <button class="modal-btn sm" onclick="openAddUrlMonitor()" style="margin-bottom:14px">+ Agregar URL</button>
-      <button class="modal-btn sm" onclick="abrirAsignar()" style="margin-bottom:14px;margin-left:8px;background:#EDE7F6;color:#5E35B1">&#9993; Avisar a una persona de varios dominios</button>
-      ${urlMonitors.length===0?'<p style="text-align:center;color:#ccc;padding:30px 0">Sin monitores configurados. Agregá una URL para empezar.</p>':
-      `${barraSeleccion(urlsSeleccionadas.size, '🔒 Vigilar sus certificados SSL', 'crearSslDesdeUrl([...urlsSeleccionadas])', 'marcarTodasUrls(false)')}
-      <table class="server-table"><thead><tr>
-        <th style="width:28px"><input type="checkbox" onchange="marcarTodasUrls(this.checked)" ${urlsSeleccionadas.size === urlMonitors.length && urlMonitors.length > 0 ? 'checked' : ''} title="Seleccionar todas"/></th>
-        <th></th><th>Nombre</th><th>URL</th><th>Método</th><th>Respuesta</th><th>Ultimo chequeo</th><th>Estado</th><th></th>
-      </tr></thead><tbody>
-      ${urlMonitors.map(u=>`<tr>
-        <td onclick="event.stopPropagation()"><input type="checkbox" onchange="marcarUrl(${u.id}, this.checked)" ${urlsSeleccionadas.has(u.id) ? 'checked' : ''}/></td>
-        <td><span class="status-dot ${u.is_up?'on':'off'}"></span></td>
-        <td><strong style="font-size:13px">${u.name||u.url}</strong></td>
-        <td style="font-size:12px;color:#666;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.url}
-          ${resumenDestinatarios(u.destinatarios) ? `<div style="font-size:10px;margin-top:2px">${resumenDestinatarios(u.destinatarios)}</div>` : ''}</td>
-        <td style="font-size:12px;color:#999">${u.method||'GET'}</td>
-        <td>${u.last_response_ms!=null?`<span class="val-num ${u.last_response_ms<500?'ok':u.last_response_ms<2000?'warn':'crit'}">${u.last_response_ms}ms</span>`:'—'}
-          ${u.last_status?`<span style="font-size:11px;color:${u.last_status===(u.expected_status||200)?'#4CAF50':'#F44336'};margin-left:4px">(${u.last_status})</span>`:''}</td>
-        <td style="font-size:12px;color:#999">${u.last_check?timeSince(u.last_check):'Nunca'}</td>
-        <td><span class="srv-badge ${u.is_up?'on':'off'}">${u.is_up?'UP':'DOWN'}</span>
-          ${u.last_error?`<div style="font-size:10px;color:#F44336;margin-top:2px">${u.last_error}</div>`:''}</td>
-        <td onclick="event.stopPropagation()">
-          <div style="display:flex;gap:4px">
-            <button class="modal-btn sm" style="background:#E3F2FD;color:#1976D2;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="openUrlHistory(${u.id})">📈 Historial</button>
-            <button class="modal-btn sm" style="background:#EDE7F6;color:#5E35B1;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="openEditUrlMonitor(${u.id})">✏ Editar</button>
-            <button class="modal-btn sm" style="background:${u.is_active?'#FFF3E0':'#E8F5E9'};color:${u.is_active?'#FF9800':'#4CAF50'};padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="toggleUrlMonitor(${u.id},${u.is_active})">${u.is_active?'Pausar':'Activar'}</button>
-            ${u.url.startsWith('https')?`<button class="modal-btn sm" style="background:#E0F7FA;color:#00838F;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="checkSSL('${new URL(u.url).hostname}')">🔒 SSL</button>`:''}
-            <button class="modal-btn sm" style="background:#FFEBEE;color:#F44336;padding:4px 8px;font-size:11px;margin-top:0;border-radius:6px" onclick="deleteUrlMonitor(${u.id})">Eliminar</button>
-          </div>
-        </td>
-      </tr>`).join('')}
-      </tbody></table>`}
+  const httpN = urlMonitors.length;
+  const httpDown = urlMonitors.filter(u=>urlEstado(u)==='down').length;
+  const sslN = sslMonitors.length;
+  const sslMal = sslMonitors.filter(s=>{const e=sslEstado(s);return e==='expired'||e==='warning';}).length;
+  return `<div class="panel">
+    <div class="panel-head" style="margin-bottom:0">
+      <div class="panel-title" style="margin:0"><span class="dot" style="background:var(--accent)"></span>Monitores<button class="help-btn" onclick="event.stopPropagation();showHelp('urls',this)" aria-label="Ayuda sobre monitores">?</button></div>
     </div>
-    <div class="panel" style="margin-top:16px">
-      <div class="panel-title"><span class="dot" style="background:#00838F"></span>🔒 Monitoreo de Certificados SSL</div>
-      <p style="font-size:12px;color:#999;margin-bottom:12px">Recibe alertas cuando un certificado SSL esta por vencer.</p>
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input class="modal-input" id="ssl-hostname" placeholder="ejemplo.com" style="flex:1;font-size:13px;padding:8px"/>
-        <input class="modal-input" id="ssl-name" placeholder="Nombre (opcional)" style="flex:1;font-size:13px;padding:8px"/>
-        <button class="modal-btn sm" onclick="addSSLMonitor()">+ Agregar</button>
-      </div>
-      <div id="ssl-list"><p style="color:#888;font-size:12px">Cargando...</p></div>
+    <div class="subtabs" role="tablist" aria-label="Tipo de monitor">
+      <button class="subtab ${monitoresTab==='http'?'active':''}" role="tab" aria-selected="${monitoresTab==='http'}" onclick="setMonitoresTab('http')">
+        ${ico('globe','sm')} HTTP <span class="tab-count ${httpDown?'crit':''}">${httpN}</span>
+      </button>
+      <button class="subtab ${monitoresTab==='ssl'?'active':''}" role="tab" aria-selected="${monitoresTab==='ssl'}" onclick="setMonitoresTab('ssl')">
+        ${ico('lock','sm')} Certificados SSL <span class="tab-count ${sslMal?'crit':''}">${sslN}</span>
+      </button>
+    </div>
+    <div role="tabpanel">${monitoresTab==='http' ? buildHttpPanel() : buildSslPanel()}</div>
+  </div>`;
+}
+
+function buildHttpPanel(){
+  if (!urlMonitorsLoaded) return `<div class="state-block"><div class="spinner"></div><span>Cargando monitores…</span></div>`;
+  if (urlMonitors.length===0) return `<div style="margin-bottom:12px"><button class="btn primary" onclick="openAddUrlMonitor()">${ico('plus','sm')}Agregar URL</button></div>
+    <div class="state-block">${ico('globe','lg')}<strong>Sin monitores HTTP</strong><span>Agregá una URL para vigilar que un sitio responda y recibir avisos cuando se caiga.</span></div>`;
+
+  const up = urlMonitors.filter(u=>urlEstado(u)==='up').length;
+  const down = urlMonitors.filter(u=>urlEstado(u)==='down').length;
+  const paused = urlMonitors.filter(u=>urlEstado(u)==='paused').length;
+  const conMs = urlMonitors.filter(u=>urlEstado(u)==='up' && u.last_response_ms!=null);
+  const msProm = conMs.length ? Math.round(conMs.reduce((a,u)=>a+u.last_response_ms,0)/conMs.length) : null;
+  const lista = urlFiltrados();
+  const fchip = (val,txt,n,cls)=>`<button class="filter-chip ${urlStatusFilter===val?'active':''}" role="tab" aria-selected="${urlStatusFilter===val}" onclick="urlStatusFilter='${val}';render()">${txt} <span class="fc-n ${cls||''}">${n}</span></button>`;
+
+  return `
+  <div class="mon-summary">
+    <div class="mon-tile"><div class="mt-num">${urlMonitors.length}</div><div class="mt-label">Monitores</div></div>
+    <div class="mon-tile"><div class="mt-num ok">${up}</div><div class="mt-label">Respondiendo</div></div>
+    <div class="mon-tile"><div class="mt-num ${down?'crit':'muted'}">${down}</div><div class="mt-label">Caídos</div></div>
+    <div class="mon-tile"><div class="mt-num muted">${msProm!=null?msProm+' ms':'—'}</div><div class="mt-label">Respuesta prom.</div></div>
+  </div>
+  <div class="mon-toolbar">
+    <button class="btn primary" onclick="openAddUrlMonitor()">${ico('plus','sm')}Agregar URL</button>
+    <div class="mon-search"><span class="search-icon">${ico('search','sm')}</span>
+      <input type="search" id="url-search" placeholder="Buscar por nombre o dominio…" aria-label="Buscar monitor HTTP" value="${escHtml(urlSearch)}" oninput="urlSearch=this.value;render()"></div>
+    <div class="header-spacer"></div>
+    <div class="filter-group" role="tablist" aria-label="Filtrar por estado">
+      ${fchip('all','Todos',urlMonitors.length)}${fchip('up','Activos',up)}${fchip('down','Caídos',down,down?'':'')}${fchip('paused','Pausados',paused)}
+    </div>
+    <button class="btn sm" onclick="abrirAsignar()" title="Avisar a una persona de varios dominios" aria-label="Avisar a una persona de varios dominios">${ico('mail','sm')}Avisar…</button>
+  </div>
+  ${barraSeleccion(urlsSeleccionadas.size, 'Vigilar sus certificados SSL', 'crearSslDesdeUrl([...urlsSeleccionadas])', 'marcarTodasUrls(false)')}
+  ${lista.length===0
+    ? `<div class="state-block">${ico('search','lg')}<strong>Sin resultados</strong><span>Ningún monitor coincide con la búsqueda o el filtro.</span></div>`
+    : `<table class="server-table mon-table">
+    <thead><tr>
+      <th style="width:28px"><input type="checkbox" onchange="marcarTodasUrls(this.checked)" ${urlsSeleccionadas.size===urlMonitors.length&&urlMonitors.length>0?'checked':''} aria-label="Seleccionar todos"></th>
+      <th style="width:24px"><span class="sr-only">Estado</span></th><th>Nombre</th><th class="col-hide-sm">Dominio</th><th class="num">Respuesta</th><th class="col-hide-sm">Último chequeo</th><th>Estado</th><th style="width:1%"><span class="sr-only">Acciones</span></th>
+    </tr></thead><tbody>
+    ${lista.map(u=>buildHttpRow(u)).join('')}
+    </tbody></table>`}`;
+}
+
+function buildHttpRow(u){
+  const est = urlEstado(u);
+  const host = (()=>{ try { return new URL(u.url).hostname; } catch(e){ return u.url; } })();
+  const esHttps = /^https/i.test(u.url);
+  const pill = est==='up' ? `<span class="pill ok">${ico('check','sm')}UP</span>`
+    : est==='down' ? `<span class="pill crit">${ico('wifioff','sm')}DOWN</span>`
+    : est==='paused' ? `<span class="pill paused">${ico('pause','sm')}Pausado</span>`
+    : `<span class="pill muted">Sin chequear</span>`;
+  const resp = u.last_response_ms!=null
+    ? `<span class="val-num ${u.last_response_ms<500?'ok':u.last_response_ms<2000?'warn':'crit'}">${u.last_response_ms} ms</span>${u.last_status?` <span class="val-num muted" style="font-size:11px">(${u.last_status})</span>`:''}`
+    : (est==='down' ? '<span class="val-num crit">sin respuesta</span>' : '<span class="val-num muted">—</span>');
+  const dst = resumenDestinatarios(u.destinatarios);
+  return `<tr>
+    <td onclick="event.stopPropagation()"><input type="checkbox" onchange="marcarUrl(${u.id}, this.checked)" ${urlsSeleccionadas.has(u.id)?'checked':''} aria-label="Seleccionar ${escHtml(u.name||host)}"></td>
+    <td><span class="status-dot ${est==='up'?'on':est==='down'?'off':''}" style="${est==='paused'||est==='pending'?'background:var(--text3)':''}" role="img" aria-label="${est}"></span></td>
+    <td><div class="srv-name">${escHtml(u.name||host)}</div>${dst?`<div class="srv-meta">${dst}</div>`:''}</td>
+    <td class="col-hide-sm" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--text2);font-size:12.5px">${escHtml(u.url)}</span></td>
+    <td class="num">${resp}</td>
+    <td class="col-hide-sm" style="color:var(--text3);font-size:12px;white-space:nowrap">${u.last_check?timeSince(u.last_check):'Nunca'}</td>
+    <td>${pill}${u.last_error?`<div style="font-size:10.5px;color:var(--crit);margin-top:2px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(u.last_error)}">${escHtml(u.last_error)}</div>`:''}</td>
+    <td onclick="event.stopPropagation()"><div class="row-actions">
+      <button class="btn sm" onclick="openUrlHistory(${u.id})" aria-label="Historial de ${escHtml(u.name||host)}">${ico('chart','sm')}Historial</button>
+      <details class="rowmenu" onkeydown="menuKeydown(event)">
+        <summary aria-haspopup="true" aria-label="Más acciones de ${escHtml(u.name||host)}" title="Más acciones">${ico('dots','sm')}</summary>
+        <div class="menu-pop" role="menu">
+          <button class="menu-item" role="menuitem" onclick="cerrarMenu(this);openEditUrlMonitor(${u.id})">${ico('edit','sm')}Editar</button>
+          <button class="menu-item" role="menuitem" onclick="cerrarMenu(this);toggleUrlMonitor(${u.id},${u.is_active})">${ico(est==='paused'?'play':'pause','sm')}${est==='paused'?'Activar':'Pausar'}</button>
+          ${esHttps?`<button class="menu-item" role="menuitem" onclick="cerrarMenu(this);checkSSL('${escHtml(host)}')">${ico('lock','sm')}Verificar SSL</button>`:''}
+          <div class="menu-sep"></div>
+          <button class="menu-item danger" role="menuitem" onclick="cerrarMenu(this);deleteUrlMonitor(${u.id})">${ico('trash','sm')}Eliminar</button>
+        </div>
+      </details>
+    </div></td>
+  </tr>`;
+}
+
+function buildSslPanel(){
+  if (!sslMonitorsLoaded) return `<div class="state-block"><div class="spinner"></div><span>Cargando certificados…</span></div>`;
+  const items = sslOrdenados();
+  const vencidos = sslMonitors.filter(s=>sslEstado(s)==='expired').length;
+  const proximos = sslMonitors.filter(s=>sslEstado(s)==='warning').length;
+  const errores = sslMonitors.filter(s=>sslEstado(s)==='error').length;
+  const validos = sslMonitors.filter(s=>sslEstado(s)==='ok').length;
+
+  const alta = `<div class="mon-toolbar">
+    <input class="modal-input" id="ssl-hostname" placeholder="ejemplo.com" style="flex:1;min-width:160px;max-width:240px;height:34px;font-size:13px;padding:0 12px" aria-label="Dominio del certificado">
+    <input class="modal-input" id="ssl-name" placeholder="Nombre (opcional)" style="flex:1;min-width:140px;max-width:220px;height:34px;font-size:13px;padding:0 12px" aria-label="Nombre del certificado">
+    <button class="btn primary" onclick="addSSLMonitor()">${ico('plus','sm')}Agregar</button>
+  </div>`;
+
+  if (sslMonitors.length===0) return alta + `<div class="state-block">${ico('lock','lg')}<strong>Sin certificados monitoreados</strong><span>Agregá un dominio para recibir avisos antes de que venza su certificado SSL.</span></div>`;
+
+  return `
+  <div class="mon-summary">
+    <div class="mon-tile"><div class="mt-num ${vencidos?'crit':'muted'}">${vencidos}</div><div class="mt-label">Vencidos</div></div>
+    <div class="mon-tile"><div class="mt-num ${proximos?'warn':'muted'}">${proximos}</div><div class="mt-label">Por vencer</div></div>
+    <div class="mon-tile"><div class="mt-num ${errores?'muted':'muted'}">${errores}</div><div class="mt-label">Error de consulta</div></div>
+    <div class="mon-tile"><div class="mt-num ${validos?'ok':'muted'}">${validos}</div><div class="mt-label">Vigentes</div></div>
+  </div>
+  ${alta}
+  ${barraSeleccion(sslSeleccionados.size, 'Vigilar que respondan', 'crearUrlDesdeSsl([...sslSeleccionados])', 'marcarTodosSsl(false)')}
+  <div class="cert-list">
+    ${items.map(s=>buildCertCard(s)).join('')}
+  </div>`;
+}
+
+function buildCertCard(s){
+  const est = sslEstado(s);
+  const dias = s.last_days_left;
+  const diasBox = est==='expired'
+    ? `<div class="cd-num" style="color:var(--crit)">${dias!=null?Math.abs(dias):'!'}</div><div class="cd-lbl">días vencido</div>`
+    : est==='warning'
+    ? `<div class="cd-num" style="color:var(--warn)">${dias!=null?dias:'—'}</div><div class="cd-lbl">días</div>`
+    : est==='ok'
+    ? `<div class="cd-num" style="color:var(--ok)">${dias!=null?dias:'—'}</div><div class="cd-lbl">días</div>`
+    : est==='error'
+    ? `<div class="cd-num" style="color:var(--text3)">${ico('warn','lg')}</div><div class="cd-lbl">error</div>`
+    : `<div class="cd-num" style="color:var(--text3)">—</div><div class="cd-lbl">sin datos</div>`;
+  const pill = est==='expired'?`<span class="pill crit">Vencido</span>`
+    : est==='warning'?`<span class="pill warn">Por vencer</span>`
+    : est==='ok'?`<span class="pill ok">Vigente</span>`
+    : est==='error'?`<span class="pill muted" title="${escHtml(s.last_error||'')}">Error de consulta</span>`
+    : `<span class="pill muted">Sin chequear</span>`;
+  const meta = est==='error'
+    ? `<span style="color:var(--crit)">${escHtml(s.last_error||'No se pudo consultar el certificado')}</span>`
+    : est==='pending'
+    ? 'Todavía sin chequear'
+    : `${s.last_expiry?'Vence '+new Date(s.last_expiry).toLocaleDateString('es',{day:'2-digit',month:'short',year:'numeric'}):'—'}${s.last_issuer?' · '+escHtml(s.last_issuer):''}`;
+  const dst = resumenDestinatarios(s.destinatarios);
+  return `<div class="cert-card st-${est}">
+    <div class="cert-days">${diasBox}</div>
+    <div class="cert-main">
+      <input type="checkbox" onchange="marcarSsl(${s.id}, this.checked)" ${sslSeleccionados.has(s.id)?'checked':''} aria-label="Seleccionar ${escHtml(s.name||s.hostname)}" style="float:right;margin-left:8px">
+      <div class="cm-name">${escHtml(s.name||s.hostname)} ${pill}</div>
+      <div class="cm-host">${escHtml(s.hostname)}</div>
+      <div class="cm-meta">${meta}${dst?' · '+dst:''}</div>
+    </div>
+    <div class="cert-actions">
+      <button class="btn sm" onclick="checkSSL('${escHtml(s.hostname)}')" aria-label="Verificar ${escHtml(s.hostname)} ahora">${ico('refresh','sm')}Verificar</button>
+      <details class="rowmenu" onkeydown="menuKeydown(event)">
+        <summary aria-haspopup="true" aria-label="Más acciones de ${escHtml(s.hostname)}" title="Más acciones">${ico('dots','sm')}</summary>
+        <div class="menu-pop" role="menu">
+          <button class="menu-item" role="menuitem" onclick="cerrarMenu(this);openEditSsl(${s.id})">${ico('edit','sm')}Editar avisos</button>
+          <button class="menu-item" role="menuitem" onclick="cerrarMenu(this);crearUrlDesdeSsl(${s.id})">${ico('globe','sm')}Vigilar que responda</button>
+          <div class="menu-sep"></div>
+          <button class="menu-item danger" role="menuitem" onclick="cerrarMenu(this);deleteSSLMonitor(${s.id})">${ico('trash','sm')}Eliminar</button>
+        </div>
+      </details>
     </div>
   </div>`;
 }
+
+// Cierra el <details> que contiene al elemento (tras elegir una accion).
+function cerrarMenu(el){ const d=el.closest('details'); if(d) d.open=false; }
+// Escape dentro de un menu: cerrar y devolver el foco al disparador.
+function menuKeydown(e){
+  if (e.key==='Escape'){ const d=e.currentTarget; d.open=false; const s=d.querySelector('summary'); if(s) s.focus(); e.stopPropagation(); }
+}
+
 
 let sslMonitors = [];
 let _ultimoSslJson = '';
@@ -3171,11 +3470,17 @@ async function loadSSLMonitors() {
   // Sin el chequeo, una respuesta que no sea lista deja sslMonitors como un
   // objeto y rompe todo lo que despues hace .some() o .map() sobre el.
   if (r.ok && Array.isArray(r.data)) {
-    // render() llama a esto en cada vuelta estando en URLs: sin comparar, la
-    // lista se repintaba cada 10 segundos aunque no hubiera cambiado nada.
     const nuevo = JSON.stringify(r.data);
     sslMonitors = r.data;
-    if (nuevo !== _ultimoSslJson) { _ultimoSslJson = nuevo; renderSSLList(); }
+    sslMonitorsLoaded = true;
+    // Repinta la vista solo si algo cambio y estamos en la pestaña SSL, sin
+    // pisar lo que el usuario este escribiendo (misma logica que loadMachines).
+    if (nuevo !== _ultimoSslJson) {
+      _ultimoSslJson = nuevo;
+      // Re-render en cualquier subpestaña de Monitores: asi el contador del
+      // subtab SSL queda al dia aunque el usuario este mirando HTTP.
+      if (activeNav==='urls' && !activeModal && !notifDropdownOpen) renderSiNoEstasEscribiendo();
+    }
   }
 }
 // Mismo criterio que render(): actualizar en vez de reconstruir. Esta lista se
@@ -3187,6 +3492,11 @@ function pintar(el, html) {
 }
 
 function renderSSLList() {
+  // El SSL ahora se dibuja dentro de buildSslPanel (pestaña Certificados); esta
+  // funcion quedo por compatibilidad con llamadas viejas -> repinta la vista.
+  if (activeNav==='urls' && !activeModal) renderSiNoEstasEscribiendo();
+  return;
+  /* eslint-disable no-unreachable */
   const el = document.getElementById('ssl-list');
   if (!el) return;
   if (sslMonitors.length === 0) { pintar(el, '<p style="color:#888;text-align:center;font-size:13px">Sin certificados monitoreados</p>'); return; }
@@ -3542,15 +3852,40 @@ function buildUrlHistoryModal() {
     const conMs = h.filter(x => x.is_up && x.response_ms != null);
     const msProm = conMs.length ? Math.round(conMs.reduce((a, x) => a + x.response_ms, 0) / conMs.length) : null;
     const uptime = (h.length - caidas) / h.length * 100;
-    const tile = (valor, etiqueta, color) => `<div style="flex:1;background:var(--bg);border-radius:8px;padding:10px;text-align:center">
-      <div style="font-size:20px;font-weight:800;color:${color}">${valor}</div>
-      <div style="font-size:10px;color:#888;text-transform:uppercase;margin-top:2px">${etiqueta}</div></div>`;
+    const tile = (valor, etiqueta, color) => `<div class="mon-tile" style="text-align:center;align-items:center">
+      <div class="mt-num" style="color:${color}">${valor}</div>
+      <div class="mt-label">${etiqueta}</div></div>`;
+    // Periodo visible: del primer al ultimo chequeo guardado.
+    const orden = [...h].sort((a,b)=>new Date(a.checked_at)-new Date(b.checked_at));
+    const fmtP = t => new Date(t).toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+    const periodo = orden.length ? `${fmtP(orden[0].checked_at)} — ${fmtP(orden[orden.length-1].checked_at)}` : '';
+    // Evolucion de latencia: solo con los ms disponibles (no se inventan).
+    const serie = orden.map(x=>({ ms: (x.is_up && x.response_ms!=null)?x.response_ms:null }));
+    const chart = (()=>{
+      const vals = serie.map(p=>p.ms).filter(v=>v!=null);
+      if (vals.length<2) return '<div style="font-size:11px;color:var(--text3);padding:8px 0">Sin datos de latencia suficientes para graficar.</div>';
+      const w=520,hh=70,pad=4,max=Math.max(...vals),min=Math.min(...vals),rng=Math.max(max-min,1);
+      const pts=serie.map((p,i)=>{ const x=pad+i/(serie.length-1)*(w-2*pad); if(p.ms==null)return null; const y=pad+(1-(p.ms-min)/rng)*(hh-2*pad); return x.toFixed(1)+','+y.toFixed(1); });
+      // Segmentos: cortar la linea donde falta un dato (caida)
+      const segs=[]; let cur=[]; pts.forEach(pt=>{ if(pt){cur.push(pt)}else{ if(cur.length>1)segs.push(cur); cur=[]; } }); if(cur.length>1)segs.push(cur);
+      const caidasX=serie.map((p,i)=>p.ms==null?pad+i/(serie.length-1)*(w-2*pad):null).filter(x=>x!=null);
+      return `<svg viewBox="0 0 ${w} ${hh}" style="width:100%;height:70px;display:block" preserveAspectRatio="none" role="img" aria-label="Evolución de la latencia">
+        ${caidasX.map(x=>`<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${hh}" stroke="var(--crit)" stroke-width="1" opacity="0.35"/>`).join('')}
+        ${segs.map(sg=>`<polyline points="${sg.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>`).join('')}
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:2px"><span>${min} ms</span><span>máx ${max} ms · líneas rojas = caídas</span></div>`;
+    })();
     cuerpo = `
-    ${soloFallos ? '' : `<div style="display:flex;gap:8px;margin-bottom:14px">
-      ${tile(uptime.toFixed(1) + '%', 'Uptime', uptime >= 99 ? '#4CAF50' : '#FF9800')}
-      ${tile(caidas, 'Caidas', caidas ? '#F44336' : '#4CAF50')}
-      ${tile(pasajeros, 'Fallos pasajeros', pasajeros ? '#FF9800' : '#888')}
-      ${tile(msProm != null ? msProm + 'ms' : '—', 'Respuesta promedio', '#2196F3')}
+    ${soloFallos ? '' : `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Período: <strong style="color:var(--text2)">${periodo}</strong> · ${h.length} chequeos</div>
+    <div class="mon-summary" style="margin-bottom:12px">
+      ${tile(uptime.toFixed(1) + '%', 'Uptime', uptime >= 99 ? 'var(--ok)' : 'var(--warn)')}
+      ${tile(caidas, 'Caídas', caidas ? 'var(--crit)' : 'var(--ok)')}
+      ${tile(pasajeros, 'Fallos pasajeros', pasajeros ? 'var(--warn)' : 'var(--text3)')}
+      ${tile(msProm != null ? msProm + 'ms' : '—', 'Respuesta prom.', 'var(--accent)')}
+    </div>
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Evolución de latencia</div>
+      ${chart}
     </div>`}
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <tr style="border-bottom:2px solid var(--border2)">
@@ -3870,7 +4205,7 @@ async function crearUrlDesdeSsl(ids) {
 let urlsSeleccionadas = new Set();
 let sslSeleccionados = new Set();
 function marcarUrl(id, tildado) { tildado ? urlsSeleccionadas.add(id) : urlsSeleccionadas.delete(id); render(); }
-function marcarSsl(id, tildado) { tildado ? sslSeleccionados.add(id) : sslSeleccionados.delete(id); renderSSLList(); }
+function marcarSsl(id, tildado) { tildado ? sslSeleccionados.add(id) : sslSeleccionados.delete(id); render(); }
 function marcarTodasUrls(tildado) {
   urlsSeleccionadas.clear();
   if (tildado) urlMonitors.forEach(u => urlsSeleccionadas.add(u.id));
@@ -3879,7 +4214,7 @@ function marcarTodasUrls(tildado) {
 function marcarTodosSsl(tildado) {
   sslSeleccionados.clear();
   if (tildado) sslMonitors.forEach(m => sslSeleccionados.add(m.id));
-  renderSSLList();
+  render();
 }
 function barraSeleccion(cantidad, texto, accion, limpiar) {
   // Devolvemos siempre un nodo, vacio cuando no hay nada seleccionado: si
