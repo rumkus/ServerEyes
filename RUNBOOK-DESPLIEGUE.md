@@ -126,18 +126,6 @@ setear la variable a mano en el dashboard con la contraseña que el script
 guardó en un archivo local (ver su salida), porque hasta entonces ServerEyes
 no puede abrir conexiones nuevas. No restaurar la contraseña vieja.
 
-**Esperado / comprobar**: el deploy queda `SUCCESS`; el log muestra
-`Base de datos inicializada` y `ServerEyes backend corriendo`;
-`curl -s https://servereyes.app/api/status` responde 200 con `"status":"ServerEyes running"`.
-La credencial vieja ya no conecta (probar con el cliente SQL que la tenía:
-debe fallar la autenticación).
-
-**Detenerse si**: el servicio no arranca (`[FATAL]` o `Error al inicializar
-DB`) → la variable quedó mal; corregirla y redeploy. Mientras tanto la app y
-los agentes ven caído el server (los agentes reintentan solos; nada se pierde
-salvo métricas de esos minutos). No seguir al paso 2 hasta que `/api/status`
-responda.
-
 ## Paso 2 — Publicar los binarios [PANEL]
 
 1. Panel de admin → **Agente** → elegir
