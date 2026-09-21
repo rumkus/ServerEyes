@@ -2868,27 +2868,6 @@ async function requireAdmin(req, res, next) {
 }
 
 // Dashboard admin: todos los usuarios y maquinas
-// Diagnostico de la cadena de proxies. Devuelve lo que Express ve de verdad:
-// la direccion del socket, la cabecera X-Forwarded-For cruda, req.ip y
-// req.ips segun el TRUST_PROXY vigente. Sirve para elegir TRUST_PROXY con
-// evidencia (que hay detras de Cloudflare y del edge de Railway, en cada
-// ruta) en vez de inferirlo. Solo admin: expone IPs internas del proveedor.
-app.get('/api/admin/diag/proxy', authenticateToken, requireAdmin, (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({
-    trust_proxy: String(app.get('trust proxy')),
-    socket: req.socket.remoteAddress,
-    x_forwarded_for: req.get('x-forwarded-for') || null,
-    ip: req.ip,
-    ips: req.ips,
-    host: req.get('host'),
-    via_cloudflare: !!req.get('cf-ray'),
-    cf_connecting_ip: req.get('cf-connecting-ip') || null,
-    x_real_ip: req.get('x-real-ip') || null,
-    x_railway_edge: req.get('x-railway-edge') || null
-  });
-});
-
 app.get('/api/admin/overview', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const users = await pool.query('SELECT id, email, nombre, is_admin, plan, max_machines, created_at, fcm_token IS NOT NULL as has_push, is_blocked, block_reason, blocked_at FROM users ORDER BY id');

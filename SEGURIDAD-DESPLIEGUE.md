@@ -230,16 +230,39 @@ está **verificado** y lo que es **supuesto** son cosas distintas:
 - **Verificado (`TRUST_PROXY=0`, `test/integracion3-sinproxy.test.js`)**:
   sin proxy, la cabecera se ignora por completo; `req.ip` es la del socket y
   el cupo es uno solo por conexión de origen, diga lo que diga la cabecera.
-- **Supuesto, pendiente de comprobar en Railway**: que el edge de Railway sea
-  exactamente **un** salto y que **agregue** (no confíe ni deje pasar) la
-  cabecera. Es lo que documenta Railway, pero **no está probado contra el
-  proxy real desde esta sesión**. Cómo comprobarlo tras el despliegue (paso
-  C.4): con un usuario de prueba logueado, desde una red conocida:
-  `curl -H 'X-Forwarded-For: 1.2.3.4' -H 'Authorization: Bearer <token>' -X POST https://servereyes.app/api/auth/logout-all`
-  y mirar en `audit_log` la fila `logout_all`: la columna `ip` tiene que ser
-  la IP pública real de esa red, no `1.2.3.4`. Si apareciera `1.2.3.4`, hay
-  más saltos o el proxy no agrega: ajustar `TRUST_PROXY` (número de saltos o
-  lista de redes) antes de confiar en los límites por IP.
+- **Comprobado en producción (2026-09-21)** con un endpoint de diagnóstico
+  temporal (`/api/admin/diag/proxy`, ya retirado) leído por las dos rutas con
+  y sin cabeceras falsas (18 lecturas). Lo que Express recibe:
+  - Socket: proxy interno de Railway (`100.64.0.x`).
+  - `X-Forwarded-For`: el edge de Railway la **reescribe** como
+    `[<peer>, <edge>]` y **descarta** todo lo que mande el cliente
+    (`X-Forwarded-For`, `Forwarded`, `True-Client-IP`). Vía `servereyes.app`
+    el peer es **Cloudflare** (`198.41.230.94`, `104.23.237.32`, en rangos
+    publicados de Cloudflare); por el dominio directo `*.up.railway.app` el
+    peer es el cliente. Edges vistos: `46.151.194.129`, `.130`.
+  - `X-Real-IP`: el edge la **sobrescribe** con la IP real del cliente en las
+    dos rutas, aunque el cliente mande una falsa.
+  - `CF-Connecting-IP`: fiable solo vía Cloudflare (un cliente que la manda
+    recibe 403 de Cloudflare); por la ruta directa pasa sin filtrar → no usar.
+- **Consecuencias**: con `TRUST_PROXY=1` (vigente) `req.ip` es el edge; con
+  `2` sería la IP de Cloudflare por `servereyes.app` (la ruta de agentes,
+  panel y app) y la real solo por la ruta directa. Ninguna configuración
+  basada en `X-Forwarded-For` puede dar la IP real vía Cloudflare, porque
+  Railway elimina la entrada que Cloudflare agrega. Nada es falsificable
+  desde el cliente en ninguna variante. Los límites por IP del pairing y la
+  columna `ip` de auditoría hoy agrupan por nodo de edge.
+- **Camino para obtener la IP real** (no aplicado): usar `X-Real-IP`
+  mediante un helper `ipCliente(req)` habilitado explícitamente por variable
+  (`CLIENT_IP_HEADER=x-real-ip`) y solo cuando el socket esté en el rango que
+  el operador declare para el proxy interno de Railway (`CLIENT_IP_SOCKETS`);
+  fuera de eso, `req.ip`. Justificación del rango: el contenedor solo recibe
+  conexiones del proxy interno (sockets observados `100.64.0.2–.21`, espacio
+  RFC 6598 de la red privada de Railway) y de servicios del mismo proyecto;
+  si el servicio se expone por otra vía, no habilitarlo. Recuperación:
+  quitar la variable. Requiere código y pruebas antes de tocar producción.
+- Cómo re-comprobar en el futuro: volver a desplegar temporalmente un
+  endpoint como el de `4706705` (solo admin, `Cache-Control: no-store`) y
+  leerlo por ambas rutas con cabeceras falsas; retirarlo después.
 - **Fuera de esos supuestos, `X-Forwarded-For` no es fiable**: con un valor
   mayor al número real de saltos, o con un proxy que reenvía la cabecera sin
   agregar, cualquier cliente elige su `req.ip` y los límites por IP y la

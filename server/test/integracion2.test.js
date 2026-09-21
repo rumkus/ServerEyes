@@ -219,27 +219,6 @@ test('con TRUST_PROXY=1 el limite por IP usa la direccion que agrega el proxy, n
   assert.equal(otraReal.status, 200, 'otra IP real (la que pone el proxy) tiene su propio cupo');
 });
 
-// ================= DIAGNOSTICO DE PROXY =================
-test('diag/proxy: solo admin; refleja la cabecera cruda y lo que req.ip decide con TRUST_PROXY', { skip }, async () => {
-  const { api, pool } = S;
-  const comun = await registrar(api, 'diag-comun@test.local');
-  assert.equal((await api('GET', '/api/admin/diag/proxy', { token: comun.token })).status, 403);
-  assert.equal((await api('GET', '/api/admin/diag/proxy')).status, 401);
-  const admin = await registrar(api, 'diag-admin@test.local');
-  await pool.query('UPDATE users SET is_admin = true WHERE email = $1', ['diag-admin@test.local']);
-  // Con TRUST_PROXY=1 (default en el harness): un salto de confianza -> req.ip es la ULTIMA entrada
-  const r = await api('GET', '/api/admin/diag/proxy', { token: admin.token, headers: { 'X-Forwarded-For': '203.0.113.5, 198.51.100.9' } });
-  assert.equal(r.status, 200);
-  assert.equal(r.data.trust_proxy, '1');
-  assert.equal(r.data.x_forwarded_for, '203.0.113.5, 198.51.100.9', 'la cabecera cruda se devuelve tal cual');
-  assert.equal(r.data.ip, '198.51.100.9');
-  assert.deepEqual(r.data.ips, ['198.51.100.9']);
-  assert.match(r.data.socket, /127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/);
-  assert.equal(r.data.via_cloudflare, false);
-  assert.equal(r.headers.get('cache-control'), 'no-store');
-  assert.ok(!JSON.stringify(r.data).includes(admin.token), 'nunca devuelve el token');
-});
-
 // ================= SSL =================
 test('ssl: ni ssl-check ni los monitores aceptan hosts que apuntan adentro', { skip }, async () => {
   const { api, pool } = S;
