@@ -2841,9 +2841,11 @@ function AppContent() {
   }
 
   if (uptimeMachine) {
-    const avgUptime = uptimeData.length > 0
-      ? Math.round(uptimeData.reduce((a: number, d: any) => a + d.percentage, 0) / uptimeData.length)
-      : 0;
+    // Disponibilidad = tiempo online / tiempo OBSERVADO, no el promedio de dias
+    // (el dia del alta y el de hoy son parciales, no 1440 min).
+    const obsOnline = uptimeData.reduce((a: number, d: any) => a + (d.online_minutes || 0), 0);
+    const obsTotal = uptimeData.reduce((a: number, d: any) => a + (d.online_minutes || 0) + (d.offline_minutes || 0), 0);
+    const avgUptime = obsTotal > 0 ? Math.round(obsOnline / obsTotal * 100) : 0;
 
     return conDialogo(
       <View style={{flex: 1, backgroundColor: '#0a1628'}}>
