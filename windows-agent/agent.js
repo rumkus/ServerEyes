@@ -202,18 +202,12 @@ function getSystemMetrics() {
 }
 
 // Servicios Windows importantes
+const { clasificarBackup } = require('./backup-estado');
+
 // Windows Backup status
 let _backupCache = null;
 let _backupLastCheck = 0;
 const BACKUP_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
-
-function formatBackupDate(raw) {
-  try {
-    const d = new Date(raw);
-    if (isNaN(d.getTime())) return raw;
-    return d.toLocaleDateString('es', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-  } catch { return raw; }
-}
 
 function getBackupStatus(forceCheck) {
   if (!forceCheck && _backupCache && (Date.now() - _backupLastCheck) < BACKUP_CHECK_INTERVAL) {
@@ -221,53 +215,20 @@ function getBackupStatus(forceCheck) {
   }
   return new Promise((resolve) => {
     const { exec } = require('child_process');
-    const finish = (obj) => { _backupCache = obj; _backupLastCheck = Date.now(); resolve(obj); };
-    // Un error que sea de PERMISOS deja el chequeo "sin confirmar" (estado
-    // desconocido). Un error de "no existe" (canal/carpeta ausente) SI confirma
-    // que no hay backup por ese lado. Se reconoce por el texto en es/en.
-    const esPermiso = (t) => /denegad|denied|permission|no autoriz|acceso/i.test(t || '');
-
-    // 1) Eventos de Windows Backup (evidencia de ejecucion, ok/error/warning).
-    exec('wevtutil qe Microsoft-Windows-Backup /c:3 /rd:true /f:text', { timeout: 15000, windowsHide: true }, (err, stdout, stderr) => {
-      const salida = (stdout || '').trim();
-      const errEv = ((stderr || '') + (err ? ' ' + err.message : '')).toLowerCase();
-
-      if (!err && salida) {
-        // Hay eventos: parsear el mas reciente.
-        const dateMatch = stdout.match(/Date:\s*(.+)/i) || stdout.match(/Fecha:\s*(.+)/i);
-        const levelMatch = stdout.match(/Level:\s*(.+)/i) || stdout.match(/Nivel:\s*(.+)/i);
-        const msgMatch = stdout.match(/Message:\s*([\s\S]*?)(?:\n\n|\nEvent|\n$)/i) || stdout.match(/Mensaje:\s*([\s\S]*?)(?:\n\n|\nEvento|\n$)/i);
-        const level = levelMatch ? levelMatch[1].trim().toLowerCase() : '';
-        const message = msgMatch ? msgMatch[1].trim().substring(0, 300) : '';
-        let status = 'ok', statusText = 'Backup realizado con exito';
-        if (level.includes('error') || level.includes('critical') || level.includes('critico')) { status = 'error'; statusText = 'El backup fallo'; }
-        else if (level.includes('warning') || level.includes('advertencia')) { status = 'warning'; statusText = 'Backup con advertencias'; }
-        return finish({ status, status_text: statusText, last_backup: dateMatch ? formatBackupDate(dateMatch[1].trim()) : null, message: message || null, checked_at: new Date().toLocaleString() });
-      }
-
-      // Sin eventos. ¿La consulta de eventos se pudo hacer? (exit 0 = si; error
-      // que no sea de permisos = canal ausente, tambien cuenta como confirmado).
-      const eventosConfirmado = !err || !esPermiso(errEv);
-
-      // 2) Imagen real de backup en C:\WindowsImageBackup (evidencia).
-      exec('dir /b /od "C:\\WindowsImageBackup"', { timeout: 5000, windowsHide: true }, (err3, stdout3, stderr3) => {
-        const dirOut = (stdout3 || '').trim();
-        const dirErr = ((stderr3 || '') + (err3 ? ' ' + err3.message : '')).toLowerCase();
-
-        if (!err3 && dirOut) {
-          return finish({ status: 'ok', status_text: 'Backup realizado con exito', last_backup: dirOut.split('\n').pop() ? dirOut.split('\n').pop().trim() : null, checked_at: new Date().toLocaleString() });
-        }
-        // Carpeta: exit 0 vacia, o error que NO es de permisos (no existe) => ausencia confirmada.
-        const imagenConfirmado = !err3 || !esPermiso(dirErr);
-
-        if (eventosConfirmado && imagenConfirmado) {
-          // Ambos lados se pudieron verificar y no hay evidencia: no configurado.
-          return finish({ status: 'not_configured', status_text: 'Windows Backup no esta configurado', checked_at: new Date().toLocaleString() });
-        }
-        // Algun lado no se pudo confirmar (permisos / servicio no disponible):
-        // NO afirmamos nada, estado desconocido.
-        return finish({ status: 'unknown', status_text: 'No se pudo verificar el backup', message: 'No se pudo leer el estado del backup (permisos o servicio no disponible). Ejecutar el agente con privilegios para confirmarlo.', checked_at: new Date().toLocaleString() });
+    // Corre un comando y NUNCA rechaza: devuelve { err, out } (err = mensaje).
+    const correr = (cmd, timeout) => new Promise((r) => {
+      exec(cmd, { timeout: timeout || 15000, windowsHide: true }, (err, out) => {
+        r({ err: err ? (err.message || String(err)) : '', out: out || '' });
       });
+    });
+    Promise.all([
+      correr('wevtutil qe Microsoft-Windows-Backup /c:3 /rd:true /f:text', 15000), // eventos
+      correr('dir /b /od "C:\WindowsImageBackup"', 5000)                          // imagen
+    ]).then(([ev, img]) => {
+      const estado = clasificarBackup(ev, img);
+      _backupCache = { ...estado, checked_at: new Date().toLocaleString() };
+      _backupLastCheck = Date.now();
+      resolve(_backupCache);
     });
   });
 }
