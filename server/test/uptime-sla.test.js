@@ -34,9 +34,26 @@ test('uptime y SLA: recorte a created_at', { skip: !hayBase() && 'TEST_DATABASE_
     assert.strictEqual(r.status, 200);
     assert.strictEqual(r.data.length, 1, 'solo debe devolver 1 dia (hoy)');
     assert.strictEqual(r.data[0].date, claveUTC(now));
-    // observado = minutos desde el alta (~5), NO 1440
-    assert.ok(r.data[0].total_minutes <= 10, 'el dia del alta es parcial, no 1440');
-    assert.ok(r.data[0].offline_minutes <= 10);
+    // sin registros aun, el lapso alta->primer latido es DESCONOCIDO: no se cuenta
+    // ni como caida ni como disponibilidad (observado = 0).
+    assert.strictEqual(r.data[0].offline_minutes, 0, 'el lapso desconocido no es caida');
+    assert.strictEqual(r.data[0].online_minutes, 0);
+    assert.strictEqual(r.data[0].total_minutes, 0, 'observado = 0 (todo desconocido)');
+    assert.strictEqual(r.headers.get('x-uptime-overall'), '', 'sin tiempo observado, overall vacio');
+  });
+
+  await t.test('el lapso alta->primer registro queda DESCONOCIDO (ni caida ni disponibilidad)', async () => {
+    const created = new Date(now - 2 * 3600 * 1000);            // alta hace 2 h
+    const id = await crearMaquina(pool, u.user.id, 'gap', created);
+    await evento(pool, id, 'online', new Date(now - 1 * 3600 * 1000)); // primer registro 1 h despues
+    const r = await api('GET', `/api/machines/${id}/uptime?days=7`, { token: u.token });
+    const obsTotal = r.data.reduce((a, d) => a + d.online_minutes + d.offline_minutes, 0);
+    const offline = r.data.reduce((a, d) => a + d.offline_minutes, 0);
+    const online = r.data.reduce((a, d) => a + d.online_minutes, 0);
+    assert.strictEqual(offline, 0, 'la hora desconocida NO se cuenta como caida');
+    assert.ok(Math.abs(online - 60) <= 2, 'solo la hora posterior al primer registro cuenta como disponibilidad, fue ' + online);
+    assert.ok(Math.abs(obsTotal - 60) <= 2, 'observado ~60 min (excluye la hora desconocida), fue ' + obsTotal);
+    assert.strictEqual(r.headers.get('x-uptime-overall'), '100', 'todo el observado fue online');
   });
 
   await t.test('maquina de hace 3 dias, online desde el alta: dias contiguos desde el alta, ninguno antes', async () => {

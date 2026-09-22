@@ -4617,7 +4617,10 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
       `SELECT status FROM uptime_log WHERE machine_id = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`,
       [req.params.id, effectiveStart]
     );
-    let lastStatus = priorEvent.rows.length > 0 ? priorEvent.rows[0].status : 'offline';
+    // Antes del primer registro de una maquina nueva el estado es DESCONOCIDO:
+    // ese lapso (alta -> primer latido) no se cuenta ni como caida ni como
+    // disponibilidad; queda excluido del tiempo observado.
+    let lastStatus = priorEvent.rows.length > 0 ? priorEvent.rows[0].status : 'unknown';
     let lastTime = new Date(effectiveStart);
 
     for (const event of events.rows) {
@@ -4635,7 +4638,8 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
 
         if (dailyUptime[dayKey]) {
           if (lastStatus === 'online') dailyUptime[dayKey].online_minutes += minutesInDay;
-          else dailyUptime[dayKey].offline_minutes += minutesInDay;
+          else if (lastStatus === 'offline') dailyUptime[dayKey].offline_minutes += minutesInDay;
+          // 'unknown': excluido del tiempo observado (no suma online ni offline)
         }
 
         remaining -= minutesInDay;
@@ -4658,7 +4662,8 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
 
       if (dailyUptime[dayKey]) {
         if (lastStatus === 'online') dailyUptime[dayKey].online_minutes += minutesInDay;
-        else dailyUptime[dayKey].offline_minutes += minutesInDay;
+        else if (lastStatus === 'offline') dailyUptime[dayKey].offline_minutes += minutesInDay;
+        // 'unknown': excluido del tiempo observado
       }
 
       remaining -= minutesInDay;
