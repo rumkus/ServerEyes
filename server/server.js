@@ -3773,18 +3773,25 @@ app.post('/api/admin/set-plan', authenticateToken, requireAdmin, async (req, res
 app.get('/api/machines/:id/sla', authenticateToken, async (req, res) => {
   try {
     const machine = await pool.query(
-      'SELECT id, sla_target FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))',
+      'SELECT id, sla_target, created_at FROM machines WHERE id = $1 AND (user_id = $2 OR EXISTS (SELECT 1 FROM machine_shares ms WHERE ms.machine_id = $1 AND ms.user_id = $2))',
       [req.params.id, req.user.id]
     );
     if (machine.rows.length === 0) return res.status(404).json({ error: 'No encontrada' });
     const slaTarget = parseFloat(machine.rows[0].sla_target) || 99.9;
+    const createdAt = machine.rows[0].created_at ? new Date(machine.rows[0].created_at) : null;
 
     const months = [];
     const now = new Date();
     for (let i = 0; i < 6; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const start = d.toISOString();
-      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).toISOString();
+      const monthEnd = Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime(), now.getTime());
+      // La maquina no pudo estar caida antes de existir: recortamos el inicio del
+      // mes a created_at y omitimos los meses enteros previos al alta.
+      const monthStart = createdAt ? Math.max(d.getTime(), createdAt.getTime()) : d.getTime();
+      if (monthStart >= monthEnd) continue;   // el alta es posterior a este mes
+
+      const start = new Date(monthStart).toISOString();
+      const end = new Date(monthEnd).toISOString();
       const events = await pool.query(
         `SELECT status, timestamp FROM uptime_log WHERE machine_id = $1 AND timestamp BETWEEN $2 AND $3 ORDER BY timestamp ASC`,
         [req.params.id, start, end]
@@ -3795,8 +3802,6 @@ app.get('/api/machines/:id/sla', authenticateToken, async (req, res) => {
       );
       let lastStatus = priorEvent.rows.length > 0 ? priorEvent.rows[0].status : 'offline';
       let onlineMs = 0, totalMs = 0;
-      const monthStart = d.getTime();
-      const monthEnd = Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime(), now.getTime());
       let cursor = monthStart;
 
       for (const evt of events.rows) {
@@ -4533,34 +4538,46 @@ app.get('/api/status', async (req, res) => {
 app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 7;
-    const machine = await pool.query('SELECT id FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const machine = await pool.query('SELECT id, created_at FROM machines WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (machine.rows.length === 0) return res.status(404).json({ error: 'Maquina no encontrada' });
 
-    // Obtener eventos de uptime
+    const now = new Date();
+    // El uptime no puede empezar antes de que la maquina existiera: antes de su
+    // alta no estaba "caida", simplemente no habia nada que medir. Recortamos el
+    // inicio del periodo a created_at para no inventar dias de offline previos.
+    const windowStart = new Date(now.getTime() - days * 86400000);
+    const createdAt = machine.rows[0].created_at ? new Date(machine.rows[0].created_at) : windowStart;
+    const effectiveStart = createdAt > windowStart ? createdAt : windowStart;
+
+    // Obtener eventos de uptime desde el inicio efectivo
     const events = await pool.query(
       `SELECT status, timestamp FROM uptime_log
-       WHERE machine_id = $1 AND timestamp > NOW() - INTERVAL '1 day' * $2
+       WHERE machine_id = $1 AND timestamp > $2
        ORDER BY timestamp ASC`,
-      [req.params.id, days]
+      [req.params.id, effectiveStart]
     );
 
-    // Calcular uptime por dia
+    // Calcular uptime por dia (en UTC, consistente con las claves): solo los
+    // dias en los que la maquina ya existia.
     const dailyUptime = {};
-    const now = new Date();
+    const effectiveStartKey = effectiveStart.toISOString().split('T')[0];
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(now);
-      date.setDate(date.getDate() - i);
+      date.setUTCDate(date.getUTCDate() - i);
       const key = date.toISOString().split('T')[0];
+      if (key < effectiveStartKey) continue;   // la maquina aun no existia ese dia
       dailyUptime[key] = { date: key, online_minutes: 0, offline_minutes: 0, total_minutes: 1440, percentage: 0 };
     }
 
-    // Determinar estado inicial antes del periodo consultado
+    // Estado inicial: ultimo evento antes del inicio efectivo (si ya venia
+    // reportando). Una maquina recien dada de alta no tiene evento previo y
+    // arranca offline hasta su primer latido.
     const priorEvent = await pool.query(
-      `SELECT status FROM uptime_log WHERE machine_id = $1 AND timestamp <= NOW() - INTERVAL '1 day' * $2 ORDER BY timestamp DESC LIMIT 1`,
-      [req.params.id, days]
+      `SELECT status FROM uptime_log WHERE machine_id = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`,
+      [req.params.id, effectiveStart]
     );
     let lastStatus = priorEvent.rows.length > 0 ? priorEvent.rows[0].status : 'offline';
-    let lastTime = new Date(now.getTime() - days * 86400000);
+    let lastTime = new Date(effectiveStart);
 
     for (const event of events.rows) {
       const eventTime = new Date(event.timestamp);
@@ -4572,7 +4589,7 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
       while (remaining > 0) {
         const dayKey = cursor.toISOString().split('T')[0];
         const endOfDay = new Date(cursor);
-        endOfDay.setHours(23, 59, 59, 999);
+        endOfDay.setUTCHours(23, 59, 59, 999);
         const minutesInDay = Math.min(remaining, (endOfDay.getTime() - cursor.getTime()) / 60000);
 
         if (dailyUptime[dayKey]) {
@@ -4595,7 +4612,7 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
     while (remaining > 0) {
       const dayKey = cursor.toISOString().split('T')[0];
       const endOfDay = new Date(cursor);
-      endOfDay.setHours(23, 59, 59, 999);
+      endOfDay.setUTCHours(23, 59, 59, 999);
       const minutesInDay = Math.min(remaining, (endOfDay.getTime() - cursor.getTime()) / 60000);
 
       if (dailyUptime[dayKey]) {
@@ -4608,13 +4625,24 @@ app.get('/api/machines/:id/uptime', authenticateToken, async (req, res) => {
     }
 
     // Calcular porcentajes
-    const result = Object.values(dailyUptime).map((d) => {
+    // total_minutes real: en el dia del alta (o el de hoy) es parcial, no 1440.
+    const dias = Object.values(dailyUptime).map((d) => {
       const total = d.online_minutes + d.offline_minutes;
+      d.total_minutes = Math.round(total);
+      d.online_minutes = Math.round(d.online_minutes);
+      d.offline_minutes = Math.round(d.offline_minutes);
       d.percentage = total > 0 ? Math.round((d.online_minutes / total) * 100) : 0;
       return d;
     });
-
-    res.json(result);
+    // Disponibilidad global correcta = tiempo online / tiempo OBSERVADO (no el
+    // promedio de dias de distinta duracion). Se expone en headers para no
+    // cambiar la forma (array) que ya consumen web y movil.
+    const obsOnline = dias.reduce((a, d) => a + d.online_minutes, 0);
+    const obsTotal = dias.reduce((a, d) => a + d.online_minutes + d.offline_minutes, 0);
+    const overall = obsTotal > 0 ? Math.round((obsOnline / obsTotal) * 100) : null;
+    res.set('X-Uptime-Overall', overall === null ? '' : String(overall));
+    res.set('X-Uptime-Observed-Minutes', String(obsTotal));
+    res.json(dias);
   } catch (error) {
     console.error('Error en uptime:', error);
     res.status(500).json({ error: 'Error interno' });

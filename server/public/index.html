@@ -2578,7 +2578,11 @@ async function loadUptime(id,days) {
 function buildUptimeModal() {
   const m=machines.find(x=>x.id===activeModal.machineId);
   const data=activeModal.data||[];
-  const avg=data.length>0?Math.round(data.reduce((a,d)=>a+d.percentage,0)/data.length):0;
+  // Disponibilidad = tiempo online / tiempo OBSERVADO, no el promedio de dias
+  // (el dia del alta y el de hoy son parciales, no 1440 min).
+  const obsOnline = data.reduce((a,d)=>a+(d.online_minutes||0),0);
+  const obsTotal = data.reduce((a,d)=>a+(d.online_minutes||0)+(d.offline_minutes||0),0);
+  const avg = obsTotal>0 ? Math.round(obsOnline/obsTotal*100) : 0;
   const hColor=avg>=95?'#4CAF50':avg>=80?'#FF9800':'#F44336';
   return `<div class="modal-overlay" onmousedown="if(event.target===this)closeModal()">
   <div class="modal-box">
