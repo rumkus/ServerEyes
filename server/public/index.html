@@ -2539,9 +2539,9 @@ function buildDetailModal() {
       ${m.geo_city?`<div style="grid-column:1/-1"><span style="color:#999">Ubicación:</span><br><strong>📍 ${m.geo_city}, ${m.geo_region}, ${m.geo_country}</strong></div>`:''}
       ${m.notes?`<div style="grid-column:1/-1"><span style="color:#999">Notas:</span><br><span style="color:#555;font-size:12px">${m.notes}</span></div>`:''}
     </div>
-    ${cpu!=null?`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#666">CPU</span><span style="font-weight:700;color:${colorPct(cpu)}">${cpu}%</span></div><div style="height:6px;background:#f0f2f5;border-radius:3px;overflow:hidden"><div style="height:100%;width:${cpu}%;background:${colorPct(cpu)};border-radius:3px"></div></div></div>`:''}
-    ${ramPct!=null?`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#666">RAM</span><span style="font-weight:700;color:${colorPct(ramPct,75,90)}">${m.ram_usage}/${m.ram_total} GB (${ramPct}%)</span></div><div style="height:6px;background:#f0f2f5;border-radius:3px;overflow:hidden"><div style="height:100%;width:${ramPct}%;background:${colorPct(ramPct,75,90)};border-radius:3px"></div></div></div>`:''}
-    ${diskHtml?`<div style="margin-top:6px">${diskHtml}</div>`:''}
+    ${cpu!=null?`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#666">CPU</span><span style="font-weight:700;color:${colorPct(cpu)}">${cpu}%</span></div><div style="height:6px;background:#f0f2f5;border-radius:3px;overflow:hidden"><div style="height:100%;width:${cpu}%;background:${colorPct(cpu)};border-radius:3px"></div></div></div>`:`<div style="font-size:12px;color:#888;margin-bottom:6px">CPU: <em style="color:#999">${m.is_online?'esperando primer reporte…':'sin datos'}</em></div>`}
+    ${ramPct!=null?`<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="color:#666">RAM</span><span style="font-weight:700;color:${colorPct(ramPct,75,90)}">${m.ram_usage}/${m.ram_total} GB (${ramPct}%)</span></div><div style="height:6px;background:#f0f2f5;border-radius:3px;overflow:hidden"><div style="height:100%;width:${ramPct}%;background:${colorPct(ramPct,75,90)};border-radius:3px"></div></div></div>`:`<div style="font-size:12px;color:#888;margin-bottom:6px">RAM: <em style="color:#999">${m.is_online?'esperando primer reporte…':'sin datos'}</em></div>`}
+    ${diskHtml?`<div style="margin-top:6px">${diskHtml}</div>`:`<div style="font-size:12px;color:#888;margin-top:6px">Discos: <em style="color:#999">${m.is_online?'esperando primer reporte…':'sin datos'}</em></div>`}
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px">
       <button class="modal-btn sm" style="border-radius:8px" onclick="openUptime(${m.id})">📊 Uptime</button>
       <button class="modal-btn sm" style="border-radius:8px" onclick="openIpHistory(${m.id})">🌐 IPs</button>
@@ -3012,7 +3012,7 @@ function buildDiskModal() {
   <div class="modal-box">
     <div class="modal-header"><h2>💾 Discos — ${m?.machine_name||''}</h2><button class="modal-close" onclick="closeModal()">Cerrar</button></div>
     <p style="font-size:13px;color:#999;margin-bottom:14px">Seleccioná los discos a mostrar en el resumen. Sin selección: se muestran todos.</p>
-    ${allDisks.length===0?'<p style="color:#ccc;text-align:center;padding:20px">Sin datos de disco.</p>':allDisks.map(disk=>{
+    ${allDisks.length===0?`<p style="color:#999;text-align:center;padding:20px">${m&&m.is_online?'Esperando el primer reporte del agente…':'Sin datos de disco.'}</p>`:allDisks.map(disk=>{
       const pct=disk.total>0?Math.round(disk.used/disk.total*100):0;
       const c=colorPct(pct,80,92);
       const checked=mon.includes(disk.drive);

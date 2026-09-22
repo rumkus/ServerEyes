@@ -182,39 +182,42 @@ function getOSInfo() {
 function getSystemMetrics() {
   return new Promise((resolve) => {
     const { exec } = require('child_process');
-    exec('wmic cpu get loadpercentage /value', (err, cpuOut) => {
-      let cpuUsage = null;
-      if (!err) {
-        const match = cpuOut.match(/LoadPercentage=(\d+)/);
-        if (match) cpuUsage = parseInt(match[1]);
-      }
-      const totalMem = os.totalmem();
-      const freeMem = os.freemem();
-      const ramTotal = Math.round(totalMem / 1024 / 1024 / 1024 * 10) / 10;
-      const ramUsage = Math.round((totalMem - freeMem) / 1024 / 1024 / 1024 * 10) / 10;
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const ramTotal = Math.round(totalMem / 1024 / 1024 / 1024 * 10) / 10;
+    const ramUsage = Math.round((totalMem - freeMem) / 1024 / 1024 / 1024 * 10) / 10;
 
-      exec('wmic logicaldisk where "DriveType=3" get DeviceID,Size,FreeSpace /format:csv', (err2, diskOut) => {
-        const disks = [];
-        let diskUsage = null, diskTotal = null;
-        if (!err2) {
-          const lines = diskOut.trim().split('\n').filter(l => l.trim() && !l.startsWith('Node'));
-          for (const line of lines) {
-            const parts = line.trim().split(',');
-            if (parts.length >= 4) {
-              const drive = parts[1];
-              const free = parseInt(parts[2]);
-              const total = parseInt(parts[3]);
-              if (total > 0) {
-                const dTotal = Math.round(total / 1024 / 1024 / 1024 * 10) / 10;
-                const dUsage = Math.round((total - free) / 1024 / 1024 / 1024 * 10) / 10;
-                disks.push({ drive, total: dTotal, used: dUsage, free: Math.round(free / 1024 / 1024 / 1024 * 10) / 10 });
-                if (drive === 'C:') { diskTotal = dTotal; diskUsage = dUsage; }
-              }
-            }
+    // CPU y discos con CIM (PowerShell), NO con wmic: Microsoft saco wmic de
+    // Windows 11 24H2 en adelante y ahi CPU/discos volvian vacios. Una sola
+    // llamada devuelve ambos en JSON.
+    const ps = "powershell -NoProfile -NonInteractive -Command \"$ErrorActionPreference='SilentlyContinue';"
+      + "$c=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average;"
+      + "$d=Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{ drive=$_.DeviceID; size=[int64]$_.Size; free=[int64]$_.FreeSpace } };"
+      + "@{ cpu=$c; disks=@($d) } | ConvertTo-Json -Compress -Depth 4\"";
+
+    exec(ps, { timeout: 15000, windowsHide: true }, (err, out) => {
+      let cpuUsage = null;
+      const disks = [];
+      let diskUsage = null, diskTotal = null;
+      try {
+        const parsed = JSON.parse(out);
+        // CPU: 0 es un valor VALIDO (no lo confundas con "sin dato"). null si PS
+        // no devolvio numero (VM sin LoadPercentage, error, timeout).
+        if (parsed && parsed.cpu !== null && parsed.cpu !== undefined && Number.isFinite(Number(parsed.cpu))) {
+          cpuUsage = Math.round(Number(parsed.cpu));
+        }
+        const arr = Array.isArray(parsed.disks) ? parsed.disks : (parsed.disks ? [parsed.disks] : []);
+        for (const dsk of arr) {
+          const total = Number(dsk.size), free = Number(dsk.free);
+          if (Number.isFinite(total) && total > 0) {
+            const dTotal = Math.round(total / 1024 / 1024 / 1024 * 10) / 10;
+            const dUsage = Math.round((total - free) / 1024 / 1024 / 1024 * 10) / 10;
+            disks.push({ drive: dsk.drive, total: dTotal, used: dUsage, free: Math.round(free / 1024 / 1024 / 1024 * 10) / 10 });
+            if (dsk.drive === 'C:') { diskTotal = dTotal; diskUsage = dUsage; }
           }
         }
-        resolve({ cpu_usage: cpuUsage, ram_usage: ramUsage, ram_total: ramTotal, disk_usage: diskUsage, disk_total: diskTotal, disks });
-      });
+      } catch (e) { /* PS fallo/timeout/JSON invalido: cpu_usage=null y disks=[] */ }
+      resolve({ cpu_usage: cpuUsage, ram_usage: ramUsage, ram_total: ramTotal, disk_usage: diskUsage, disk_total: diskTotal, disks });
     });
   });
 }
