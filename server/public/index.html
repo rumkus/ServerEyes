@@ -2934,7 +2934,29 @@ async function forzarDns(id) {
   else avisar('Error', r.data?.error||'No se pudo actualizar', '⚠️');
   loadMachines();
 }
+// Valida los umbrales del formulario de edicion. Devuelve un mensaje de error
+// (para mostrarselo al usuario) o null si esta todo bien. No modifica los campos.
+function validarUmbralesUI() {
+  const chk = (id, tipo, label) => {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const v = el.value;
+    if (v === '' || v == null) return null;         // vacio = deshabilitado
+    const n = Number(v);
+    if (!Number.isFinite(n)) return label + ' debe ser un numero valido.';
+    if (n < 0) return label + ' no puede ser negativo.';
+    if (tipo === 'pct' && n > 100) return label + ' no puede superar 100%.';
+    return null;
+  };
+  return chk('ed-alert-cpu', 'pct', 'El umbral de CPU')
+    || chk('ed-alert-ram', 'pct', 'El umbral de RAM')
+    || chk('ed-alert-disk', 'pct', 'El umbral de disco')
+    || chk('ed-alert-ping', 'ms', 'El umbral de ping');
+}
+
 async function saveEdit() {
+  const errUmbral = validarUmbralesUI();
+  if (errUmbral) { avisar('Valor invalido', errUmbral, '⚠️'); return; }
   const parseAlert = (id) => { const v=document.getElementById(id)?.value; return v?parseInt(v):null; };
   const data={
     machine_name: document.getElementById('ed-name').value.trim(),

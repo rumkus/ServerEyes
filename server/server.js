@@ -1495,6 +1495,10 @@ app.post('/api/pending-changes', authenticateToken, async (req, res) => {
       ownerId = u.rows[0]?.user_id;
     }
     if (!ownerId || ownerId === req.user.id) return res.status(400).json({ error: 'Solo para recursos compartidos' });
+    if (change_type === 'edit' && target_type === 'machine' && data && typeof data === 'object') {
+      const umbral = validarUmbralesAlerta(data);
+      if (umbral.error) return res.status(400).json({ error: umbral.error });
+    }
     const result = await pool.query(
       'INSERT INTO pending_changes (requester_id, owner_id, change_type, target_type, target_id, target_name, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
       [req.user.id, ownerId, change_type, target_type, target_id, target_name || '', JSON.stringify(data)]
@@ -1532,8 +1536,16 @@ async function resolvePendingChange(changeId, ownerId, doApply) {
   if (doApply && change.data) {
     const d = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
     if (change.change_type === 'edit' && change.target_type === 'machine') {
+      // Aunque se valido al crear el pending-change, revalidamos al aplicar por
+      // si el dato quedo viejo: un umbral invalido nunca debe llegar a la base.
+      const umbral = validarUmbralesAlerta(d);
+      if (umbral.error) {
+        await pool.query('UPDATE pending_changes SET status = $1, resolved_at = NOW(), resolved_by = $2 WHERE id = $3', ['rejected', ownerId, changeId]);
+        const err = new Error(`Cambio rechazado: ${umbral.error}`); err.code = 'UMBRAL_INVALIDO'; throw err;
+      }
+      const norm = { ...d, ...umbral.values };
       const sets = []; const vals = []; let i = 1;
-      for (const [k, v] of Object.entries(d)) {
+      for (const [k, v] of Object.entries(norm)) {
         if (['machine_name','notes','alert_cpu','alert_ram','alert_disk','alert_ping','alert_offline','rdp_port','rdp_user','mac_address'].includes(k)) {
           sets.push(`${k} = $${i}`); vals.push(v); i++;
         }
@@ -2392,9 +2404,38 @@ app.post('/api/machines', authenticateToken, async (req, res) => {
 });
 
 // Actualizar maquina (nombre, grupo, orden)
+// Valida y normaliza los umbrales de alerta. Semantica: undefined = no tocar;
+// null o '' = deshabilitar (se guarda NULL). Un % debe ser finito en [0,100];
+// el ping, finito y >= 0. Devuelve { error, values } donde values trae solo las
+// claves presentes, ya normalizadas a entero o null. No cambia nada en silencio:
+// si algo es invalido, error queda seteado y el llamador NO debe guardar.
+function validarUmbralesAlerta(body) {
+  const values = {};
+  const chequear = (k, tipo, label) => {
+    if (!(k in body)) return null;                 // no se toca
+    const v = body[k];
+    if (v === null || v === '') { values[k] = null; return null; } // deshabilitar
+    const n = Number(v);
+    if (typeof v === 'boolean' || !Number.isFinite(n)) return label + ' debe ser un numero valido';
+    if (n < 0) return label + ' no puede ser negativo';
+    if (tipo === 'pct' && n > 100) return label + ' no puede superar 100';
+    values[k] = Math.round(n);
+    return null;
+  };
+  const error = chequear('alert_cpu', 'pct', 'El umbral de CPU')
+    || chequear('alert_ram', 'pct', 'El umbral de RAM')
+    || chequear('alert_disk', 'pct', 'El umbral de disco')
+    || chequear('alert_ping', 'ms', 'El umbral de ping');
+  return { error: error || null, values };
+}
+
 app.put('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
-    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes, alert_cpu, alert_ram, alert_disk, alert_ping, alert_offline, monitored_disks } = req.body;
+    const { machine_name, grupo, orden, dns_update_url, dns_host, check_ip_change, notes, alert_offline, monitored_disks } = req.body;
+    // Validacion de umbrales: rechaza invalidos con 400 en vez de guardarlos.
+    const umbral = validarUmbralesAlerta(req.body);
+    if (umbral.error) return res.status(400).json({ error: umbral.error });
+    const { alert_cpu, alert_ram, alert_disk, alert_ping } = umbral.values;
     const fields = [];
     const values = [];
     let idx = 1;
