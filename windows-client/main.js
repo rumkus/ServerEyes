@@ -8,7 +8,7 @@ const http = require('http');
 const { app, Tray, Menu, nativeImage, BrowserWindow, ipcMain, dialog } = electron;
 const { RegistroComandos } = require('./comandos');
 
-const CLIENT_VERSION = '1.2.0';
+const CLIENT_VERSION = '1.2.1';
 let tray = null;
 const _clientLogs = [];
 function clog(msg) { const line = `[${new Date().toLocaleString()}] ${msg}`; _clientLogs.push(line); if (_clientLogs.length > 50) _clientLogs.splice(0, _clientLogs.length - 50); }

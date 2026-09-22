@@ -9,7 +9,7 @@ const { execSync } = require('child_process');
 const { spawn } = require('child_process');
 const { RegistroComandos } = require('./comandos');
 
-const AGENT_VERSION = '1.4.0';
+const AGENT_VERSION = '1.4.1';
 const EXE_PATH = process.execPath;
 const EXE_DIR = path.dirname(EXE_PATH);
 const CONFIG_FILE = path.join(EXE_DIR, 'servereyes-config.json');
