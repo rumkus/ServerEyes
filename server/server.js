@@ -9,6 +9,7 @@ const { PairingStore } = require('./lib/pairing');
 const urlGuard = require('./lib/url-guard');
 const sesiones = require('./lib/sesiones');
 const comandos = require('./lib/comandos');
+const offlineDet = require('./lib/offline');
 
 // Temporizadores de la aplicacion (detector offline, SSL, URLs, reportes...).
 // Se registran para poder detenerlos: los tests importan este modulo y
@@ -1699,14 +1700,20 @@ app.post('/api/fcm-token', authenticateToken, async (req, res) => {
 });
 
 // Funcion para enviar push a un usuario
-async function sendPush(userId, title, body, data = {}) {
+async function sendPush(userId, title, body, data = {}, opts = {}) {
+  // Best-effort por defecto (no relanza). Con opts.throwOnError se usa cuando el
+  // llamador NECESITA saber si no se pudo entregar (p. ej. el detector de offline,
+  // para no marcar la alerta como enviada antes de entregarla y poder reintentar).
+  const forzar = opts.throwOnError === true;
   try {
     const user = await pool.query('SELECT fcm_token, email, email_notifications, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [userId]);
     const u = user.rows[0];
-    if (!u) return;
+    if (!u) { if (forzar) throw new Error(`usuario ${userId} sin destinatario`); return; }
+    let huboCanal = false, entregado = false, ultimoError = null;
 
     // Push notification
     if (firebaseAdmin && u.fcm_token) {
+      huboCanal = true;
       try {
         const strData = {};
         for (const [k, v] of Object.entries(data)) strData[k] = String(v);
@@ -1718,8 +1725,10 @@ async function sendPush(userId, title, body, data = {}) {
           android: { priority: 'high', notification: { sound: 'default', channelId: 'servereyes' } }
         });
         console.log(`[PUSH] Enviado a user ${userId}: ${title}`);
+        entregado = true;
       } catch (err) {
         console.error(`[PUSH] Error enviando a user ${userId}:`, err.message);
+        ultimoError = err;
         if (err.code === 'messaging/registration-token-not-registered') {
           await pool.query('UPDATE users SET fcm_token = NULL WHERE id = $1', [userId]);
         }
@@ -1728,15 +1737,21 @@ async function sendPush(userId, title, body, data = {}) {
 
     // Email notification (usa SMTP del usuario si tiene, sino el global)
     if (u.email_notifications !== false && u.email) {
+      huboCanal = true;
       const htmlBody = `<p style="font-size:15px;color:#333;margin:0 0 12px"><strong>${title}</strong></p><p style="color:#666;margin:0">${body}</p>`;
-      if (u.smtp_user && u.smtp_pass) {
-        sendEmailWithUserSMTP(u, title, htmlBody);
-      } else {
-        sendEmail(u.email, title, htmlBody);
-      }
+      try {
+        if (u.smtp_user && u.smtp_pass) await sendEmailWithUserSMTP(u, title, htmlBody);
+        else await sendEmail(u.email, title, htmlBody);
+        entregado = true; // nota: sendEmail/SMTP son best-effort internamente
+      } catch (e) { ultimoError = e; }
     }
+
+    // Con throwOnError: fallar solo si habia a quien avisar y ningun canal entrego.
+    if (forzar && huboCanal && !entregado) throw (ultimoError || new Error('no se pudo entregar la alerta'));
+    if (forzar && !huboCanal) throw new Error(`usuario ${userId} sin canal de aviso configurado`);
   } catch (err) {
     console.error(`[NOTIFY] Error para user ${userId}:`, err.message);
+    if (forzar) throw err;
   }
 }
 
@@ -2853,46 +2868,20 @@ dentroDe(revisarCertificados, 45000);
 
 // ============== DETECTOR DE OFFLINE ==============
 
-// Cada 30 segundos, marcar maquinas sin heartbeat en 60s como offline
+// Cada 30s, en dos pasos (antirrebote, ver lib/offline.js):
+//  1) marcar offline (solo estado del panel) lo que no late hace MARK_SEG;
+//  2) alertar + abrir incidente SOLO lo que sostuvo el silencio >= ALERT_SEG.
+// Asi un micro-corte de red/DNS que se recupera antes de ALERT_SEG no manda
+// correo ni abre incidente (eran la mayoria de las "caidas" falsas).
 cadaTanto(async () => {
   try {
-    const offlineMachines = await pool.query(
-      `UPDATE machines SET is_online = false
-       WHERE is_online = true
-       AND last_heartbeat < NOW() - INTERVAL '60 seconds'
-       RETURNING *`
-    );
-
-    for (const machine of offlineMachines.rows) {
-      if (!machine.offline_notified) {
-        console.log(`[OFFLINE] ${machine.machine_name} (${machine.public_ip})`);
-        await pool.query('INSERT INTO uptime_log (machine_id, status) VALUES ($1, $2)', [machine.id, 'offline']);
-        await pool.query(
-          'UPDATE machines SET offline_notified = true WHERE id = $1',
-          [machine.id]
-        );
-        // Auto-crear incidente
-        try {
-          const inc = await pool.query(
-            `INSERT INTO incidents (machine_id, user_id, title, status, started_at)
-             VALUES ($1, $2, $3, 'open', NOW()) RETURNING id`,
-            [machine.id, machine.user_id, `${machine.machine_name} offline`]
-          );
-          await pool.query(
-            `INSERT INTO incident_events (incident_id, event_type, message) VALUES ($1, 'detected', $2)`,
-            [inc.rows[0].id, `Maquina dejo de responder. Ultima IP: ${machine.public_ip || 'desconocida'}`]
-          );
-        } catch (ie) { console.error('Error creando incidente:', ie.message); }
-        if (machine.alert_offline !== false) {
-          const inMaint = await isInMaintenance(machine.id, machine.user_id);
-          if (!inMaint) {
-            sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) });
-          } else {
-            console.log(`[MAINT] Alerta suprimida para ${machine.machine_name} (en ventana de mantenimiento)`);
-          }
-        }
-      }
-    }
+    await offlineDet.evaluarOffline(pool, {
+      log: (m) => console.log(m),
+      enMantenimiento: (id, uid) => isInMaintenance(id, uid),
+      // notificar RECHAZA si no se pudo entregar -> evaluarOffline revierte
+      // offline_notified y reintenta en la proxima pasada (no pierde la alerta).
+      notificar: (machine) => sendPush(machine.user_id, '⚠️ Maquina OFFLINE', `${machine.machine_name} dejo de responder`, { type: 'offline', machineId: String(machine.id) }, { throwOnError: true }),
+    });
   } catch (error) {
     console.error('Error en detector offline:', error);
   }
