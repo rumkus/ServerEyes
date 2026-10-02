@@ -10,6 +10,7 @@ const urlGuard = require('./lib/url-guard');
 const sesiones = require('./lib/sesiones');
 const comandos = require('./lib/comandos');
 const offlineDet = require('./lib/offline');
+const { quitarNulos } = require('./lib/sanitizar');
 
 // Temporizadores de la aplicacion (detector offline, SSL, URLs, reportes...).
 // Se registran para poder detenerlos: los tests importan este modulo y
@@ -1964,6 +1965,12 @@ async function actualizarDns(m, ip) {
 // Heartbeat desde el cliente Windows
 app.post('/api/heartbeat', async (req, res) => {
   try {
+    // Postgres no acepta U+0000 en text/jsonb: limpiar el byte nulo SOLO de
+    // los campos que se persisten (strings y anidados), sin tocar machine_key
+    // ni datos de autenticacion. Ver lib/sanitizar.js.
+    for (const campo of ['machine_name','public_ip','local_ip','os_info','agent_logs','disks','services','open_ports','agent_config','backup_status','security_info','inventory']) {
+      if (req.body[campo] !== undefined) req.body[campo] = quitarNulos(req.body[campo]);
+    }
     const { machine_key, machine_name, public_ip, local_ip, os_info, ping_ms, download_mbps, cpu_usage, ram_usage, ram_total, disk_usage, disk_total, disks, agent_version: reportedVersion, agent_logs, agent_type, services, open_ports, agent_config, backup_status, security_info, inventory } = req.body;
 
     if (!machine_key) {
