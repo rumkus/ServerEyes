@@ -1377,7 +1377,7 @@ app.post('/api/organization/invite', authenticateToken, async (req, res) => {
     const inviter = await pool.query('SELECT email, nombre, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from FROM users WHERE id = $1', [req.user.id]);
     const inviterData = inviter.rows[0];
     const inviterName = inviterData?.nombre || inviterData?.email || '';
-    const apkUrl = 'https://github.com/rumkus/ServerEyes/releases/latest';
+    const apkUrl = 'https://github.com/rumkus/ServerEyes-releases/releases/latest';
     const inviteHtml = `<h3 style="color:#333">Te invitaron a unirte a <strong>${orgName}</strong></h3>
        <p style="color:#555"><strong>${inviterName}</strong> de la empresa <strong>${orgName}</strong> te invito a ser parte de su equipo en ServerEyes.</p>
        <div style="background:#f0f7ff;border-radius:8px;padding:16px;text-align:center;margin:16px 0">
