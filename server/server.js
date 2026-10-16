@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const { PairingStore } = require('./lib/pairing');
 const urlGuard = require('./lib/url-guard');
+const { evaluarSalud } = require('./lib/health-check');
 const sesiones = require('./lib/sesiones');
 const comandos = require('./lib/comandos');
 const offlineDet = require('./lib/offline');
@@ -919,6 +920,14 @@ async function initDB() {
   // Destinatarios extra por monitor: al cliente dueño de ese sitio le llegan
   // los avisos de su propio sitio, sin darle acceso a la cuenta.
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS notify_emails JSONB DEFAULT '[]'`).catch(() => {});
+  // Health-check de apps/APIs: status exacto + cuerpo JSON esperado + politica
+  // estricta de redireccion/TLS. Columnas opcionales; los monitores "clasicos"
+  // (sin estas) conservan la regla historica (sano = 2xx/3xx).
+  await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS expected_json JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS health_mode BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS enforce_tls BOOLEAN DEFAULT false`).catch(() => {});
+  await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS last_error_kind TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE url_check_history ADD COLUMN IF NOT EXISTS error_kind TEXT`).catch(() => {});
 
   dentroDe(censarVersiones, 20000);
   cadaTanto(censarVersiones, 60 * 60 * 1000);
@@ -1160,7 +1169,37 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17)`).catch(() => {});
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
 
+  await sembrarControlesStaging();
+
   console.log('Base de datos inicializada');
+}
+
+// Controles de salud de Linde/staging (web/admin/api). Idempotente: no recrea si
+// ya existen (por URL). Quedan bajo el primer admin; los destinatarios extra se
+// cargan aparte por el mecanismo opt-in (no se hardcodea ningun correo).
+// Se puede desactivar con SEED_STAGING_CONTROLS=0.
+async function sembrarControlesStaging() {
+  if (process.env.SEED_STAGING_CONTROLS === '0') return;
+  try {
+    const admin = await pool.query(`SELECT id FROM users WHERE is_admin=true ORDER BY id ASC LIMIT 1`);
+    if (!admin.rows.length) { console.log('[SEED] aun no hay admin; controles de staging no sembrados'); return; }
+    const ownerId = admin.rows[0].id;
+    const controles = [
+      { url: 'https://web-staging-6538.up.railway.app/health/ready',   name: 'Linde/staging Web',   service: 'web' },
+      { url: 'https://admin-staging-33d1.up.railway.app/health/ready', name: 'Linde/staging Admin', service: 'admin' },
+      { url: 'https://api-staging-46412.up.railway.app/health/ready',  name: 'Linde/staging API',   service: 'api' }
+    ];
+    for (const c of controles) {
+      await pool.query(
+        `INSERT INTO url_monitors
+           (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails, health_mode, expected_json, enforce_tls, notify_down)
+         SELECT $1, $2, $3, 'GET', 200, 10000, 300, '[]'::jsonb, true, $4::jsonb, true, true
+         WHERE NOT EXISTS (SELECT 1 FROM url_monitors WHERE url = $2)`,
+        [ownerId, c.url, c.name, JSON.stringify({ status: 'ok', service: c.service })]
+      );
+    }
+    console.log('[SEED] controles de Linde/staging asegurados (web/admin/api)');
+  } catch (e) { console.error('[SEED] controles staging:', e.message); }
 }
 
 // Audit helper
@@ -4839,12 +4878,28 @@ function isInMaintenance(machineId, userId) {
 
 // ============== URL/HTTP MONITORING ==============
 
+// Estado mostrable de un monitor. Distingue "sin comprobar" (nunca corrio) de
+// "saludable", y "desactualizado" (la ultima medicion quedo vieja porque el
+// scheduler no corrio) para no presentar un dato viejo como si fuera actual.
+// La edad viene calculada en SQL (edad_check_seg): comparar un TIMESTAMP de
+// Postgres con un Date de JS es fragil por zona horaria.
+function estadoUrlMonitor(m, schedPausado) {
+  if (m.last_check == null || m.edad_check_seg == null) return 'sin_comprobar';
+  if (schedPausado) return 'desactualizado';
+  const intervalo = (m.interval_seconds || 300);
+  if (Number(m.edad_check_seg) > intervalo * 2 + 60) return 'desactualizado';
+  return m.is_up ? 'saludable' : 'caido';
+}
+
+const COLS_EDAD_URL = `, EXTRACT(EPOCH FROM (NOW() - um.last_check))::int AS edad_check_seg,
+       CASE WHEN um.is_up = false THEN EXTRACT(EPOCH FROM (NOW() - um.down_since))::int END AS outage_seconds`;
+
 app.get('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
-    const own = await pool.query(`SELECT um.*, false as is_shared${SUB_DESTINATARIOS_URL}
+    const own = await pool.query(`SELECT um.*, false as is_shared${SUB_DESTINATARIOS_URL}${COLS_EDAD_URL}
        FROM url_monitors um WHERE um.user_id = $1 ORDER BY um.created_at DESC`, [req.user.id]);
     const shared = await pool.query(
-      `SELECT um.*, true as is_shared, u.email as owner_email, u.nombre as owner_name${SUB_DESTINATARIOS_URL}
+      `SELECT um.*, true as is_shared, u.email as owner_email, u.nombre as owner_name${SUB_DESTINATARIOS_URL}${COLS_EDAD_URL}
        FROM url_monitors um
        JOIN url_shares us ON us.url_id = um.id
        LEFT JOIN users u ON um.user_id = u.id
@@ -4852,7 +4907,23 @@ app.get('/api/url-monitors', authenticateToken, async (req, res) => {
        ORDER BY um.created_at DESC`,
       [req.user.id]
     );
-    res.json([...own.rows, ...shared.rows]);
+    // ¿El verificador esta corriendo? Si el ultimo latido quedo viejo, las
+    // mediciones estan pausadas y todo monitor se marca 'desactualizado'.
+    let schedPausado = false, ultimoTick = null;
+    try {
+      const t = await pool.query(`SELECT value FROM app_settings WHERE key='url_checker_last_tick'`);
+      if (t.rows.length && t.rows[0].value) {
+        ultimoTick = t.rows[0].value;
+        schedPausado = (Date.now() - Date.parse(ultimoTick)) > URL_CHECKER_INTERVAL_MS * 3;
+      }
+    } catch (e) {}
+    const anotar = (m) => Object.assign(m, {
+      estado: estadoUrlMonitor(m, schedPausado),
+      // outage_seconds ya viene de SQL (o null si esta arriba)
+      scheduler_pausado: schedPausado,
+      scheduler_ultimo_tick: ultimoTick
+    });
+    res.json([...own.rows.map(anotar), ...shared.rows.map(anotar)]);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -4860,16 +4931,20 @@ app.get('/api/url-monitors', authenticateToken, async (req, res) => {
 
 app.post('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
-    const { url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails } = req.body;
+    const { url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails, health_mode, expected_json, enforce_tls } = req.body;
     if (!url) return res.status(400).json({ error: 'url requerido' });
     try { await urlGuard.validarDestino(url); }
     catch (e) { return res.status(400).json({ error: e.message }); }
+    if (expected_json !== undefined && expected_json !== null && (typeof expected_json !== 'object' || Array.isArray(expected_json))) {
+      return res.status(400).json({ error: 'expected_json debe ser un objeto {clave: valor}' });
+    }
     const correos = notify_emails === undefined ? [] : normalizarCorreos(notify_emails);
     if (correos && correos.error) return res.status(400).json({ error: correos.error });
     if (correos === null) return res.status(400).json({ error: 'notify_emails debe ser una lista' });
     const result = await pool.query(
-      'INSERT INTO url_monitors (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-      [req.user.id, url, name || url, method || 'GET', expected_status || 200, timeout_ms || 10000, interval_seconds || 300, JSON.stringify(correos)]
+      'INSERT INTO url_monitors (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails, health_mode, expected_json, enforce_tls) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+      [req.user.id, url, name || url, method || 'GET', expected_status || 200, timeout_ms || 10000, interval_seconds || 300, JSON.stringify(correos),
+       !!health_mode, expected_json ? JSON.stringify(expected_json) : null, !!enforce_tls]
     );
     const duenio = await traerDuenio(req.user.id);
     if (duenio) {
@@ -4885,10 +4960,13 @@ app.post('/api/url-monitors', authenticateToken, async (req, res) => {
 
 app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
   try {
-    const { url, name, method, expected_status, timeout_ms, interval_seconds, is_active, notify_emails } = req.body;
+    const { url, name, method, expected_status, timeout_ms, interval_seconds, is_active, notify_emails, health_mode, expected_json, enforce_tls } = req.body;
     if (url !== undefined && url !== null) {
       try { await urlGuard.validarDestino(url); }
       catch (e) { return res.status(400).json({ error: e.message }); }
+    }
+    if (expected_json !== undefined && expected_json !== null && (typeof expected_json !== 'object' || Array.isArray(expected_json))) {
+      return res.status(400).json({ error: 'expected_json debe ser un objeto {clave: valor}' });
     }
     let correos = null;
     if (notify_emails !== undefined) {
@@ -4900,10 +4978,16 @@ app.put('/api/url-monitors/:id', authenticateToken, async (req, res) => {
       `UPDATE url_monitors SET url=COALESCE($1,url), name=COALESCE($2,name), method=COALESCE($3,method),
        expected_status=COALESCE($4,expected_status), timeout_ms=COALESCE($5,timeout_ms),
        interval_seconds=COALESCE($6,interval_seconds), is_active=COALESCE($7,is_active),
-       notify_emails=COALESCE($10,notify_emails)
+       notify_emails=COALESCE($10,notify_emails),
+       health_mode=COALESCE($11,health_mode), enforce_tls=COALESCE($12,enforce_tls),
+       expected_json=CASE WHEN $13::text IS NULL THEN expected_json ELSE $14::jsonb END
        WHERE id=$8 AND user_id=$9 RETURNING *`,
       [url, name, method, expected_status, timeout_ms, interval_seconds, is_active, req.params.id, req.user.id,
-       correos === null ? null : JSON.stringify(correos)]
+       correos === null ? null : JSON.stringify(correos),
+       health_mode === undefined ? null : !!health_mode,
+       enforce_tls === undefined ? null : !!enforce_tls,
+       expected_json === undefined ? null : 'set',
+       expected_json ? JSON.stringify(expected_json) : null]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
     if (correos !== null) {
@@ -4977,23 +5061,33 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // resuelva el DNS en ese momento. Las URLs guardadas antes de esa validacion
 // pasan por el mismo filtro en cada chequeo: si apuntan adentro, el monitor
 // queda caido con el motivo en last_error y no se hace ninguna conexion.
-const followRedirects = (urlStr, method, timeoutMs, maxRedirects) =>
-  urlGuard.followRedirects(urlStr, method, timeoutMs, maxRedirects, { userAgent: URL_MONITOR_UA });
+const followRedirects = (urlStr, method, timeoutMs, maxRedirects, extra = {}) =>
+  urlGuard.followRedirects(urlStr, method, timeoutMs, maxRedirects, Object.assign({ userAgent: URL_MONITOR_UA }, extra));
 
-// Un intento suelto contra la URL. Nunca lanza: devuelve el resultado.
+// Un intento suelto contra la URL. Nunca lanza: devuelve el resultado ya evaluado.
+// Para monitores health_mode / con JSON esperado aplica la politica estricta
+// (status exacto + JSON + sin redireccion + TLS) de lib/health-check; el resto
+// mantiene la regla historica (sano = 2xx/3xx).
 async function probeUrl(mon) {
   const startTime = Date.now();
+  const spec = {
+    expected_status: mon.expected_status,
+    expected_json: mon.expected_json,
+    health_mode: mon.health_mode,
+    enforce_tls: mon.enforce_tls
+  };
+  const necesitaBody = !!(mon.health_mode || (mon.expected_json && Object.keys(mon.expected_json).length));
   try {
-    const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, 5);
-    const isUp = result.status >= 200 && result.status < 400;
-    return {
-      isUp,
-      status: result.status,
-      ms: Date.now() - startTime,
-      error: isUp ? null : `HTTP ${result.status}`
-    };
+    const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, 5,
+      necesitaBody ? { captureBody: 65536 } : {});
+    const v = evaluarSalud({
+      status: result.status, body: result.body, finalUrl: result.finalUrl,
+      redirects: result.redirects, tls: result.tls, error: null
+    }, spec);
+    return { isUp: v.ok, status: result.status, ms: Date.now() - startTime, error: v.ok ? null : v.detail, kind: v.kind };
   } catch (err) {
-    return { isUp: false, status: null, ms: Date.now() - startTime, error: err.message || 'Error desconocido' };
+    const v = evaluarSalud({ error: err }, spec);
+    return { isUp: false, status: null, ms: Date.now() - startTime, error: v.detail, kind: v.kind };
   }
 }
 
@@ -5001,11 +5095,12 @@ async function checkUrlMonitor(mon) {
   let probe = await probeUrl(mon);
   let attempts = 1;
   let lastError = probe.error;
+  let lastKind = probe.kind;
   while (!probe.isUp && attempts < URL_CHECK_RETRIES) {
     await sleep(URL_CHECK_RETRY_DELAY_MS);
     probe = await probeUrl(mon);
     attempts++;
-    if (probe.error) lastError = probe.error;
+    if (probe.error) { lastError = probe.error; lastKind = probe.kind; }
   }
 
   const isUp = probe.isUp;
@@ -5015,17 +5110,18 @@ async function checkUrlMonitor(mon) {
 
   await pool.query(
     `UPDATE url_monitors SET last_status=$1, last_response_ms=$2, last_check=NOW(), last_error=$3,
+     last_error_kind=$6,
      is_up=$4, down_since=CASE WHEN $4=true THEN NULL ELSE COALESCE(down_since, NOW()) END
      WHERE id=$5`,
-    [probe.status, probe.ms, isUp ? null : lastError, isUp, mon.id]
+    [probe.status, probe.ms, isUp ? null : lastError, isUp, mon.id, isUp ? null : lastKind]
   );
 
   // Historial: queda registro aunque la URL se recupere. Guardamos tambien los
   // fallos transitorios (isUp=true con attempts>1) para poder hacer post-mortem.
   await pool.query(
-    `INSERT INTO url_check_history (url_id, is_up, status, response_ms, error, attempts, notified)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [mon.id, isUp, probe.status, probe.ms, lastError, attempts, notify]
+    `INSERT INTO url_check_history (url_id, is_up, status, response_ms, error, attempts, notified, error_kind)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [mon.id, isUp, probe.status, probe.ms, lastError, attempts, notify, isUp ? null : lastKind]
   ).catch(e => console.error('[URL-MONITOR] No se pudo guardar historial:', e.message));
 
   if (notify && isUp) {
@@ -5046,11 +5142,36 @@ async function checkUrlMonitor(mon) {
   }
 }
 
+// Latido del verificador de URLs. Si entre un ciclo y el siguiente pasa mucho
+// mas que el intervalo (proceso dormido, reinicio, redeploy de Railway), queda
+// registrado como interrupcion: asi la UI no muestra una medicion vieja como si
+// fuera actual (ver el estado 'desactualizado'/'pausado' en GET /api/url-monitors).
+const URL_CHECKER_INTERVAL_MS = 60000;
+async function registrarTickUrlChecker() {
+  try {
+    const now = Date.now();
+    const prev = await pool.query(`SELECT value FROM app_settings WHERE key='url_checker_last_tick'`);
+    if (prev.rows.length && prev.rows[0].value) {
+      const prevMs = Date.parse(prev.rows[0].value);
+      const gap = now - prevMs;
+      if (isFinite(prevMs) && gap > URL_CHECKER_INTERVAL_MS * 3) {
+        console.warn(`[URL-MONITOR] Interrupcion del scheduler: ${Math.round(gap / 1000)}s sin chequear (ultimo tick ${prev.rows[0].value})`);
+        await pool.query(`INSERT INTO app_settings(key,value) VALUES('url_checker_last_gap',$1)
+          ON CONFLICT(key) DO UPDATE SET value=$1`,
+          [JSON.stringify({ at: new Date(now).toISOString(), gap_seconds: Math.round(gap / 1000), desde: prev.rows[0].value })]).catch(() => {});
+      }
+    }
+    await pool.query(`INSERT INTO app_settings(key,value) VALUES('url_checker_last_tick',$1)
+      ON CONFLICT(key) DO UPDATE SET value=$1`, [new Date(now).toISOString()]).catch(() => {});
+  } catch (e) { console.error('[URL-MONITOR] tick:', e.message); }
+}
+
 let urlCheckRunning = false;
 cadaTanto(async () => {
   if (urlCheckRunning) return; // evitamos solapar ciclos: con reintentos un ciclo puede pasar los 60s
   urlCheckRunning = true;
   try {
+    await registrarTickUrlChecker();
     const monitors = await pool.query(
       `SELECT um.*, u.id as owner_id FROM url_monitors um
        JOIN users u ON um.user_id = u.id

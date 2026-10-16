@@ -3485,11 +3485,25 @@ let sslMonitorsLoaded = false;
 
 function setMonitoresTab(t){ monitoresTab = t; render(); }
 
-// Estado real de un monitor HTTP segun lo que devuelve la API.
+// Estado real de un monitor HTTP segun lo que devuelve la API. Preferimos el
+// estado computado por el server (incluye 'desactualizado' = medicion vieja
+// porque el verificador no corrio: no se muestra un dato viejo como actual).
 function urlEstado(u){
   if (u.is_active === false) return 'paused';
-  if (u.last_check == null) return 'pending';
+  if (u.estado === 'sin_comprobar') return 'pending';
+  if (u.estado === 'desactualizado') return 'stale';
+  if (u.estado === 'saludable') return 'up';
+  if (u.estado === 'caido') return 'down';
+  if (u.last_check == null) return 'pending';   // fallback (respuesta sin 'estado')
   return u.is_up ? 'up' : 'down';
+}
+// Duracion legible a partir de segundos (para "caído hace ...").
+function duracionCorta(seg){
+  seg = Math.max(0, Math.round(Number(seg)||0));
+  if (seg < 60) return seg + 's';
+  if (seg < 3600) return Math.floor(seg/60) + 'm';
+  if (seg < 86400) return Math.floor(seg/3600) + 'h ' + Math.floor((seg%3600)/60) + 'm';
+  return Math.floor(seg/86400) + 'd ' + Math.floor((seg%86400)/3600) + 'h';
 }
 function urlFiltrados(){
   const q = urlSearch.trim().toLowerCase();
@@ -3557,8 +3571,16 @@ function buildHttpPanel(){
   const msProm = conMs.length ? Math.round(conMs.reduce((a,u)=>a+u.last_response_ms,0)/conMs.length) : null;
   const lista = urlFiltrados();
   const fchip = (val,txt,n,cls)=>`<button class="filter-chip ${urlStatusFilter===val?'active':''}" role="tab" aria-selected="${urlStatusFilter===val}" onclick="urlStatusFilter='${val}';render()">${txt} <span class="fc-n ${cls||''}">${n}</span></button>`;
+  // Aviso si el verificador no esta corriendo: las mediciones de abajo pueden
+  // estar viejas (no se muestran como "actuales").
+  const pausado = urlMonitors.some(u=>u.scheduler_pausado);
+  const tick = (urlMonitors.find(u=>u.scheduler_ultimo_tick)||{}).scheduler_ultimo_tick;
+  const bannerPausa = pausado
+    ? `<div class="banner warn" style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px">
+         ${ico('warn','sm')} El verificador de URLs no está corriendo (último chequeo ${tick?timeSince(tick):'desconocido'}). Las mediciones pueden estar desactualizadas.</div>`
+    : '';
 
-  return `
+  return bannerPausa + `
   <div class="mon-summary">
     <div class="mon-tile"><div class="mt-num">${urlMonitors.length}</div><div class="mt-label">Monitores</div></div>
     <div class="mon-tile"><div class="mt-num ok">${up}</div><div class="mt-label">Respondiendo</div></div>
@@ -3593,8 +3615,11 @@ function buildHttpRow(u){
   const esHttps = /^https/i.test(u.url);
   const pill = est==='up' ? `<span class="pill ok">${ico('check','sm')}UP</span>`
     : est==='down' ? `<span class="pill crit">${ico('wifioff','sm')}DOWN</span>`
+    : est==='stale' ? `<span class="pill warn" title="La última medición quedó vieja: el verificador no corrió">Desactualizado</span>`
     : est==='paused' ? `<span class="pill paused">${ico('pause','sm')}Pausado</span>`
     : `<span class="pill muted">Sin chequear</span>`;
+  const caidaDesde = (est==='down' && u.outage_seconds!=null)
+    ? `<div style="font-size:10.5px;color:var(--text3);margin-top:2px">caído hace ${duracionCorta(u.outage_seconds)}</div>` : '';
   const resp = u.last_response_ms!=null
     ? `<span class="val-num ${u.last_response_ms<500?'ok':u.last_response_ms<2000?'warn':'crit'}">${u.last_response_ms} ms</span>${u.last_status?` <span class="val-num muted" style="font-size:11px">(${u.last_status})</span>`:''}`
     : (est==='down' ? '<span class="val-num crit">sin respuesta</span>' : '<span class="val-num muted">—</span>');
@@ -3606,7 +3631,7 @@ function buildHttpRow(u){
     <td class="col-hide-sm" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--text2);font-size:12.5px">${escHtml(u.url)}</span></td>
     <td class="num">${resp}</td>
     <td class="col-hide-sm" style="color:var(--text3);font-size:12px;white-space:nowrap">${u.last_check?timeSince(u.last_check):'Nunca'}</td>
-    <td>${pill}${u.last_error?`<div style="font-size:10.5px;color:var(--crit);margin-top:2px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(u.last_error)}">${escHtml(u.last_error)}</div>`:''}</td>
+    <td>${pill}${caidaDesde}${u.last_error?`<div style="font-size:10.5px;color:var(--crit);margin-top:2px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(u.last_error)}">${u.last_error_kind?`<b>${escHtml(u.last_error_kind)}:</b> `:''}${escHtml(u.last_error)}</div>`:''}</td>
     <td onclick="event.stopPropagation()"><div class="row-actions">
       <button class="btn sm" onclick="openUrlHistory(${u.id})" aria-label="Historial de ${escHtml(u.name||host)}">${ico('chart','sm')}Historial</button>
       <details class="rowmenu" onkeydown="menuKeydown(event)">

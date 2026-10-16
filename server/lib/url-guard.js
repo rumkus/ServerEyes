@@ -247,8 +247,38 @@ function followRedirects(urlStr, method, timeoutMs, maxRedirects, opts = {}) {
           doRequest(next);
           return;
         }
-        res.resume();
-        res.on('end', () => finish(null, { status: res.statusCode, redirects }));
+        // Respuesta final (no es redireccion).
+        let tlsInfo = null;
+        if (urlObj.protocol === 'https:' && res.socket && typeof res.socket.authorized !== 'undefined') {
+          tlsInfo = {
+            authorized: res.socket.authorized === true,
+            authorizationError: res.socket.authorizationError ? String(res.socket.authorizationError) : null
+          };
+        }
+        const base = { status: res.statusCode, redirects, finalUrl: destino.url, tls: tlsInfo };
+        const cap = (opts.captureBody | 0);
+        if (cap <= 0) {
+          // Compat: sin captura de cuerpo (comportamiento historico), se descarta.
+          res.resume();
+          res.on('end', () => finish(null, base));
+          return;
+        }
+        // Captura del cuerpo acotada a `cap` bytes: basta el JSON de un /health y
+        // evita cargar en memoria una respuesta grande. Se corta y no se sigue leyendo.
+        const chunks = [];
+        let total = 0, truncado = false;
+        const terminar = () => finish(null, Object.assign({}, base, {
+          body: Buffer.concat(chunks).toString('utf8'), bodyTruncated: truncado
+        }));
+        res.on('data', (c) => {
+          if (truncado) return;
+          if (total + c.length > cap) {
+            chunks.push(c.subarray(0, cap - total)); total = cap; truncado = true; terminar(); res.destroy(); return;
+          }
+          chunks.push(c); total += c.length;
+        });
+        res.on('end', terminar);
+        res.on('error', (e) => finish(e));
       });
       current = r;
       r.on('error', (e) => {
