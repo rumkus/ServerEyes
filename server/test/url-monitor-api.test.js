@@ -126,6 +126,27 @@ test('endpoint de incidentes del monitor devuelve los abiertos/resueltos', { ski
   assert.equal(r.data[0].status, 'open');
 });
 
+test('siembra de los 3 controles de Linde/staging es valida y idempotente', { skip }, async () => {
+  // require lazy: levantarServer ya cargo '../server' con DATABASE_URL seteada.
+  const servidor = require('../server');
+  const u = await registrar(S.api, 'seedadmin@demo.com');
+  await S.pool.query(`UPDATE users SET is_admin=true WHERE id=$1`, [u.user.id]); // aseguramos admin
+  await servidor.sembrarControlesStaging();
+  let r = await S.pool.query(`SELECT url, health_mode, enforce_tls, expected_json, interval_seconds, timeout_ms FROM url_monitors ORDER BY id`);
+  assert.equal(r.rows.length, 3);
+  for (const m of r.rows) {
+    assert.equal(m.health_mode, true);
+    assert.equal(m.enforce_tls, true);
+    assert.equal(m.interval_seconds, 300);
+    assert.equal(m.timeout_ms, 10000);
+    assert.ok(m.expected_json && m.expected_json.status === 'ok');
+  }
+  // idempotente: segunda corrida no duplica
+  await servidor.sembrarControlesStaging();
+  r = await S.pool.query(`SELECT COUNT(*)::int n FROM url_monitors`);
+  assert.equal(r.rows[0].n, 3);
+});
+
 test('aislamiento: usuario B no ve ni toca el monitor de A', { skip }, async () => {
   const A = await registrar(S.api, 'a-iso@demo.com');
   const B = await registrar(S.api, 'b-iso@demo.com');

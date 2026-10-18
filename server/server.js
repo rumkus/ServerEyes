@@ -1200,16 +1200,23 @@ async function sembrarControlesStaging() {
       { url: 'https://admin-staging-33d1.up.railway.app/health/ready', name: 'Linde/staging Admin', service: 'admin' },
       { url: 'https://api-staging-46412.up.railway.app/health/ready',  name: 'Linde/staging API',   service: 'api' }
     ];
+    let creados = 0;
     for (const c of controles) {
-      await pool.query(
-        `INSERT INTO url_monitors
-           (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails, health_mode, expected_json, enforce_tls, notify_down)
-         SELECT $1, $2, $3, 'GET', 200, 10000, 300, '[]'::jsonb, true, $4::jsonb, true, true
-         WHERE NOT EXISTS (SELECT 1 FROM url_monitors WHERE url = $2)`,
-        [ownerId, c.url, c.name, JSON.stringify({ status: 'ok', service: c.service })]
-      );
+      try {
+        // Casts explicitos: $2 (url) se usa en el SELECT y en el WHERE; sin el cast
+        // Postgres deduce tipos inconsistentes para el mismo parametro.
+        const r = await pool.query(
+          `INSERT INTO url_monitors
+             (user_id, url, name, method, expected_status, timeout_ms, interval_seconds, notify_emails, health_mode, expected_json, enforce_tls, notify_down)
+           SELECT $1::int, $2::varchar, $3::varchar, 'GET', 200, 10000, 300, '[]'::jsonb, true, $4::jsonb, true, true
+           WHERE NOT EXISTS (SELECT 1 FROM url_monitors WHERE url = $2::varchar)
+           RETURNING id`,
+          [ownerId, c.url, c.name, JSON.stringify({ status: 'ok', service: c.service })]
+        );
+        if (r.rows.length) creados++;
+      } catch (e) { console.error(`[SEED] control ${c.service}:`, e.message); }
     }
-    console.log('[SEED] controles de Linde/staging asegurados (web/admin/api)');
+    console.log(`[SEED] controles de Linde/staging asegurados (web/admin/api); nuevos=${creados}`);
   } catch (e) { console.error('[SEED] controles staging:', e.message); }
 }
 
@@ -5827,4 +5834,4 @@ function detener() {
   return detenido;
 }
 
-module.exports = { app, pool, listo, detener };
+module.exports = { app, pool, listo, detener, sembrarControlesStaging };
