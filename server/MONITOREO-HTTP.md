@@ -40,24 +40,53 @@ recrea si ya existe (por URL); si se borra, reaparece en el próximo arranque.
 ## Qué valida cada chequeo
 
 1. **Status exacto** (200, configurable). No alcanza "cualquier < 400".
-2. **Cuerpo JSON** con los pares clave/valor indicados (`expected_json`).
-3. **Sin redirección**: en `health_mode`, cualquier 3xx/redirección (p. ej. a un
-   login) es **caída**, no "sano".
-4. **TLS** (si `enforce_tls`): un certificado no confiable es caída.
-5. **Clasificación de errores**: `dns`, `tls`, `timeout`, `conexion`, `ssrf`,
-   `redireccion`, `http`, `json` (se guarda en `last_error_kind` y en el historial).
+2. **Cuerpo JSON** con los pares clave/valor indicados (`expected_json`), comparado
+   por propiedad (sin depender del orden de claves). Una respuesta **HTML con 200
+   NO es saludable** (no parsea como JSON → `json`).
+3. **Sin redirección**: en `health_mode` NO se sigue la redirección (`maxRedirects=0`);
+   cualquier 3xx (incluida la que va a un login) es **caída** `redireccion`, y no se
+   conecta al destino.
+4. **TLS real** (si `enforce_tls`): se **exige HTTPS** y se valida el certificado
+   con `rejectUnauthorized:true` (cadena + **hostname** por SNI + **vigencia**). La
+   validación TLS **no se desactiva**: un cert inválido tira error en el handshake
+   y el chequeo da caída `tls`. (Los monitores sin `enforce_tls` siguen con
+   `rejectUnauthorized:false`, porque un cert vencido lo vigila `ssl_monitors`.)
+5. **Timeout** único que cubre también la **lectura del cuerpo** (un `/health` que
+   queda sin terminar da `timeout`).
+6. **Cuerpo acotado** (64 KB): si se excede, es caída `cuerpo_grande` (no se valida
+   un cuerpo truncado como correcto). Nunca se almacena la respuesta completa.
+7. **Clasificación de errores**: `dns`, `tls`, `timeout`, `conexion`, `ssrf`,
+   `redireccion`, `http`, `json`, `cuerpo_grande` (en `last_error_kind` y en el historial).
 
 Los monitores "clásicos" (sin `health_mode` ni `expected_json`) conservan la
 regla histórica (sano = 2xx/3xx): no se cambió su comportamiento.
 
-## Confirmación, avisos y anti-repetición
+## Confirmación, incidentes y avisos
 
-- **Reintento antes de alertar**: una caída se confirma con `URL_CHECK_RETRIES=3`
-  intentos separados `15s` antes de declararla (filtra cortes transitorios).
-- **Avisa al caer y al recuperarse**, y **sólo al cambiar de estado**
-  (`notify_down && wasUp !== isUp`): no repite la misma alerta en cada ciclo.
+- **Reintento antes de alertar/abrir incidente**: una caída se confirma con
+  `URL_CHECK_RETRIES=3` intentos separados `URL_CHECK_RETRY_DELAY_MS=15s` (hasta
+  ~30s) antes de declararla. Filtra cortes transitorios.
+- **Un solo incidente por caída confirmada** (`lib/url-incidents.js`): reutiliza la
+  tabla `incidents` (`incidents.url_id`; `machine_id` queda NULL). Apertura
+  idempotente (`INSERT … SELECT WHERE sigue caído AND NOT EXISTS uno abierto`): no
+  duplica. Al recuperarse se **resuelve** (con duración) y se registra el evento.
+- **Avisa al caer y al recuperarse**, sólo en la transición. **Deduplicado** por el
+  cambio de estado. **Reintento de entrega**: el aviso queda `alert_pendiente` y se
+  entrega con **reclamo atómico**; si la entrega falla, se revierte y se reintta en
+  el próximo ciclo **sin duplicar** (mismo patrón que `lib/offline.js`).
+- **Pausar o editar** un monitor **no** pasa por el checker → **no** se interpreta
+  como recuperación (el incidente abierto sigue abierto; no se emite aviso 'up').
 - Canales: push (FCM) + email (SMTP). Al dueño siempre; a destinatarios extra por
   el mecanismo opt-in (doble confirmación), ver abajo.
+
+## Concurrencia y reinicios
+
+- **Sin solapes / sin duplicados entre workers**: los vencidos se **reclaman de
+  forma atómica** (`UPDATE … SET last_check=NOW() WHERE vencido RETURNING`), así dos
+  instancias no chequean el mismo monitor. El aviso también se reclama atómico. Con
+  una sola instancia, además, un guard en memoria evita solapar ciclos.
+- **Tras un reinicio**: el verificador se re-arma solo al iniciar el proceso y los
+  vencidos se recalculan por `last_check` en la base (la programación no se pierde).
 
 ## Estados mostrados (distinguir "sin comprobar" de "saludable")
 
@@ -100,40 +129,60 @@ a `desactualizado`; el panel muestra un aviso ("el verificador no está corriend
 
 - **Agregar/editar un control**: pestaña *URLs* → *Agregar URL* (o `POST/PUT
   /api/url-monitors`, que aceptan `health_mode`, `expected_json`, `enforce_tls`).
-- **Ver historial**: botón *Historial* por fila (`GET /api/url-monitors/:id/history`).
+- **Ver historial**: `GET /api/url-monitors/:id/history` (botón *Historial*).
+- **Ver incidentes** del control: `GET /api/url-monitors/:id/incidents`.
 - **Desactivar la siembra automática** de los 3 controles: `SEED_STAGING_CONTROLS=0`.
 - **Pausar/activar** un control: desde el menú de la fila (`is_active`).
 
 ## Pruebas realizadas (evidencia)
 
-- `node --test` (sin tocar staging): **134/134**. Incluye:
-  - `health-check.test.js` — 503, JSON inválido, JSON con valor distinto,
-    redirección a login, timeout, DNS, TLS no confiable, conexión, SSRF,
-    recuperación, status configurable, compat clásico.
-  - `url-monitor.test.js` — integración real contra un **mock HTTP local**
-    (inyectando el validador, sin abrir bypass SSRF): 503, JSON malo, redirección,
-    timeout, caída→recuperación, captura de cuerpo acotada, SSRF bloqueado.
-  - `url-monitor-api.test.js` — API contra Postgres real: alta/edición con campos
-    health-check, estado `sin_comprobar`/`saludable`/`caido`(+outage)/`desactualizado`
-    y `scheduler_pausado`.
-- **Chequeo real de solo-lectura** contra los 3 endpoints vivos de staging: los 3
-  dan 200, sin redirección, TLS confiable y el JSON exacto (~400ms). No se detuvo
-  staging en ningún momento.
-- **Smoke test** del panel (server + Postgres reales): la vista *Monitores HTTP*
-  renderiza estado, respuesta, "caído hace Xm", categoría de error y el aviso de
-  scheduler pausado, sin errores de JS.
+- `node --test` (sin tocar staging): **148/148**. Incluye:
+  - `health-check.test.js` — 503, JSON inválido, JSON con valor distinto, servicio
+    equivocado, redirección (seguida y NO seguida), **cuerpo grande**, timeout, DNS,
+    TLS no confiable, conexión, SSRF, recuperación, status configurable, compat clásico.
+  - `url-monitor.test.js` — integración contra un **mock HTTP local** (inyectando el
+    validador, sin abrir bypass SSRF): 503, JSON malo, redirección, **no-seguir
+    redirección (`maxRedirects=0`)**, timeout, caída→recuperación, cuerpo acotado,
+    SSRF bloqueado.
+  - `url-incidents.test.js` — contra Postgres real: **un solo incidente** por caída
+    (idempotente), recuperación que lo resuelve, **reintento de entrega** que revierte
+    sin duplicar, deduplicación, **concurrencia** (claim atómico → un aviso), pausar
+    ≠ recuperación, recuperación antes de entregar la caída (sin aviso espurio).
+  - `url-monitor-api.test.js` — API contra Postgres real: alta/edición health-check,
+    estados, `scheduler_pausado`, `proxima_check`, endpoint de incidentes y
+    **aislamiento** entre usuarios (401/404).
+- **Chequeo real de solo-lectura** contra los 3 endpoints vivos de staging, con TLS
+  **estricto** (`rejectUnauthorized:true`): los 3 dan 200, sin redirección, cert
+  válido y JSON exacto (~230-340ms). No se detuvo staging en ningún momento.
+- **Evidencia del scheduler** (server + Postgres reales): el verificador ejecutó una
+  **medición real** de cada uno de los 3 (200, is_up, ~340ms, `proxima_check`
+  computada). Demostración en vivo de **caída confirmada → un incidente** (service
+  equivocado con 200 → `json`) y **recuperación → incidente resuelto** (duración).
+
+## Dónde corre y con la PC del administrador apagada
+
+- Los chequeos corren en el **backend de ServerEyes en Railway** (proceso Node;
+  scheduler = `setInterval`). No dependen de ninguna PC de administrador ni de un
+  navegador abierto: **siguen activos con la PC del admin apagada** mientras el
+  servicio de Railway esté levantado. El panel sólo muestra lo ya medido.
+- **Independencia de fallas — hallazgo**: los endpoints de Linde/staging son
+  `*.up.railway.app` y **ServerEyes también corre en Railway** → **comparten
+  proveedor**. Una caída a nivel Railway afectaría a ambos y ServerEyes no podría
+  avisar. La vigilancia externa (del worker y de la antigüedad de backups) queda
+  identificada como **etapa posterior** (no cubierta todavía).
 
 ## Límites y pendientes reales
 
-- **Recepción real de notificaciones**: se validó el *envío* (push/email) y la
-  lógica de disparo, pero la **recepción real no se da por verificada** hasta
-  confirmarla contra un buzón real (pendiente de cargar el destinatario por el
-  mecanismo opt-in).
-- **Despliegue**: el feature está construido y probado en local; **no se
-  desplegó**. Los 3 controles empiezan a correr cada 5 min recién tras el deploy.
-- Los incidentes formales siguen siendo de máquinas; para los controles HTTP el
-  "historial de incidentes" se ve desde el historial de chequeos (`url_check_history`)
-  y la duración de la caída (`outage_seconds`/`down_since`).
+- **NO está en monitoreo continuo activo en la instancia real**: el feature está
+  construido y probado; **no se desplegó**. Haber creado registros o corrido un
+  chequeo manual **no** equivale a monitoreo activo. Los 3 controles empiezan a
+  correr cada 5 min recién **tras el deploy** a la instancia real.
+- **Recepción real de notificaciones**: se validó el *envío* (push/email), el
+  disparo, la deduplicación y el reintento de entrega, pero la **recepción real no
+  se da por verificada** hasta confirmarla contra un buzón real (falta cargar el
+  destinatario de prueba por el opt-in y que el entorno tenga SMTP configurado).
+- **Multi-worker**: el reclamo atómico lo hace seguro si se escala; hoy la instancia
+  corre con **1 réplica** (sin config de réplicas detectada).
 - Display de "último chequeo" en el panel usa la hora del navegador; es correcto
-  cuando el backend corre en UTC (Railway). El cálculo de `estado` se hace en SQL,
-  inmune a zona horaria.
+  cuando el backend corre en UTC (Railway). El cálculo de `estado`/edad se hace en
+  SQL, inmune a zona horaria.

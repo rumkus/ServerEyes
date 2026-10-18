@@ -102,3 +102,42 @@ test('scheduler pausado: tick viejo marca todo desactualizado', { skip }, async 
   assert.equal(m.scheduler_pausado, true);
   assert.equal(m.estado, 'desactualizado');
 });
+
+test('GET expone proxima_check cuando ya hubo una comprobacion', { skip }, async () => {
+  const { token } = await registrar(S.api, 'g@g.com');
+  const c = await S.api('POST', '/api/url-monitors', { token, body: { url: 'https://example.com/', interval_seconds: 300 } });
+  await tickReciente();
+  await S.pool.query(`UPDATE url_monitors SET last_check=NOW(), is_up=true WHERE id=$1`, [c.data.id]);
+  const g = await S.api('GET', '/api/url-monitors', { token });
+  const m = g.data.find(x => x.id === c.data.id);
+  assert.ok(m.proxima_check, 'proxima_check presente');
+  assert.ok(new Date(m.proxima_check).getTime() > Date.now(), 'proxima_check en el futuro');
+});
+
+test('endpoint de incidentes del monitor devuelve los abiertos/resueltos', { skip }, async () => {
+  const { token } = await registrar(S.api, 'h@h.com');
+  const c = await S.api('POST', '/api/url-monitors', { token, body: { url: 'https://example.com/', health_mode: true } });
+  // abrimos un incidente directo (como lo haria la transicion)
+  await S.pool.query(`UPDATE url_monitors SET is_up=false, down_since=NOW() WHERE id=$1`, [c.data.id]);
+  await S.pool.query(`INSERT INTO incidents (url_id, user_id, title, status) VALUES ($1,$2,'caido','open')`, [c.data.id, (await S.pool.query('SELECT user_id FROM url_monitors WHERE id=$1',[c.data.id])).rows[0].user_id]);
+  const r = await S.api('GET', '/api/url-monitors/' + c.data.id + '/incidents', { token });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.length, 1);
+  assert.equal(r.data[0].status, 'open');
+});
+
+test('aislamiento: usuario B no ve ni toca el monitor de A', { skip }, async () => {
+  const A = await registrar(S.api, 'a-iso@demo.com');
+  const B = await registrar(S.api, 'b-iso@demo.com');
+  const c = await S.api('POST', '/api/url-monitors', { token: A.token, body: { url: 'https://example.com/' } });
+  // B no lo ve en su lista
+  const lista = await S.api('GET', '/api/url-monitors', { token: B.token });
+  assert.equal(lista.data.find(x => x.id === c.data.id), undefined);
+  // B no accede a historial/incidentes/edicion/borrado
+  assert.equal((await S.api('GET', '/api/url-monitors/' + c.data.id + '/history', { token: B.token })).status, 404);
+  assert.equal((await S.api('GET', '/api/url-monitors/' + c.data.id + '/incidents', { token: B.token })).status, 404);
+  const put = await S.api('PUT', '/api/url-monitors/' + c.data.id, { token: B.token, body: { name: 'hack' } });
+  assert.equal(put.status, 404);
+  // sin token: 401
+  assert.equal((await S.api('GET', '/api/url-monitors')).status, 401);
+});

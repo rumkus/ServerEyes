@@ -230,16 +230,29 @@ function followRedirects(urlStr, method, timeoutMs, maxRedirects, opts = {}) {
           'Cache-Control': 'no-cache',
           'X-Monitor': 'ServerEyes/1.0'
         },
-        // Un certificado vencido no es "sitio caido": eso lo vigila ssl_monitors.
-        rejectUnauthorized: false,
+        // Por defecto NO se valida el certificado (un cert vencido no es "sitio
+        // caido": eso lo vigila ssl_monitors). Con opts.rejectUnauthorized=true
+        // (health-check enforce_tls) se EXIGE cert+hostname+vigencia validos: un
+        // cert invalido tira error en el handshake y el chequeo da caida (TLS).
+        rejectUnauthorized: opts.rejectUnauthorized === true,
         // La conexion va a la direccion validada, no a lo que diga el DNS ahora.
         lookup: lookupFijo(address, family),
         servername: net.isIP(urlObj.hostname) ? undefined : urlObj.hostname
       };
+      const maxEff = (maxRedirects == null ? 5 : maxRedirects);
       const r = client.request(urlObj, reqOpts, (res) => {
         if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
           res.resume();
-          if (redirects >= (maxRedirects || 5)) return finish(new Error('Demasiadas redirecciones (' + redirects + ')'));
+          // maxEff=0 (health-check): NO se sigue la redireccion. Se devuelve el
+          // 3xx marcado para que el evaluador lo trate como caida 'redireccion'
+          // (p.ej. /health que redirige a /login). No se conecta al destino.
+          if (maxEff === 0) {
+            return finish(null, { status: res.statusCode, redirects: 0, redirectBlocked: true,
+              location: res.headers.location, finalUrl: destino.url,
+              tls: (urlObj.protocol === 'https:' && res.socket && typeof res.socket.authorized !== 'undefined')
+                ? { authorized: res.socket.authorized === true, authorizationError: res.socket.authorizationError ? String(res.socket.authorizationError) : null } : null });
+          }
+          if (redirects >= maxEff) return finish(new Error('Demasiadas redirecciones (' + redirects + ')'));
           redirects++;
           let next = null;
           try { next = new URL(res.headers.location, urlObj).href; } catch (e) { next = null; }

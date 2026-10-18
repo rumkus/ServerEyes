@@ -88,3 +88,18 @@ test('status esperado configurable (p.ej. 204)', () => {
   assert.equal(evaluarSalud({ status: 204, redirects: 0 }, spec).ok, true);
   assert.equal(evaluarSalud({ status: 200, redirects: 0 }, spec).ok, false);
 });
+
+test('caida: cuerpo demasiado grande (truncado) no se valida como sano', () => {
+  const v = evaluarSalud({ status: 200, redirects: 0, bodyTruncated: true, body: '{"status":"ok"', tls: { authorized: true } }, specWeb);
+  assert.equal(v.ok, false); assert.equal(v.kind, 'cuerpo_grande');
+});
+
+test('caida: redireccion NO seguida (redirectBlocked) = redireccion', () => {
+  const v = evaluarSalud({ status: 302, redirects: 0, redirectBlocked: true, location: '/login' }, specWeb);
+  assert.equal(v.ok, false); assert.equal(v.kind, 'redireccion'); assert.match(v.detail, /login/);
+});
+
+test('caida: status 3xx directo (sin seguir) = redireccion', () => {
+  const v = evaluarSalud({ status: 301, redirects: 0, finalUrl: 'https://x/' }, specWeb);
+  assert.equal(v.ok, false); assert.equal(v.kind, 'redireccion');
+});

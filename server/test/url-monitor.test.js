@@ -97,3 +97,12 @@ test('e2e SSRF sigue bloqueado: una URL a loopback no se conecta ni con captura'
     DestinoNoPermitido
   );
 });
+
+test('e2e health_mode no sigue la redireccion (maxRedirects=0): redirectBlocked', async () => {
+  const r = await followRedirects('http://local.test:' + port + '/tologin', 'GET', 2000, 0, { validar: validarLocal, captureBody: 65536 });
+  assert.equal(r.redirectBlocked, true);
+  assert.equal(r.redirects, 0);
+  assert.match(String(r.location), /login/);
+  const v = evaluarSalud({ status: r.status, redirects: r.redirects, redirectBlocked: r.redirectBlocked, location: r.location }, specWeb);
+  assert.equal(v.ok, false); assert.equal(v.kind, 'redireccion');
+});

@@ -8,6 +8,7 @@ const path = require('path');
 const { PairingStore } = require('./lib/pairing');
 const urlGuard = require('./lib/url-guard');
 const { evaluarSalud } = require('./lib/health-check');
+const urlInc = require('./lib/url-incidents');
 const sesiones = require('./lib/sesiones');
 const comandos = require('./lib/comandos');
 const offlineDet = require('./lib/offline');
@@ -927,7 +928,11 @@ async function initDB() {
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS health_mode BOOLEAN DEFAULT false`).catch(() => {});
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS enforce_tls BOOLEAN DEFAULT false`).catch(() => {});
   await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS last_error_kind TEXT`).catch(() => {});
-  await pool.query(`ALTER TABLE url_check_history ADD COLUMN IF NOT EXISTS error_kind TEXT`).catch(() => {});
+  // Aviso pendiente de entrega ('down'|'up'): se reclama de forma atomica y se
+  // reintenta si falla la entrega, sin duplicar (ver lib/url-incidents.js).
+  await pool.query(`ALTER TABLE url_monitors ADD COLUMN IF NOT EXISTS alert_pendiente VARCHAR(10)`).catch(() => {});
+  // NOTA: error_kind (url_check_history) y url_id (incidents) se agregan DESPUES
+  // de crear esas tablas (mas abajo), no aca: en una base nueva todavia no existen.
 
   dentroDe(censarVersiones, 20000);
   cadaTanto(censarVersiones, 60 * 60 * 1000);
@@ -1005,6 +1010,8 @@ async function initDB() {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_url_check_history ON url_check_history (url_id, checked_at DESC)`).catch(() => {});
+  // Categoria del error del chequeo (dns/tls/timeout/conexion/ssrf/redireccion/http/json/cuerpo_grande).
+  await pool.query(`ALTER TABLE url_check_history ADD COLUMN IF NOT EXISTS error_kind TEXT`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_notifications (
@@ -1070,6 +1077,10 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  // Incidentes de URL en la MISMA tabla (machine_id queda NULL; url_id apunta al
+  // monitor). No es un sistema paralelo: reusa incidents/incident_events.
+  await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS url_id INTEGER REFERENCES url_monitors(id) ON DELETE CASCADE`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_incidents_url_open ON incidents (url_id, status)`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS incident_events (
@@ -4892,7 +4903,8 @@ function estadoUrlMonitor(m, schedPausado) {
 }
 
 const COLS_EDAD_URL = `, EXTRACT(EPOCH FROM (NOW() - um.last_check))::int AS edad_check_seg,
-       CASE WHEN um.is_up = false THEN EXTRACT(EPOCH FROM (NOW() - um.down_since))::int END AS outage_seconds`;
+       CASE WHEN um.is_up = false THEN EXTRACT(EPOCH FROM (NOW() - um.down_since))::int END AS outage_seconds,
+       CASE WHEN um.last_check IS NOT NULL THEN um.last_check + (um.interval_seconds || ' seconds')::interval END AS proxima_check`;
 
 app.get('/api/url-monitors', authenticateToken, async (req, res) => {
   try {
@@ -5030,9 +5042,36 @@ app.get('/api/url-monitors/:id/history', authenticateToken, async (req, res) => 
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
     const filtro = req.query.only_failures === 'true' ? 'AND (is_up = false OR attempts > 1)' : '';
     const result = await pool.query(
-      `SELECT checked_at, is_up, status, response_ms, error, attempts, notified
+      `SELECT checked_at, is_up, status, response_ms, error, error_kind, attempts, notified
        FROM url_check_history WHERE url_id = $1 ${filtro}
        ORDER BY checked_at DESC LIMIT $2`,
+      [urlId, limit]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Incidentes de un monitor de URL (dueno o tecnico con la URL compartida).
+// Reutiliza la tabla incidents (incidents.url_id). Un solo incidente abierto por
+// caida; aca se ven con su duracion y sus eventos (detected/resolved).
+app.get('/api/url-monitors/:id/incidents', authenticateToken, async (req, res) => {
+  try {
+    const urlId = parseInt(req.params.id, 10);
+    if (!urlId) return res.status(400).json({ error: 'id invalido' });
+    const acceso = await pool.query(
+      `SELECT um.id FROM url_monitors um
+       LEFT JOIN url_shares us ON us.url_id = um.id AND us.user_id = $2
+       WHERE um.id = $1 AND (um.user_id = $2 OR us.user_id IS NOT NULL)`,
+      [urlId, req.user.id]
+    );
+    if (acceso.rows.length === 0) return res.status(404).json({ error: 'Monitor no encontrado' });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+    const result = await pool.query(
+      `SELECT i.id, i.status, i.started_at, i.ended_at, i.duration_minutes, i.title,
+       (SELECT COUNT(*) FROM incident_events ie WHERE ie.incident_id = i.id) AS event_count
+       FROM incidents i WHERE i.url_id = $1 ORDER BY i.started_at DESC LIMIT $2`,
       [urlId, limit]
     );
     res.json(result.rows);
@@ -5077,12 +5116,21 @@ async function probeUrl(mon) {
     enforce_tls: mon.enforce_tls
   };
   const necesitaBody = !!(mon.health_mode || (mon.expected_json && Object.keys(mon.expected_json).length));
+  // enforce_tls EXIGE https: una URL http no puede dar certificado valido.
+  if (mon.enforce_tls && !/^https:/i.test(mon.url || '')) {
+    return { isUp: false, status: null, ms: Date.now() - startTime, error: 'enforce_tls: se exige HTTPS', kind: 'tls' };
+  }
+  const extra = {};
+  if (necesitaBody) extra.captureBody = 65536;
+  if (mon.enforce_tls) extra.rejectUnauthorized = true;   // valida cert+hostname+vigencia
+  // health_mode: NO seguir redirecciones (un 3xx vuelve marcado -> caida 'redireccion').
+  const maxRedirects = mon.health_mode ? 0 : 5;
   try {
-    const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, 5,
-      necesitaBody ? { captureBody: 65536 } : {});
+    const result = await followRedirects(mon.url, mon.method, mon.timeout_ms || 10000, maxRedirects, extra);
     const v = evaluarSalud({
-      status: result.status, body: result.body, finalUrl: result.finalUrl,
-      redirects: result.redirects, tls: result.tls, error: null
+      status: result.status, body: result.body, finalUrl: result.finalUrl, location: result.location,
+      redirects: result.redirects, redirectBlocked: result.redirectBlocked, bodyTruncated: result.bodyTruncated,
+      tls: result.tls, error: null
     }, spec);
     return { isUp: v.ok, status: result.status, ms: Date.now() - startTime, error: v.ok ? null : v.detail, kind: v.kind };
   } catch (err) {
@@ -5105,8 +5153,8 @@ async function checkUrlMonitor(mon) {
 
   const isUp = probe.isUp;
   const wasUp = mon.is_up;
-  // Notificamos solo cuando cambia el estado y ya se confirmo con reintentos.
-  const notify = mon.notify_down && wasUp !== isUp;
+  // El estado cambio y ya se confirmo con reintentos (3x/15s).
+  const cambioEstado = wasUp !== isUp;
 
   await pool.query(
     `UPDATE url_monitors SET last_status=$1, last_response_ms=$2, last_check=NOW(), last_error=$3,
@@ -5121,24 +5169,39 @@ async function checkUrlMonitor(mon) {
   await pool.query(
     `INSERT INTO url_check_history (url_id, is_up, status, response_ms, error, attempts, notified, error_kind)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [mon.id, isUp, probe.status, probe.ms, lastError, attempts, notify, isUp ? null : lastKind]
+    [mon.id, isUp, probe.status, probe.ms, lastError, attempts, cambioEstado && !!mon.notify_down, isUp ? null : lastKind]
   ).catch(e => console.error('[URL-MONITOR] No se pudo guardar historial:', e.message));
 
-  if (notify && isUp) {
-    sendPush(mon.owner_id, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo (${probe.ms}ms)`, { type: 'url_up' });
-    avisarAExtras(mon.owner_id, 'url', mon.id, `✅ ${mon.name || mon.url} volvio a funcionar`,
-      `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> volvio a responder normalmente.</p>
-       <p style="color:#666">Tiempo de respuesta: ${probe.ms}ms<br>URL: ${mon.url}</p>`);
-  } else if (notify && !isUp) {
-    sendPush(mon.owner_id, '🚨 URL Caida', `${mon.name || mon.url}: ${lastError} (${attempts} intentos)`, { type: 'url_down' });
-    avisarAExtras(mon.owner_id, 'url', mon.id, `🚨 ${mon.name || mon.url} no responde`,
-      `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> no esta respondiendo.</p>
-       <p style="color:#666">Detalle: ${lastError}<br>URL: ${mon.url}<br>Se reintento ${attempts} veces antes de avisar.</p>`);
+  // En la transicion: abre/cierra incidente (uno solo por caida) y deja el aviso
+  // PENDIENTE. El envio real -con reintentos de entrega y dedup- lo hace
+  // entregarAvisosUrl en el mismo ciclo (lib/url-incidents.js). Pausar/editar un
+  // monitor NO pasa por aca, asi que no se interpreta como recuperacion.
+  if (cambioEstado) {
+    try { await urlInc.aplicarTransicionUrl(pool, { ...mon, is_up: isUp, last_error: isUp ? null : lastError }, isUp, wasUp); }
+    catch (e) { console.error('[URL-MONITOR] transicion/incidente:', e.message); }
   }
+
   if (!isUp) {
     console.log(`[URL-MONITOR] CAIDA ${mon.url} -> ${lastError} tras ${attempts} intentos`);
   } else if (attempts > 1) {
     console.log(`[URL-MONITOR] Fallo transitorio en ${mon.url} (${lastError}), recupero en el intento ${attempts}`);
+  }
+}
+
+// Envio real de un aviso de URL (dep de entregarAvisosUrl). RECHAZA si el canal
+// principal (push/email al dueno) no pudo entregar -> se reintenta sin duplicar.
+async function notificarUrl(mon, tipo) {
+  const owner = mon.user_id;
+  if (tipo === 'up') {
+    await sendPush(owner, '✅ URL Recuperada', `${mon.name || mon.url} esta respondiendo`, { type: 'url_up' }, { throwOnError: true });
+    avisarAExtras(owner, 'url', mon.id, `✅ ${mon.name || mon.url} volvio a funcionar`,
+      `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> volvio a responder normalmente.</p>
+       <p style="color:#666">URL: ${mon.url}</p>`);
+  } else {
+    await sendPush(owner, '🚨 URL Caida', `${mon.name || mon.url}: ${mon.last_error || 's/d'}`, { type: 'url_down' }, { throwOnError: true });
+    avisarAExtras(owner, 'url', mon.id, `🚨 ${mon.name || mon.url} no responde`,
+      `<p style="font-size:15px;color:#333"><strong>${mon.name || mon.url}</strong> no esta respondiendo.</p>
+       <p style="color:#666">Detalle: ${mon.last_error || 's/d'}<br>URL: ${mon.url}<br>Se reintento antes de avisar.</p>`);
   }
 }
 
@@ -5172,11 +5235,15 @@ cadaTanto(async () => {
   urlCheckRunning = true;
   try {
     await registrarTickUrlChecker();
+    // RECLAMO ATOMICO de los vencidos: el propio UPDATE adelanta last_check, asi
+    // dos workers no chequean el mismo monitor (con una sola instancia el guard
+    // urlCheckRunning ya evita solapar; esto lo hace seguro si se escala).
+    // RETURNING devuelve los valores NUEVOS: is_up sigue siendo el viejo (wasUp).
     const monitors = await pool.query(
-      `SELECT um.*, u.id as owner_id FROM url_monitors um
-       JOIN users u ON um.user_id = u.id
-       WHERE um.is_active = true
-       AND (um.last_check IS NULL OR um.last_check < NOW() - (um.interval_seconds || ' seconds')::INTERVAL)`
+      `UPDATE url_monitors SET last_check = NOW()
+       WHERE is_active = true
+         AND (last_check IS NULL OR last_check < NOW() - (interval_seconds || ' seconds')::INTERVAL)
+       RETURNING *`
     );
     // En tandas: los reintentos hacen que un monitor caido tarde ~30s, y en
     // serie eso retrasaba el chequeo de todos los demas.
@@ -5186,6 +5253,9 @@ cadaTanto(async () => {
         checkUrlMonitor(mon).catch(e => console.error(`[URL-MONITOR] Error en ${mon.url}:`, e.message))
       ));
     }
+    // Entrega de avisos pendientes (caida/recuperacion) con reintento y dedup.
+    await urlInc.entregarAvisosUrl(pool, { notificar: notificarUrl, log: (m) => console.log(m) })
+      .catch(e => console.error('[URL-AVISO] Error:', e.message));
   } catch (err) {
     console.error('[URL-MONITOR] Error:', err.message);
   } finally {

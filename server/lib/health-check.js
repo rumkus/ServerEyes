@@ -87,8 +87,10 @@ function evaluarSalud(probe, spec) {
   }
 
   // 4) Redireccion: un /health que redirige (a login u otro lado) NO esta sano.
-  if (probe.redirects > 0) {
-    return { ok: false, kind: 'redireccion', detail: `Redireccion no esperada (${probe.redirects}) -> ${probe.finalUrl || '?'}` };
+  // Se rechaza sin seguirla (redirectBlocked) o si el status es 3xx.
+  if (probe.redirects > 0 || probe.redirectBlocked || (probe.status >= 300 && probe.status < 400)) {
+    const destino = probe.location || probe.finalUrl || '?';
+    return { ok: false, kind: 'redireccion', detail: `Redireccion no permitida (HTTP ${probe.status}) -> ${destino}` };
   }
 
   // 5) Status exacto.
@@ -97,7 +99,13 @@ function evaluarSalud(probe, spec) {
     return { ok: false, kind: 'http', detail: `HTTP ${probe.status} (esperado ${esperado})` };
   }
 
-  // 6) Cuerpo JSON con los pares esperados.
+  // 6) Cuerpo demasiado grande: se corto antes de terminar -> no se valida un
+  // cuerpo truncado como si fuera correcto.
+  if (probe.bodyTruncated) {
+    return { ok: false, kind: 'cuerpo_grande', detail: 'La respuesta excede el tamano maximo del cuerpo' };
+  }
+
+  // 7) Cuerpo JSON con los pares esperados.
   if (spec.expected_json && Object.keys(spec.expected_json).length) {
     let parsed;
     try { parsed = JSON.parse(probe.body == null ? '' : probe.body); }
