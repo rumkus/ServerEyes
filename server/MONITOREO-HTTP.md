@@ -171,12 +171,15 @@ a `desactualizado`; el panel muestra un aviso ("el verificador no está corriend
   avisar. La vigilancia externa (del worker y de la antigüedad de backups) queda
   identificada como **etapa posterior** (no cubierta todavía).
 
+## Estado
+
+- **DESPLEGADO y activo** (2026-10-18) en la instancia real (Railway, proyecto
+  `fabulous-wisdom`, servicio `ServerEyes`). Los 3 controles están sembrados
+  (`nuevos=3`) y el scheduler los chequea cada 5 min (verificado por logs DNS de
+  egress a `*-staging` ~60s post-arranque; sin caídas). Commits `cb0bc7d` + `8872726`.
+
 ## Límites y pendientes reales
 
-- **NO está en monitoreo continuo activo en la instancia real**: el feature está
-  construido y probado; **no se desplegó**. Haber creado registros o corrido un
-  chequeo manual **no** equivale a monitoreo activo. Los 3 controles empiezan a
-  correr cada 5 min recién **tras el deploy** a la instancia real.
 - **Recepción real de notificaciones**: se validó el *envío* (push/email), el
   disparo, la deduplicación y el reintento de entrega, pero la **recepción real no
   se da por verificada** hasta confirmarla contra un buzón real (falta cargar el

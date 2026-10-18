@@ -157,10 +157,22 @@ aviso; registrar qué se recibió. **No se declara verificado hasta recibirlo.**
 
 ## 10. Commit y estado de despliegue
 
-- Rama `codex/monitoreo-http-health` (base `main`). Commit de esta entrega: ver
-  `git log` de la rama (se indica en el mensaje de entrega).
-- **NO desplegado** y **NO configurado en la instancia real** todavía. Para activarlo:
-  merge a `main` + push (Railway auto-deploy); los 3 controles se siembran solos al
-  iniciar (bajo el primer admin) salvo `SEED_STAGING_CONTROLS=0`, o se crean con los
-  curl de §3. **Falta (datos a proveer):** OK de despliegue, destinatario de prueba, y
-  confirmar SMTP en el entorno.
+**DESPLEGADO en la instancia real** (2026-10-18). ServerEyes corre en Railway,
+proyecto `fabulous-wisdom`, servicio `ServerEyes`, entorno `production`.
+
+- Commits en `main`: `cb0bc7d` (feature) y `8872726` (fix de la siembra).
+- Deploy `574f88a0` — **SUCCESS**. Log de arranque: `Base de datos inicializada`,
+  `ServerEyes backend corriendo en puerto 3000`, y
+  **`[SEED] controles de Linde/staging asegurados (web/admin/api); nuevos=3`**.
+- **Scheduler activo en prod** (no es chequeo manual): a los ~60s del arranque el
+  verificador salió a chequear los 3 controles — evidencia en logs DNS de Railway
+  (resolución de `api-staging-46412.up.railway.app` a las 22:08:03). Sin líneas
+  `[URL-MONITOR] CAIDA` → los 3 están saludables.
+- **Bug corregido en el deploy**: la primera subida (`cb0bc7d`) desplegó OK pero la
+  siembra falló (`inconsistent types deduced for parameter $2`: faltaban casts en el
+  `INSERT … SELECT`). Se corrigió en `8872726` (casts explícitos + test que corre la
+  siembra contra Postgres) y el redeploy creó los 3 (`nuevos=3`).
+
+**Pendiente (no bloquea el monitoreo, sí la verificación de avisos):** recepción real
+de una alerta de caída y de recuperación con un destinatario de prueba autorizado
+(ver §8). Requiere el correo de destino + confirmar SMTP del entorno.
