@@ -9,6 +9,7 @@ const { PairingStore } = require('./lib/pairing');
 const urlGuard = require('./lib/url-guard');
 const { evaluarSalud } = require('./lib/health-check');
 const urlInc = require('./lib/url-incidents');
+const backupMon = require('./lib/backup-monitor');
 const sesiones = require('./lib/sesiones');
 const comandos = require('./lib/comandos');
 const offlineDet = require('./lib/offline');
@@ -1082,6 +1083,58 @@ async function initDB() {
   await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS url_id INTEGER REFERENCES url_monitors(id) ON DELETE CASCADE`).catch(() => {});
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_incidents_url_open ON incidents (url_id, status)`).catch(() => {});
 
+  // Monitor de BACKUPS (recibe recibos del exportador offsite; no sondea). Estado
+  // inicial 'pendiente' (nunca saludable por defecto). TIMESTAMPTZ para calcular
+  // frescura en UTC sin ambiguedad de zona.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS backup_monitors (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      name VARCHAR(255) NOT NULL,
+      environment VARCHAR(50) NOT NULL DEFAULT 'staging',
+      token_hash TEXT,
+      freshness_seconds INTEGER DEFAULT 93600,
+      is_active BOOLEAN DEFAULT true,
+      estado VARCHAR(20) DEFAULT 'pendiente',
+      alert_pendiente VARCHAR(12),
+      last_success_backup_id TEXT,
+      last_success_captured_at TIMESTAMPTZ,
+      last_success_received_at TIMESTAMPTZ,
+      last_success_bytes BIGINT,
+      last_success_sha256 TEXT,
+      last_success_file_id TEXT,
+      last_success_verified_at TIMESTAMPTZ,
+      last_attempt_at TIMESTAMPTZ,
+      last_failure_at TIMESTAMPTZ,
+      last_failure_reason TEXT,
+      last_failure_run_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, name)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS backup_events (
+      id SERIAL PRIMARY KEY,
+      monitor_id INTEGER REFERENCES backup_monitors(id) ON DELETE CASCADE,
+      tipo VARCHAR(20) NOT NULL,
+      dedup_key TEXT NOT NULL,
+      backup_id TEXT,
+      run_id TEXT,
+      captured_at TIMESTAMPTZ,
+      received_at TIMESTAMPTZ DEFAULT NOW(),
+      bytes BIGINT,
+      sha256 TEXT,
+      file_id TEXT,
+      verified_at TIMESTAMPTZ,
+      reason TEXT,
+      aceptado BOOLEAN DEFAULT true,
+      UNIQUE(monitor_id, dedup_key)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_backup_events_mon ON backup_events (monitor_id, received_at DESC)`).catch(() => {});
+  await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS backup_monitor_id INTEGER REFERENCES backup_monitors(id) ON DELETE CASCADE`).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_incidents_backup_open ON incidents (backup_monitor_id, status)`).catch(() => {});
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS incident_events (
       id SERIAL PRIMARY KEY,
@@ -1181,6 +1234,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE machines ADD COLUMN IF NOT EXISTS wol_broadcast VARCHAR(45) DEFAULT '255.255.255.255'`).catch(() => {});
 
   await sembrarControlesStaging();
+  await sembrarMonitorBackupLinde();
 
   console.log('Base de datos inicializada');
 }
@@ -1218,6 +1272,25 @@ async function sembrarControlesStaging() {
     }
     console.log(`[SEED] controles de Linde/staging asegurados (web/admin/api); nuevos=${creados}`);
   } catch (e) { console.error('[SEED] controles staging:', e.message); }
+}
+
+// Monitor de backups de Linde/staging. Idempotente (por nombre). SIN token usable
+// al crearse: el admin lo obtiene con POST /api/backup-monitors/:id/rotate-token
+// (no se imprime ningun secreto en logs). Estado inicial 'pendiente'.
+async function sembrarMonitorBackupLinde() {
+  if (process.env.SEED_STAGING_CONTROLS === '0') return;
+  try {
+    const admin = await pool.query(`SELECT id FROM users WHERE is_admin=true ORDER BY id ASC LIMIT 1`);
+    if (!admin.rows.length) return;
+    const r = await pool.query(
+      `INSERT INTO backup_monitors (user_id, name, environment, freshness_seconds, estado)
+       SELECT $1::int, $2::varchar, 'staging', 93600, 'pendiente'
+       WHERE NOT EXISTS (SELECT 1 FROM backup_monitors WHERE name = $2::varchar)
+       RETURNING id`,
+      [admin.rows[0].id, 'Linde/staging backups Google Drive']
+    );
+    console.log(`[SEED] monitor de backups Linde/staging asegurado; nuevo=${r.rows.length}`);
+  } catch (e) { console.error('[SEED] monitor backups:', e.message); }
 }
 
 // Audit helper
@@ -5269,6 +5342,154 @@ cadaTanto(async () => {
     urlCheckRunning = false;
   }
 }, 60000);
+
+// ============== MONITOR DE BACKUPS (recibe recibos del exportador) ==============
+//
+// ServerEyes NO sondea el backup: RECIBE eventos HTTPS autenticados por un token
+// EXCLUSIVO del monitor (no el JWT de usuario, ni una credencial global). El token
+// se entrega por POST .../rotate-token (admin) y se guarda solo su hash.
+
+// Autenticacion del ingestor por token del monitor.
+async function cargarMonitorBackupPorToken(req, res, next) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'id invalido' });
+    const auth = req.headers['authorization'] || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const r = await pool.query(`SELECT * FROM backup_monitors WHERE id=$1`, [id]);
+    const mon = r.rows[0];
+    // Respuesta uniforme para no filtrar existencia del monitor.
+    if (!mon || !mon.token_hash || !mon.is_active || !backupMon.tokenCoincide(token, mon.token_hash)) {
+      return res.status(401).json({ error: 'no autorizado' });
+    }
+    req.backupMonitor = mon;
+    next();
+  } catch (e) { res.status(500).json({ error: 'Error interno' }); }
+}
+
+// Ingesta de un evento del exportador (verified | failed).
+app.post('/api/backup-monitors/:id/events', cargarMonitorBackupPorToken, async (req, res) => {
+  try {
+    const mon = req.backupMonitor;
+    const ev = req.body || {};
+    const now = new Date();
+    if (ev.event === 'offsite_backup_verified') {
+      const v = backupMon.validarVerified(ev, mon, now);
+      if (!v.ok) return res.status(400).json({ error: 'evento invalido', motivo: v.motivo });
+      const r = await backupMon.ingestarVerified(pool, mon, v.datos, now);
+      if (r.resultado === 'conflicto') return res.status(409).json({ error: 'conflicto', motivo: 'backupId repetido con contenido distinto' });
+      backupMon.entregarAvisosBackup(pool, { notificar: notificarBackup, log: (m) => console.log(m) }).catch(() => {});
+      return res.json({ ok: true, resultado: r.resultado, estado: r.estado || mon.estado });
+    }
+    if (ev.event === 'offsite_backup_failed') {
+      const v = backupMon.validarFailed(ev, mon, now);
+      if (!v.ok) return res.status(400).json({ error: 'evento invalido', motivo: v.motivo });
+      const r = await backupMon.ingestarFailed(pool, mon, v.datos, now);
+      backupMon.entregarAvisosBackup(pool, { notificar: notificarBackup, log: (m) => console.log(m) }).catch(() => {});
+      return res.json({ ok: true, resultado: r.resultado });
+    }
+    return res.status(400).json({ error: 'event no reconocido' });
+  } catch (e) {
+    console.error('[BACKUP] ingesta:', e.message);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// Estado del/los monitor(es) de backup (dueno). Nunca saludable por defecto.
+app.get('/api/backup-monitors', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT * FROM backup_monitors WHERE user_id=$1 ORDER BY id`, [req.user.id]);
+    const now = new Date();
+    const filas = await Promise.all(r.rows.map(async (m) => {
+      const abiertos = await pool.query(`SELECT COUNT(*)::int n FROM incidents WHERE backup_monitor_id=$1 AND status='open'`, [m.id]);
+      const { token_hash, ...pub } = m; // nunca exponer el hash del token
+      return Object.assign(pub, {
+        estado_frescura: backupMon.estadoFrescura(m, now),
+        segundos_desde_captura: backupMon.segundosDesdeCaptura(m, now),
+        incidentes_abiertos: abiertos.rows[0].n,
+        tiene_token: !!token_hash
+      });
+    }));
+    res.json(filas);
+  } catch (e) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.get('/api/backup-monitors/:id/incidents', authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const ok = await pool.query(`SELECT 1 FROM backup_monitors WHERE id=$1 AND user_id=$2`, [id, req.user.id]);
+    if (!ok.rows.length) return res.status(404).json({ error: 'No encontrado' });
+    const r = await pool.query(
+      `SELECT id, status, started_at, ended_at, duration_minutes, title,
+       (SELECT COUNT(*) FROM incident_events ie WHERE ie.incident_id=i.id) AS event_count
+       FROM incidents i WHERE backup_monitor_id=$1 ORDER BY started_at DESC LIMIT 100`, [id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+app.get('/api/backup-monitors/:id/events', authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const ok = await pool.query(`SELECT 1 FROM backup_monitors WHERE id=$1 AND user_id=$2`, [id, req.user.id]);
+    if (!ok.rows.length) return res.status(404).json({ error: 'No encontrado' });
+    const r = await pool.query(
+      `SELECT tipo, backup_id, run_id, captured_at, received_at, bytes, sha256, file_id, verified_at, reason, aceptado
+       FROM backup_events WHERE monitor_id=$1 ORDER BY id DESC LIMIT 100`, [id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Rotar/obtener el token del monitor (admin). Devuelve el token EN CLARO UNA vez;
+// no se guarda ni se loguea. El admin lo carga en la variable de Railway del exportador.
+app.post('/api/backup-monitors/:id/rotate-token', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const token = backupMon.generarToken();
+    const r = await pool.query(`UPDATE backup_monitors SET token_hash=$2 WHERE id=$1 RETURNING id, name, environment`,
+      [id, backupMon.hashTokenHex(token)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'No encontrado' });
+    logAudit(req.user.id, 'rotate_backup_token', 'backup_monitor', id, r.rows[0].name, req.ip);
+    res.json({ id: r.rows[0].id, name: r.rows[0].name, environment: r.rows[0].environment, token,
+      aviso: 'Guardá este token ahora; no se vuelve a mostrar. Cargalo en la variable SERVEREYES_BACKUP_TOKEN del exportador.' });
+  } catch (e) { res.status(500).json({ error: 'Error interno' }); }
+});
+
+// Envio real del aviso de backup (dep de entregarAvisosBackup). RECHAZA si el
+// canal principal (push/email al dueno) no entrego -> reintento sin duplicar.
+async function notificarBackup(mon, tipo) {
+  const owner = mon.user_id;
+  const nombre = mon.name;
+  if (tipo === 'recuperado') {
+    await sendPush(owner, '✅ Backup recuperado', `${nombre}: copia verificada reciente`, { type: 'backup_up' }, { throwOnError: true });
+    avisarAExtras(owner, 'backup', mon.id, `✅ ${nombre}: backup recuperado`,
+      `<p style="font-size:15px;color:#333">Se recibió una copia <strong>verificada y reciente</strong> de <strong>${nombre}</strong>.</p>`);
+  } else if (tipo === 'fallo') {
+    await sendPush(owner, '🚨 Backup fallido', `${nombre}: ejecución fallida`, { type: 'backup_fail' }, { throwOnError: true });
+    avisarAExtras(owner, 'backup', mon.id, `🚨 ${nombre}: ejecución de backup fallida`,
+      `<p style="font-size:15px;color:#333"><strong>${nombre}</strong> informó una ejecución fallida.</p>
+       <p style="color:#666">Causa: ${mon.last_failure_reason || 's/d'}</p>`);
+  } else { // vencido
+    await sendPush(owner, '🚨 Backup vencido', `${nombre}: sin copia verificada reciente`, { type: 'backup_stale' }, { throwOnError: true });
+    avisarAExtras(owner, 'backup', mon.id, `🚨 ${nombre}: backup vencido`,
+      `<p style="font-size:15px;color:#333">No se recibió una copia verificada reciente de <strong>${nombre}</strong> (umbral 26h).</p>`);
+  }
+}
+
+// Scheduler de frescura de backups: evalua como maximo cada 5 min (no depende de
+// ninguna PC). Abre incidente por vencimiento y entrega avisos pendientes.
+let backupCheckRunning = false;
+cadaTanto(async () => {
+  if (backupCheckRunning) return;
+  backupCheckRunning = true;
+  try {
+    await backupMon.evaluarFrescuraBackups(pool);
+    await backupMon.entregarAvisosBackup(pool, { notificar: notificarBackup, log: (m) => console.log(m) });
+  } catch (e) { console.error('[BACKUP] scheduler:', e.message); }
+  finally { backupCheckRunning = false; }
+}, 300000);
+dentroDe(async () => {
+  try { await backupMon.evaluarFrescuraBackups(pool); await backupMon.entregarAvisosBackup(pool, { notificar: notificarBackup }); } catch (e) {}
+}, 30000);
 
 // Purga del historial de chequeos (retencion 30 dias).
 //
