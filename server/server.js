@@ -516,6 +516,19 @@ app.use(cors());
 // creer que el limite real era 10mb.
 app.use(express.json({ limit: '60mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Health para el vigilante EXTERNO (corre fuera de Railway). Sin auth y sin
+// secretos: confirma que el proceso responde Y que la base contesta. 503 si la
+// DB esta caida (app viva pero sin base = no sano). No expone datos.
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.set('Cache-Control', 'no-store').json({ status: 'ok', service: 'servereyes', ts: new Date().toISOString() });
+  } catch (e) {
+    res.status(503).set('Cache-Control', 'no-store').json({ status: 'db_down' });
+  }
+});
+
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
 // Base de datos

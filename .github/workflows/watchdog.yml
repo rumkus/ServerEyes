@@ -1,0 +1,55 @@
+name: ServerEyes watchdog
+
+# Vigilante EXTERNO de ServerEyes: corre en la infraestructura de GitHub
+# (independiente de Railway y de cualquier PC). Si ServerEyes/Railway se cae,
+# ServerEyes no puede avisar de su propia caida -> este job si, desde afuera.
+#
+# Canal de aviso:
+#  - Por defecto: GitHub envia un email al dueño del repo cuando el job FALLA
+#    (Actions -> Notifications). Si tenes la app de mail en el celu, se refleja al reloj.
+#  - Opcional (push al reloj): defini el secret WATCHDOG_NOTIFY_URL con una URL
+#    de ntfy.sh (ej. https://ntfy.sh/mi-topic-secreto-123) e instala la app ntfy
+#    en el celular (sin cuenta). El job le hace POST cuando detecta la caida.
+#
+# Limitaciones honestas: el cron de GitHub puede demorarse 5-15 min bajo carga
+# (minimo 5 min); y los workflows programados se desactivan tras 60 dias SIN
+# actividad en el repo (ServerEyes es activo, asi que no aplica). Si GitHub
+# estuviera caido, el vigilante no corre (dominio de falla distinto a Railway).
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servereyes-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chequear /health (con reintento para filtrar blips)
+        env:
+          URL: https://servereyes.app/health
+          NOTIFY_URL: ${{ secrets.WATCHDOG_NOTIFY_URL }}
+        run: |
+          set -u
+          ok=0
+          code=000
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 15 "$URL" || echo 000)
+            if [ "$code" = "200" ] && grep -q '"status":"ok"' /tmp/body; then ok=1; break; fi
+            echo "intento $i: HTTP $code - $(head -c 200 /tmp/body 2>/dev/null)"
+            [ "$i" -lt 3 ] && sleep 20 || true
+          done
+          if [ "$ok" = "1" ]; then echo "ServerEyes OK (HTTP 200, status ok)"; exit 0; fi
+          msg="ServerEyes no responde /health (ultimo HTTP $code) $(date -u +%FT%TZ)"
+          echo "::error::$msg"
+          if [ -n "${NOTIFY_URL:-}" ]; then
+            curl -s -m 15 -H 'Title: ServerEyes caido' -H 'Priority: high' -H 'Tags: warning' -d "$msg" "$NOTIFY_URL" || true
+          fi
+          exit 1
