@@ -2093,6 +2093,13 @@ async function actualizarDns(m, ip) {
 // ============== RUTAS PUBLICAS (WINDOWS CLIENT) ==============
 
 // Heartbeat desde el cliente Windows
+// Gate del aviso de recuperacion (online de nuevo). Puro/testeable: solo avisamos
+// si la caida llego a alertarse (offline_notified era true) y las alertas offline
+// estan habilitadas. El mantenimiento se chequea aparte (es async).
+function debeAvisarRecuperacion(estabaAlertadaOffline, alertOffline) {
+  return estabaAlertadaOffline === true && alertOffline !== false;
+}
+
 app.post('/api/heartbeat', async (req, res) => {
   try {
     // Postgres no acepta U+0000 en text/jsonb: limpiar el byte nulo SOLO de
@@ -2116,9 +2123,12 @@ app.post('/api/heartbeat', async (req, res) => {
       return res.json({ status: 'speed_test_saved' });
     }
 
-    // Obtener IP actual antes del update para detectar cambio real
-    const beforeUpdate = await pool.query('SELECT public_ip FROM machines WHERE machine_key = $1', [machine_key]);
+    // Obtener IP y estado offline ANTES del update: el UPDATE repone
+    // is_online=true/offline_notified=false, asi que el estado previo (si la
+    // caida llego a alertarse) hay que leerlo aca para el aviso de recuperacion.
+    const beforeUpdate = await pool.query('SELECT public_ip, is_online, offline_notified FROM machines WHERE machine_key = $1', [machine_key]);
     const oldPublicIp = beforeUpdate.rows[0]?.public_ip;
+    const estabaAlertadaOffline = beforeUpdate.rows[0]?.offline_notified === true;
 
     // Actualizar maquina (solo detectar cambio de IP si check_ip_change = true)
     const result = await pool.query(
@@ -2225,6 +2235,24 @@ app.post('/api/heartbeat', async (req, res) => {
             );
           }
         } catch (ie) {}
+
+        // Aviso de RECUPERACION (volvio a estar en linea). Mismos gates que la
+        // alerta offline, para que el "volvio" solo acompañe a una caida que
+        // SI se aviso: (1) la caida llego a alertarse (offline_notified era true,
+        // no un micro-corte que nunca alerto), (2) las alertas offline estan
+        // habilitadas para la maquina, (3) no esta en ventana de mantenimiento.
+        if (debeAvisarRecuperacion(estabaAlertadaOffline, updatedMachine.alert_offline) && updatedMachine.user_id) {
+          let enMant = false;
+          try { enMant = await isInMaintenance(updatedMachine.id, updatedMachine.user_id); } catch {}
+          if (!enMant) {
+            sendPush(
+              updatedMachine.user_id,
+              '✅ Maquina en linea',
+              `${updatedMachine.machine_name} volvio a responder`,
+              { type: 'online', machineId: String(updatedMachine.id) }
+            ).catch(e => console.error('[RECUPERACION] push:', e.message));
+          }
+        }
       }
     }
 
@@ -6055,4 +6083,4 @@ function detener() {
   return detenido;
 }
 
-module.exports = { app, pool, listo, detener, sembrarControlesStaging };
+module.exports = { app, pool, listo, detener, sembrarControlesStaging, debeAvisarRecuperacion };
