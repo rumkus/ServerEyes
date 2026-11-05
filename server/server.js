@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -510,7 +512,22 @@ function configurarTrustProxy() {
 app.set('trust proxy', configurarTrustProxy());
 
 // Middleware
+// Cabeceras de seguridad. CSP desactivada a proposito: el panel (public/index.html)
+// usa scripts inline y una CSP estricta lo rompe; el resto (HSTS, X-Content-Type,
+// X-Frame-Options, Referrer-Policy...) se mantiene.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
+
+// Rate limit para los endpoints de autenticacion (fuerza bruta / credential stuffing).
+// Clave por IP real (trust proxy ya configurado). No afecta heartbeats ni API autenticada.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.AUTH_RATE_MAX || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',  // la suite registra muchos usuarios; no agotar el limite
+  message: { error: 'Demasiados intentos. Probá de nuevo en unos minutos.' }
+});
 // 60mb para que entre el agente en base64. El segundo express.json que habia
 // aca, de 10mb, era codigo muerto: el primero ya parseo el body, pero hacia
 // creer que el limite real era 10mb.
@@ -1318,7 +1335,7 @@ async function logAudit(userId, action, targetType, targetId, details, ip) {
 
 // ============== AUTH: REGISTRO Y LOGIN ==============
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const { email, password, nombre } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
@@ -1347,7 +1364,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
@@ -2009,7 +2026,11 @@ function dnsConfigurado(m) {
 // para que el editor sepa si hay uno cargado.
 function ocultarSecretosDns(m) {
   if (!m || typeof m !== 'object') return m;
-  const { cf_api_token, ...resto } = m;
+  // machine_key es la credencial del agente (auth del heartbeat + HMAC de comandos):
+  // no debe viajar al cliente en listados/heartbeat/updates, y MENOS a usuarios con
+  // quienes se comparte la maquina (acceso de solo-lectura). El dueño la obtiene al
+  // CREAR la maquina (POST /api/machines no pasa por aca).
+  const { cf_api_token, machine_key, ...resto } = m;
   return { ...resto, cf_token_set: !!cf_api_token };
 }
 
@@ -2189,7 +2210,7 @@ app.post('/api/heartbeat', async (req, res) => {
     );
 
     // Geolocalizar IP si no tiene geo o cambio la IP (skip si fue editado manualmente)
-    if (public_ip && updatedMachine && !updatedMachine.geo_manual && (!updatedMachine.geo_city || updatedMachine.public_ip !== public_ip)) {
+    if (public_ip && require('net').isIP(public_ip) && updatedMachine && !updatedMachine.geo_manual && (!updatedMachine.geo_city || updatedMachine.public_ip !== public_ip)) {
       try {
         const https = require('https');
         // Consulta suelta: con timeout, y el socket sin ref para que no
@@ -2531,7 +2552,7 @@ app.post('/api/heartbeat', async (req, res) => {
     res.json({ status: 'ok', machine: ocultarSecretosDns(result.rows[0]), run_speedtest: runSpeedtest, update: updateInfo, commands: pendingCommands, check_backup: checkBackup });
   } catch (error) {
     console.error('Error en heartbeat:', error.message, error.stack);
-    res.status(500).json({ error: 'Error interno', detail: error.message });
+    res.status(500).json({ error: 'Error interno' }); // sin detail: no filtrar internos al agente/anonimo
   }
 });
 
@@ -2751,9 +2772,11 @@ app.post('/api/machines/:id/update-dns', authenticateToken, async (req, res) => 
 // Eliminar maquina
 app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
   try {
+    // Scopeado por dueño: un id de otro tenant -> el subselect queda vacio y no
+    // borra nada (heartbeat_log no tiene ON DELETE CASCADE, por eso va primero).
     await pool.query(
-      'DELETE FROM heartbeat_log WHERE machine_id = $1',
-      [req.params.id]
+      'DELETE FROM heartbeat_log WHERE machine_id IN (SELECT id FROM machines WHERE id = $1 AND user_id = $2)',
+      [req.params.id, req.user.id]
     );
     const delResult = await pool.query(
       'DELETE FROM machines WHERE id = $1 AND user_id = $2 RETURNING machine_name',
@@ -3889,10 +3912,33 @@ app.get('/api/auth/smtp', authenticateToken, async (req, res) => {
   }
 });
 
+// Valida que un host SMTP no apunte a direcciones internas/reservadas (anti-SSRF
+// ciego: el server conecta a ese host). Vacio = ok (limpiar). Reusa esIpPublica
+// de url-guard. Es el choke point: si no se guarda un host interno, el test/envio
+// posteriores quedan seguros.
+async function smtpHostSeguro(host) {
+  const h = String(host || '').trim().toLowerCase();
+  if (!h) return { ok: true };
+  if (h === 'localhost' || /(^|\.)(local|internal|railway\.internal)$/.test(h)) return { ok: false, motivo: 'Host SMTP interno no permitido' };
+  try {
+    const net = require('net');
+    let ips;
+    if (net.isIP(h)) ips = [h];
+    else ips = (await require('dns').promises.lookup(h, { all: true })).map(a => a.address);
+    if (!ips.length) return { ok: false, motivo: 'No se pudo resolver el host SMTP' };
+    for (const ip of ips) if (!urlGuard.esIpPublica(ip)) return { ok: false, motivo: 'El host SMTP resuelve a una direccion no publica' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, motivo: 'No se pudo resolver el host SMTP' };
+  }
+}
+
 // Guardar config SMTP del usuario
 app.post('/api/auth/smtp', authenticateToken, async (req, res) => {
   try {
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, email_notifications } = req.body;
+    const hv = await smtpHostSeguro(smtp_host);
+    if (!hv.ok) return res.status(400).json({ error: hv.motivo });
     await pool.query(
       'UPDATE users SET smtp_host = $1, smtp_port = $2, smtp_secure = $3, smtp_user = $4, smtp_from = $5, email_notifications = $6 WHERE id = $7',
       [smtp_host || null, smtp_port || 587, smtp_secure || 'tls', smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
