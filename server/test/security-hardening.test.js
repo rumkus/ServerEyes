@@ -75,6 +75,16 @@ test('SMTP secure: la app manda "tls"/"ssl" (string) -> se guarda como boolean (
   assert.equal(g.data.smtp_secure, true, '"ssl" -> true');
 });
 
+test('limite JSON: 2mb global rechaza; agent/upload acepta grande', { skip }, async () => {
+  const big = { x: 'a'.repeat(3 * 1024 * 1024) }; // ~3mb
+  // Ruta normal: el parser chico (2mb) la rechaza con 413 antes de cualquier handler.
+  const r1 = await S.api('POST', '/api/auth/login', { body: big });
+  assert.equal(r1.status, 413, 'body >2mb en ruta normal -> 413');
+  // agent/upload: el parser grande (80mb) acepta el body; sin token cae en 401 (no 413).
+  const r2 = await S.api('POST', '/api/admin/agent/upload', { body: big });
+  assert.notEqual(r2.status, 413, 'agent/upload no rechaza por tamaño');
+});
+
 test('helmet: cabeceras de seguridad presentes', { skip }, async () => {
   const r = await S.api('GET', '/health');
   assert.equal(r.status, 200);

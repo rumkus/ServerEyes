@@ -528,10 +528,15 @@ const authLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',  // la suite registra muchos usuarios; no agotar el limite
   message: { error: 'Demasiados intentos. Probá de nuevo en unos minutos.' }
 });
-// 60mb para que entre el agente en base64. El segundo express.json que habia
-// aca, de 10mb, era codigo muerto: el primero ya parseo el body, pero hacia
-// creer que el limite real era 10mb.
-app.use(express.json({ limit: '60mb' }));
+// Limite del body JSON. Medicion real (nov/2026): el heartbeat -el POST mas
+// grande y frecuente- pesa ~6 KB; el resto de la API, menos. El 60mb global era
+// un amplificador de DoS en endpoints anonimos (login/register/heartbeat/pairing).
+// UNICA ruta que necesita mucho: /api/admin/agent/upload, que sube el binario del
+// agente como base64 (~50 MB). Entonces: global chico (2mb) y grande SOLO ahi.
+// (Pendiente deseable: migrar esa subida a multipart como ya se hizo con el cliente.)
+const jsonChico = express.json({ limit: '2mb' });
+const jsonGrande = express.json({ limit: '80mb' });
+app.use((req, res, next) => (req.path === '/api/admin/agent/upload' ? jsonGrande : jsonChico)(req, res, next));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Health para el vigilante EXTERNO (corre fuera de Railway). Sin auth y sin
@@ -544,21 +549,6 @@ app.get('/health', async (req, res) => {
   } catch (e) {
     res.status(503).set('Cache-Control', 'no-store').json({ status: 'db_down' });
   }
-});
-
-// TEMPORAL (medicion para dimensionar el limite JSON): registra el tamaño real
-// (Content-Length) de cada POST por ruta. Solo en memoria; se consulta por
-// /api/admin/_postsizes (admin). Se retira una vez fijado el limite.
-const _postSizes = {};
-app.use((req, res, next) => {
-  if (req.method === 'POST') {
-    const len = Number(req.headers['content-length'] || 0);
-    const p = (req.path || '').replace(/\/\d+(?=\/|$)/g, '/:id');
-    const s = _postSizes[p] || (_postSizes[p] = { max: 0, count: 0 });
-    s.count++;
-    if (len > s.max) { s.max = len; s.maxAt = new Date().toISOString(); }
-  }
-  next();
 });
 
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
@@ -3999,13 +3989,6 @@ app.post('/api/admin/test-email', authenticateToken, requireAdmin, async (req, r
 });
 
 // Test push notification (admin only)
-// TEMPORAL: tamaños reales de los POST para dimensionar el limite JSON.
-app.get('/api/admin/_postsizes', authenticateToken, requireAdmin, (req, res) => {
-  const filas = Object.entries(_postSizes).map(([path, s]) => ({ path, max_bytes: s.max, max_kb: +(s.max / 1024).toFixed(1), count: s.count, maxAt: s.maxAt }))
-    .sort((a, b) => b.max_bytes - a.max_bytes);
-  res.json({ limite_actual: '60mb', rutas: filas });
-});
-
 app.post('/api/admin/test-push', authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!firebaseAdmin) return res.status(400).json({ error: 'Firebase no esta configurado en el servidor', hint: 'Configura la variable FIREBASE_SERVICE_ACCOUNT en Railway' });
