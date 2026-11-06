@@ -63,6 +63,18 @@ test('SMTP anti-SSRF: rechaza hosts internos, acepta uno publico', { skip }, asy
   assert.equal(vacio.status, 200, 'vacio = limpiar, ok');
 });
 
+test('SMTP secure: la app manda "tls"/"ssl" (string) -> se guarda como boolean (bug fix)', { skip }, async () => {
+  const u = await registrar(S.api, 'smtps@demo.com');
+  let r = await S.api('POST', '/api/auth/smtp', { token: u.token, body: { smtp_host: '8.8.8.8', smtp_port: 587, smtp_secure: 'tls', smtp_user: 'x', smtp_from: 'x@x.com' } });
+  assert.equal(r.status, 200, '"tls" ya no da 500');
+  let g = await S.api('GET', '/api/auth/smtp', { token: u.token });
+  assert.equal(g.data.smtp_secure, false, '"tls" -> false');
+  r = await S.api('POST', '/api/auth/smtp', { token: u.token, body: { smtp_host: '8.8.8.8', smtp_port: 465, smtp_secure: 'ssl', smtp_user: 'x', smtp_from: 'x@x.com' } });
+  assert.equal(r.status, 200);
+  g = await S.api('GET', '/api/auth/smtp', { token: u.token });
+  assert.equal(g.data.smtp_secure, true, '"ssl" -> true');
+});
+
 test('helmet: cabeceras de seguridad presentes', { skip }, async () => {
   const r = await S.api('GET', '/health');
   assert.equal(r.status, 200);

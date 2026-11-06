@@ -546,6 +546,21 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// TEMPORAL (medicion para dimensionar el limite JSON): registra el tamaño real
+// (Content-Length) de cada POST por ruta. Solo en memoria; se consulta por
+// /api/admin/_postsizes (admin). Se retira una vez fijado el limite.
+const _postSizes = {};
+app.use((req, res, next) => {
+  if (req.method === 'POST') {
+    const len = Number(req.headers['content-length'] || 0);
+    const p = (req.path || '').replace(/\/\d+(?=\/|$)/g, '/:id');
+    const s = _postSizes[p] || (_postSizes[p] = { max: 0, count: 0 });
+    s.count++;
+    if (len > s.max) { s.max = len; s.maxAt = new Date().toISOString(); }
+  }
+  next();
+});
+
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
 // Base de datos
@@ -3906,7 +3921,7 @@ app.get('/api/auth/smtp', authenticateToken, async (req, res) => {
   try {
     const user = await pool.query('SELECT smtp_host, smtp_port, smtp_secure, smtp_user, smtp_from, email_notifications FROM users WHERE id = $1', [req.user.id]);
     const u = user.rows[0] || {};
-    res.json({ smtp_host: u.smtp_host || '', smtp_port: u.smtp_port || 587, smtp_secure: u.smtp_secure || 'tls', smtp_user: u.smtp_user || '', smtp_from: u.smtp_from || '', email_notifications: u.email_notifications !== false, configured: !!u.smtp_user });
+    res.json({ smtp_host: u.smtp_host || '', smtp_port: u.smtp_port || 587, smtp_secure: u.smtp_secure === true, smtp_user: u.smtp_user || '', smtp_from: u.smtp_from || '', email_notifications: u.email_notifications !== false, configured: !!u.smtp_user });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
   }
@@ -3939,9 +3954,13 @@ app.post('/api/auth/smtp', authenticateToken, async (req, res) => {
     const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from, email_notifications } = req.body;
     const hv = await smtpHostSeguro(smtp_host);
     if (!hv.ok) return res.status(400).json({ error: hv.motivo });
+    // smtp_secure es BOOLEAN en la base, pero la app lo manda como 'ssl'/'tls'
+    // (o booleano). Antes se guardaba `smtp_secure || 'tls'` -> metia un string en
+    // la columna boolean y daba 500 en cada guardado desde la app. Se normaliza.
+    const smtpSecureBool = smtp_secure === true || smtp_secure === 'ssl' || smtp_secure === 'true' || smtp_secure === 1;
     await pool.query(
       'UPDATE users SET smtp_host = $1, smtp_port = $2, smtp_secure = $3, smtp_user = $4, smtp_from = $5, email_notifications = $6 WHERE id = $7',
-      [smtp_host || null, smtp_port || 587, smtp_secure || 'tls', smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
+      [smtp_host || null, smtp_port || 587, smtpSecureBool, smtp_user || null, smtp_from || null, email_notifications !== false, req.user.id]
     );
     // Solo actualizar password si se envió (no vacío)
     if (smtp_pass) {
@@ -3980,6 +3999,13 @@ app.post('/api/admin/test-email', authenticateToken, requireAdmin, async (req, r
 });
 
 // Test push notification (admin only)
+// TEMPORAL: tamaños reales de los POST para dimensionar el limite JSON.
+app.get('/api/admin/_postsizes', authenticateToken, requireAdmin, (req, res) => {
+  const filas = Object.entries(_postSizes).map(([path, s]) => ({ path, max_bytes: s.max, max_kb: +(s.max / 1024).toFixed(1), count: s.count, maxAt: s.maxAt }))
+    .sort((a, b) => b.max_bytes - a.max_bytes);
+  res.json({ limite_actual: '60mb', rutas: filas });
+});
+
 app.post('/api/admin/test-push', authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!firebaseAdmin) return res.status(400).json({ error: 'Firebase no esta configurado en el servidor', hint: 'Configura la variable FIREBASE_SERVICE_ACCOUNT en Railway' });
